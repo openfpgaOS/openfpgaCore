@@ -1,0 +1,17 @@
+V1 actual failing path: native_mem BRAM read/write port -> mesh-header extent
+arithmetic/comparison -> native_read_addr write qualification. Slow85 setup
+-3.420 ns (11.038 ns data delay, -2.262 ns clock skew); slow0 -3.626 ns.
+
+V2 adds a registered RAM output and corresponding wait states for every native
+consumer. Header count validation/10-bit byte extent, 25-bit address addition,
+and final comparison are separate stages. Valid meshlet extent <=644 bytes.
+The native RAM no_rw_check attribute is safe because no native RAM result is
+consumed during COPY writes or a miss fill; consumers issue fresh reads after
+those complete and wait through both read registers. Legacy timing unchanged.
+
+ABI, fixed arithmetic, primitive order, cache ownership and reset semantics
+are unchanged. The focused test randomly schedules backpressure using the
+same RNG as generated jobs; different cycle counts therefore generate different
+later native fixtures. Each version is independently exact against its C++
+reference. Disabled-native legacy tests have identical words and cycle counts.
+Whole-game same-capture parity is a separate validation gate.

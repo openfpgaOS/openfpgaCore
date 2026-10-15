@@ -1,0 +1,104 @@
+{
+  "status": "PASS_FINAL_QGF_INDEPENDENT_UNIT_VERIFICATION",
+  "reports": [
+    {
+      "report": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/metadata-v1/manifest.json",
+      "sha256": "b757d83a57fb13544d56806ea6f3d03cf9365b8320a98c466181289eb4c0447b",
+      "status": "PASS_ACTUAL_QGF_LOAD_ADMISSION_METADATA",
+      "result": {
+        "pass": true,
+        "batches": 292,
+        "checks": 102701,
+        "triangle_admissions_checked": 2104210,
+        "accepted": 37164,
+        "conservative_hash_collisions": 1026,
+        "cycles": 43978
+      },
+      "bound_inputs": 5
+    },
+    {
+      "report": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/wrapper-v1/manifest.json",
+      "sha256": "d8e92c65fee6e08680d228a21f7c3761a968b5400defb370721b49050f790489",
+      "status": "PASS_ACTUAL_QGF_WRAPPER_ARBITRATION_AND_RESET",
+      "result": {
+        "pass": true,
+        "checks": 415,
+        "cycles": 1090,
+        "scope": "Actual QGF phase10, BIM2 and shared FMA; transaction producer uses one actual FMA operation"
+      },
+      "bound_inputs": 7
+    },
+    {
+      "report": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/worker-v4/manifest.json",
+      "sha256": "bd7b9b8919db56eee85514a5bfdcdb3602104796ed7b1904995b534c38c59ec3",
+      "status": "PASS_ACTUAL_QGF_WORKER_ARITHMETIC_ORDER_REPAIR_AND_PRESSURE",
+      "result": {
+        "pass": true,
+        "checks": 80768,
+        "cycles": 135462,
+        "current_cpu_vectors": 140,
+        "exact_FP_stage_checks": 150,
+        "natural_arithmetic_repairs": 5,
+        "total_repairs": 7
+      },
+      "bound_inputs": 11
+    },
+    {
+      "report": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/admission-v1/manifest.json",
+      "sha256": "383cd77d66dc5092ac4abfb975bbc26e155dc26c527a97f99e5d97aaebe2e7c2",
+      "status": "PASS_ACTUAL_QGF_ADMISSION_C_LOOP",
+      "result": {
+        "pass": true,
+        "streams": 20003,
+        "checks": 60009
+      },
+      "bound_inputs": 4
+    },
+    {
+      "report": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/lazy-v1/report.json",
+      "sha256": "adecf2dd62891b30e1537f157649da343b5726e24873ab63403c41f6690a6d77",
+      "status": "PASS_ACTUAL_LAZY_C_FUNCTIONS",
+      "result": {
+        "pass": true,
+        "loads": 8000,
+        "checks": 322014,
+        "explicit_consumes": 4968,
+        "materialized_slots": 52519,
+        "copy_calls": 5023
+      },
+      "bound_inputs": 5
+    },
+    {
+      "report": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/repair-cpu-v1/manifest.json",
+      "sha256": "c7ec8ef7ef55a5555468d330be850d2078cf3b2fc6a65861e58c105b3c010ccf",
+      "status": "PASS_ACTUAL_CPU_QGF_REPAIR_AND_FCSR",
+      "result": {
+        "pass": true,
+        "vectors": 2405,
+        "status": 1611516670,
+        "cycles": 912699,
+        "last_pc": 272630238,
+        "mcause": 0,
+        "mepc": 0,
+        "mtval": 0
+      },
+      "bound_inputs": 12
+    }
+  ],
+  "total_bound_inputs_rechecked": 44,
+  "tested_modules_match_native_v1": {
+    "phase10_load_alias.v": "424c41d245bac415e4f453ab4dd6b650a73cee57ee392239f89cf7b8bcc49646",
+    "geometry_raw_load.v": "a49563b15545d9d89e0b33d09428897baa0256af6d8e582dfdd51755ad0da860",
+    "geometry_import_view.v": "937f80db1ec005f22d91b7df384ebd5258c97d494e9009cbc13ae1ac53eaa128",
+    "geometry_float_cull_mem.v": "53163df4519861d2ffa3d115b45656a90f03e6ef869a02188d1344710931f2ac",
+    "geometry_import_convert.v": "3beac876e469ec45ff3d3e81c9645671dcb92737d1f84dd188ca454fbbcf7526",
+    "GeometryFmaProbe.v": "348d11609de14326dc9408c11e39a385a85a4e0678eaaf5d69f39d6cfba38088",
+    "gpu_queued_front.v": "ac978376a246b6860a4891fd23c9f4405ccb2e37362d0aa88091a29187b09dc6"
+  },
+  "historical_iterations": "worker-v1/v2 stopped on testbench timing expectations, fixed in v3; v4 adds explicit bank reuse before any raster consumption and is the final authoritative worker report. Older intermediate test manifests preserve their historical hashes, not the current shared test-source path contents.",
+  "limits": [
+    "Unit scope only; no native performance or physical timing conclusion.",
+    "Metadata arithmetic producer and wrapper transaction producer are explicitly stubbed; actual SCAN, wrapper, snapshots, FMA/cull/converter/worker are tested in their indicated harnesses.",
+    "App admission uses a stub display decoder; lazy lifetime models hardware success/failure; arithmetic repair itself executes on the actual frozen CPU."
+  ]
+}

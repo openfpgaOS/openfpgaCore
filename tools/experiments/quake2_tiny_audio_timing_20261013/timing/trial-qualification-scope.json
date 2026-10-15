@@ -1,0 +1,20 @@
+{
+  "seeds": [
+    2,
+    20,
+    18,
+    14,
+    30,
+    13,
+    16,
+    1
+  ],
+  "scope": "Eight targeted seeds on identical qualified source; no new full sweep or promotion.",
+  "source": "9a4e8b063a2ac21c59d7dbfc47335155760666d22b10095dda27559573329a87",
+  "dock_intact": true,
+  "additional_seeds": [
+    18,
+    14
+  ],
+  "reason": "Existing best candidate89.45MHz misses requested >90 by68ps; two additional targeted placements with unchanged source."
+}

@@ -1,0 +1,182 @@
+{
+  "schema": 1,
+  "status": "READ_ONLY_STATIC_ALM_AUDIT_NO_SOURCE_CHANGE_NO_SYNTHESIS",
+  "model": "native-v7",
+  "baseline": {
+    "ALMs": 18169,
+    "ALM_capacity": 18480,
+    "ALM_spare": 311,
+    "M10K": 304,
+    "M10K_capacity": 308,
+    "MHz": 90.28
+  },
+  "candidate_memory_budget": {
+    "intended_M10K": 308,
+    "not_verified_by_fitter": true
+  },
+  "priority": "Measure native benefit and map selected capacity first. These are bounded fallback cuts if the implementation does not fit, not measured ALM savings.",
+  "ranked_cuts": [
+    {
+      "rank": 1,
+      "name": "Integrated destination-zero specialization",
+      "scope": "New mesh engine plus its existing raw LOAD instantiation, generic default unchanged",
+      "evidence": [
+        "phase10_load_alias.v:94 rejects mesh VTX end != count through unsupported_features; legacy VTX construction at91 also has end=count",
+        "geometry_mesh_task_ctrl.v:40-43 computes offered_dest; assignments76 and79 capture load_dest and create owned_mask with a variable destination shift",
+        "geometry_raw_load.v:41-46 validates dynamic dest and builds shifted incoming_mask, stores job_dest/job_mask",
+        "geometry_raw_load.v:83,110,118,164 adds job_dest to raw/scan/compute/attribute addresses",
+        "phase10_load_alias.v legacy non-mesh branch:246 drives raw .dest(5'd0)"
+      ],
+      "proposal": "Pass an integrated-only DEST_ZERO_ONLY parameter into task controller and wire frontend raw dest to literal0. Keep the same early malformed/nonzero-destination fallback. Generate owned mask with no second destination shift. Generic standalone path retains arbitrary dest.",
+      "benefit": "Restores baseline constant propagation through destination state, range addition, 32-bit mask shift and downstream small address adders; potentially more useful than tiny counter cuts.",
+      "bits": "At least controller/raw destination registers become constant; no credible ALM count without mapping.",
+      "tests": [
+        "All existing command-shape/nonzero-destination negative tests retain rejection before raw START",
+        "Legacy partial app G_VTX still maps software slots separately and uses physical dest0",
+        "Exact raw-output and native full-frame oracle unchanged"
+      ]
+    },
+    {
+      "rank": 2,
+      "name": "Bypass duplicate scalar task context capture",
+      "source": "geometry_mesh_task_engine.v:38-61,85-86; phase10_load_alias.v:25-40,181-197",
+      "declared_register_bits": 209,
+      "proposal": "Add default-on capture parameter to generic engine; integrated wrapper selects direct scalar inputs.",
+      "proof": "Wrapper holds aspect/coefficient/ambient/diffuse/lighting/scales in registers and writes them only with write_idle=full_write&&!active&&!pending. Active ownership covers raw LOAD, preflight, validation and copy. The only mutable held-task uniforms are separate flags/U/V and do not feed this scalar context.",
+      "existing_optimization": "Raw frontend already selects CAPTURE_CONTEXT(0); its own unused held-context registers are not additional savings.",
+      "tests": [
+        "Context writes while pending/active must not alter numeric results",
+        "Reset and canceled/fallback tasks",
+        "Generic engine default continues to allow callers to change scalar inputs after task acceptance"
+      ]
+    },
+    {
+      "rank": 3,
+      "name": "Bypass duplicate packet immutable-input capture",
+      "source": "geometry_mesh_packet.v:24-25,70-77; phase10_load_alias.v:170-178; geometry_mesh_task_ctrl.v:120-131",
+      "declared_register_bits": 135,
+      "likely_live_register_bits_before_mapping": 100,
+      "proposal": "Default-on packet capture parameter; integrated instance uses used_mask/live_count/flags/U/V directly through completion.",
+      "proof": "Task controller used_mask/live_count are immutable after whole-task preflight until ACK. Wrapper accepts uniforms only before validation starts; packet_busy remains set through validated hold and copy. After producer completion they may change, when no further packet input is consumed.",
+      "qualification": "Source flags upper13 bits and UV subtraction upper11 bits each may already prune, hence135 source bits is not a net FF or ALM estimate. Keep list_mask, converted X/Y/W/depth/U/V/RGB, current indices and output progress.",
+      "tests": [
+        "Validation held before ARM",
+        "ARM pending behind an older queued packet",
+        "Illegal uniform writes during validation/copy",
+        "Cancellation/consumer reset and immediate next task"
+      ]
+    },
+    {
+      "rank": 4,
+      "name": "Share matrix initialization bitmap",
+      "source": "phase10_load_alias.v:28,40,180; geometry_mesh_task_engine.v:38,55,58,69",
+      "declared_register_bits": 16,
+      "proposal": "Integrated engine consumes wrapper matrix_complete; generic engine retains own bitmap.",
+      "proof": "Both integrated maps see the same16 accepted matrix writes and reset. Wrapper idle gating and engine task_ready gating coincide when those writes are possible.",
+      "tests": [
+        "No matrix, partially initialized matrix, all16 writes",
+        "Legacy versus mesh missing-matrix outcomes",
+        "Reset then reinitialize"
+      ]
+    },
+    {
+      "rank": 5,
+      "name": "Exact narrower converter control/guard-sticky network",
+      "source": "geometry_import_convert.v",
+      "proposal": "Replace integer/general shifts with bounded exponent cases and exact guard/sticky rounding while keeping all error/clamp behavior.",
+      "benefit": "Potentially removes broad dynamic remainder/mask shifters. Synthesis can already narrow some source expressions; this is higher verification cost than capture bypass.",
+      "tests": [
+        "Existing converter CPU oracle including ties, +/-zero, nonnormal inputs, overflow and depth clamps",
+        "Full scene-chain payload and native frame oracle"
+      ]
+    },
+    {
+      "rank": 6,
+      "name": "Optional new MMIO diagnostic readback pruning",
+      "source": "phase10_load_alias.v:30,117-128,138,152,189-192; work-app-v2 gfx_pc.c:3258-3265",
+      "proposal": "Only if necessary, make new descriptor/uniform/completed-serial diagnostic readbacks optional in a documented trial configuration. Keep capability/status and exact clip/cull/input counts.",
+      "benefit": "completed_serial32 exists solely for word0x2f readback. configuration has15 reserved bits and VTX has9 unused bits retained for full readback; removing readback may let those prune and shrink muxes. Do not claim all source registers disappear.",
+      "compatibility": "This changes documented readback behavior; generic default must preserve ABI, and experiment configuration/receipt must explicitly state zero reads. Current app only reads status21,input2e,clip29,cull2a.",
+      "not_remove": "clip/cull/input counts are used by gfx_mesh_finish for consistency and exact diagnostics, not optional unused telemetry."
+    }
+  ],
+  "possible_later_metadata_packing": {
+    "source": "geometry_mesh_queue.v:20-21,43-45,81-82,102-108; gpu_mesh_bridge.v:23-24,85-90",
+    "proposal": "After complete context validation, store19-bit flags and two16-bit tile origins (reconstruct <<3) rather than96 bits; preserve malformed full32-bit marker checks, including high/reserved/alignment bits.",
+    "nominal_bits_per_context_saved": 45,
+    "qualification": "Queue producer and head are different concurrent packets, and bridge marker may be a third; cannot merge these contexts. Generic queue currently accepts arbitrary metadata, so specialization requires explicit domain checks/parameter. Untextured raw offsets need canonicalization or preservation if generic ABI permits arbitrary unused values. Higher risk than direct capture bypass."
+  },
+  "already_absent_or_prunable": [
+    "GPU_PROFILE absent in exact macro list: GPU performance counters already disabled.",
+    "EXCLUDE_SYSREG_DIAG_READBACK present: data-slot word counters, scanout fetch diagnostics, timer readback and other old diagnostic mux inputs already omitted; unconsumed counters should synthesize away.",
+    "EXCLUDE_GPU_COMMAND_DMA, EXCLUDE_GPU_LIGHT, EXCLUDE_CLIP_TRI, EXCLUDE_GPU_XFORM_MAC, EXCLUDE_GPU_PARAM_SPAN_LIST already set.",
+    "Raw cycles/compute_cycles and frontend tri_cross_bits/tri_clip_or outputs are unconnected in mesh task engine; trimming them in source alone is not credible new area saving.",
+    "A one-bit width reduction to each queue count (max416) is only3 bits and not a meaningful first target."
+  ],
+  "do_not_cut": [
+    "CPU caches without a measured counterfactual.",
+    "Numerical prevalidation, whole-span fallback, exact9-op cull or sticky protocol/error detection.",
+    "Queue pointer10th bit: distinguishes full/empty in512-word circular storage.",
+    "Separate old queued packet and current raw descriptor/token/context lifetime.",
+    "Active OS/boot/saves/input/video capabilities merely because a sampled SM64 frame does not invoke them.",
+    "Queue credits/capacity before resolving current measured backpressure."
+  ],
+  "macros": [
+    "INCLUDE_VERT_TRI",
+    "INCLUDE_DIRECT_COLOR",
+    "INCLUDE_COMBINE",
+    "INCLUDE_Z_BURST",
+    "VEXII_CPU_OS30",
+    "INCLUDE_HW_MIXER",
+    "INCLUDE_TEX_MEM",
+    "INCLUDE_CB_WINDOW2",
+    "INCLUDE_VI_FILTER",
+    "INCLUDE_XFORM",
+    "EXCLUDE_GPU_LIGHT",
+    "EXCLUDE_CLIP_TRI",
+    "EXCLUDE_GPU_XFORM_MAC",
+    "INCLUDE_CPU_RING",
+    "EXCLUDE_GPU_COMMAND_DMA",
+    "EXCLUDE_GPU_PARAM_SPAN_LIST",
+    "INCLUDE_XFORM_VERTEX_RAM",
+    "INCLUDE_XFORM_RATIO_PIPE",
+    "INCLUDE_GPU_CLAMP_PIPE",
+    "INCLUDE_Z_COMPARE_PARALLEL",
+    "INCLUDE_CB_SPLIT_MULT",
+    "INCLUDE_PSS_SPECULATIVE_STEP",
+    "INCLUDE_SPAN_DEDICATED_MULT",
+    "INCLUDE_TEX_QUEUE_RAM",
+    "INCLUDE_TEX_QUEUE_MLAB",
+    "INCLUDE_EW_STEP_PREDECODE",
+    "INCLUDE_EARLY_Z_CAPTURE",
+    "EXCLUDE_SYSREG_DIAG_READBACK",
+    "INCLUDE_Z_WINDOW8",
+    "INCLUDE_GPU_RENDER_CACHE",
+    "INCLUDE_DERIVE_PARALLEL_SCALE",
+    "INCLUDE_Z_EARLY_RESTART",
+    "INCLUDE_GPU_CLAMP_FLAGS_PIPE",
+    "INCLUDE_GPU_WQ16",
+    "INCLUDE_Z_WINDOW_PREDECODE",
+    "INCLUDE_SPAN_LOOKAHEAD",
+    "OF_EXPERIMENT_SDRAM_STAGING",
+    "INCLUDE_CLK90",
+    "OF_EXPERIMENT_PSRAM32",
+    "INCLUDE_GPU_MESH_FRONT"
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/phase10_load_alias.v": "322bea9ab96131f84d13edf6448f490e7190519b38a2dfa1ba027fa31fae116d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_task_engine.v": "7a7a4d0d5d376d81412437f7dd9a9b2d66bdc90db7d06d456680920af1e29f7f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_task_ctrl.v": "899e04b44048bc94d6fe70c259c6fc144e826260fc1ecff032ba8bb890251496",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_packet.v": "493c6618a9e7962de6e171d3730e85df0725edae20658fb457b86522a8b2d4b8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_queue.v": "a3ac412006c503332f4a6d8895155d869f367bb39924e8a6a4c4245d1ff230e4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_stream.v": "c437aa11c859757493764e6c243da4cb1238c585a8c65ff7330a8f4017aedc28",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_raw_frontend.v": "61854f2d9949339c9b4c123d1b174da3828601cbf1edcbc0c410fbf854fac764",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_raw_load.v": "ade3041bfd27ab6200c5d6356775adac778a34eb0d81c1f253ff83367627c144",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_import_convert.v": "3beac876e469ec45ff3d3e81c9645671dcb92737d1f84dd188ca454fbbcf7526",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/gpu_mesh_bridge.v": "8c02f8dacee2e4ff57d568bc9b968bb8b4109aa622739e3bf33804d39dc9cad9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/gpu_core.v": "f5483ea84933b3f02b953c147ec16e6ba0622cd76886dd3072e8f13f8f49e5ff",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/axi_periph_slave.v": "713d55b83637b81b07a36c52ba86232fa609076e3c990d56dc77811a0df82aa4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/prepared.json": "4212a8790cd00675b2b71fe0ae3452b6ecfc37e6123ee22bd09517098841fe7d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v2/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "8dc5cfe5726622feaf6b1f0d9a31b58d8ba7ff085f0c067022163adffae54e00"
+  }
+}

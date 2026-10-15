@@ -1,0 +1,42 @@
+Exact selected core-v4 baseline, worker 829827085023e6bf62832595e8f75ee57558d232e478640a6e65b4c728abdca5.
+
+Selected candidate pending physical fit: native MAC stream plus four-word color
+blend destination window. Native transform still uses the same signed 48-bit
+modular accumulation, operand order, offset, palette, projection and FIFO.
+Its shared DSP accepts one multiply per cycle: feed the six terms in order
+instead of waiting for each term to finish before launching the next.
+Three camera rows fall from 117 to 36 cycles/vertex. No new DSP or BRAM.
+The four-word color window adds two data slots and associated small selection
+logic; full-frame color and depth files are byte-identical in all four captures.
+
+Combined full GPU RTL cycles (actual controller/arbiter/cache implementations):
+frame20  3,076,766 -> 2,815,736  -8.484%
+frame80  3,812,485 -> 3,393,528 -10.989%
+frame180 3,446,182 -> 3,159,878  -8.308%
+frame300 2,492,418 -> 2,384,050  -4.348%
+
+These are replay service times with commands immediately available and no CPU,
+audio or scanout contention. Whole-frame/game FPS improvement requires paced
+combined CPU/GPU measurement and hardware confirmation. CPU and GPU savings
+must not be added as independent percentages when the work overlaps.
+
+Rejected existing config changes (all four-frame outputs exact):
+- Depth window16 vs8 saves only0.09-0.26%, adds registers/mux size.
+- Same-capacity render cache4ways/128sets vs2ways/256sets varies -0.30 to+0.34%.
+- Selective read wait saves0.27-0.65%, adds tag scoreboard and proof/timing burden.
+Keeping default depth/cache/read barriers preserves resource and timing margin.
+
+Frame80 baseline raster stalls: triangle derivation621,978cycles, fragment
+pipeline2,174,135cycles, clears300,475cycles. Color destination request+fill
+waits496,156cycles; depth-read wait477,324cycles. Worker compute1,213,465cycles,
+but726,630 overlap raster and1,953,464 additional cycles stall on a full output
+queue. This is why faster arithmetic helps but cannot eliminate every GPU stall.
+The actual render cache holds32KiB despite historical8KiB comments.
+
+Physical fit uses fixedseed2, unchanged100MHz configured clock and all timing
+constraints. Source freeze has exactly two changes from the core-v4 fit inputs:
+worker MAC scheduling and removal of INCLUDE_CB_WINDOW2 to select default4.
+The old fit's post-build QSF had Quartus-generated removals of optimization
+assignments; original pre-build QSF was restored from manifest before changing
+CB setting. Every original127file pin was checked. No seed sweep, deployment,
+source baseline mutation or unrelated core feature change was performed.

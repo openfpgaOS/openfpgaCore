@@ -1,0 +1,22 @@
+{
+  "passed": true,
+  "wait_poll_and_state_order_unchanged": true,
+  "diagnostic_clean_preserves_normal_package": true,
+  "invalid_profile_mode_rejected": true,
+  "ready_path_wait_timer_reads": 0,
+  "timer_reads_per_blocked_episode": 2,
+  "batch_timer_reads": 2,
+  "copy_timer_not_per_word": true,
+  "frozen_overlay_no_collection": true,
+  "counter_and_clock_wrap_tested": true,
+  "limits": [
+    "Fake MMIO/clock tests establish accounting and ordering, not physical timing or FPS.",
+    "CPU COPY includes loads, MMIO stores, status check and publish; DMA COPY covers visibility preparation.",
+    "Wait counters omit texture/LUT uploads, translucency table waits, nonblocking probes and kernel presentation waits."
+  ],
+  "hashes": {
+    "src/sdk/include/of_gpu.h": "b0b227de408e6399d88c5c9dce7dde44ce4107c3d952d5a106f0ee6842e7f1fe",
+    "src/quake2/openfpga/of_gpu_profile_q2.h": "6c2e77e262432066fe9e5cc86b64f44ad004b1453898e9d65f0264f01cad382a",
+    "src/quake2/openfpga/of_emit_q2.c": "eab20226c518b31982a3bc9e666aeee8f2c5cfea7faee60420010b6eced48a22"
+  }
+}

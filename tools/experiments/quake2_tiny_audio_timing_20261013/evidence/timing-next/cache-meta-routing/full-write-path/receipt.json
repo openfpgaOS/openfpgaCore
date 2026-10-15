@@ -1,0 +1,34 @@
+{
+  "passed": true,
+  "cache_sha256": "8f320a9ffba4e2ab608250ced03f869b96de97651fb10bd2d345c22a670d6e41",
+  "gpu_sha256": "5359411b9af35fd4619da978c3f508997ae1c0a2ba3281512c50c5a1d1e4e217",
+  "worker_sha256": "dc82691f019420352905292bb60d71943d989a42e4b2608feeefa218fe8f50f9",
+  "parent_receipt_sha256": "df54c4570d38cacdb6102b7d5dadf4101ba9e340c2ae048299d990c7f466abb3",
+  "source_unchanged": true,
+  "exact_complete_run_transcript": true,
+  "exact_all_color_depth_bytes": true,
+  "exact_all_timed_word_writes": true,
+  "color_depth_bytes_compared": 614400,
+  "physical_word_write_records": 19442,
+  "cycles": 1791183,
+  "quiet_reference_cycles": 738914,
+  "dumps_sha256": {
+    "quiet-color.bin": "c838411c1545865f8931ac7d079351cc978f06f248346d7bd2474db23f17fd6b",
+    "quiet-depth.bin": "e8f3004816febbfe1411a6caa2c7f3ab94cbf8d6e9666a6f381519956048d041",
+    "contended-color.bin": "c838411c1545865f8931ac7d079351cc978f06f248346d7bd2474db23f17fd6b",
+    "contended-depth.bin": "e8f3004816febbfe1411a6caa2c7f3ab94cbf8d6e9666a6f381519956048d041",
+    "all-word-writes.bin": "2f98bcb058f059d26b5dfcccc060aec81a68f6bd8431b766fd4452c400c3f591"
+  },
+  "warning": "One inherited refresh interval1701 cycles versus limit1700 appears identically in both runs and prior control. No claim of physical DRAM retention/timing closure.",
+  "scope": "Replay staged GPU/worker plus metadata-payload cache against exact prior bytes.\n\nPreserves the existing real GPU/cache/arbiter/slave fixture, synthetic\nCPU/bridge/audio/scanout traffic and inherited split-DQ MiSTer SDRAM model.\nDoes not instantiate actual CPU/audio mixer or the Pocket PHY.\n",
+  "limitations": [
+    "CPU/audio/bridge/scanout traffic is synthetic. No actual CPU core or audio mixer is instantiated.",
+    "The inherited controller model is split-DQ MiSTer io_sdram_test, not Pocket PHY.",
+    "Fast-texture/native-mesh external ports are tied idle; this directed0x4E/clear test exercises the raster/write path. Native/particle worker jobs are covered in the separate fullGPU capture and worker lockstep gates.",
+    "No Dock/output-video, whole-device FPS, audio PCM or physical timing claim."
+  ],
+  "recipe_sha256": "09c8ba09e3f13683ca8b91b638ccba9c5cab2e29cc5874a1386e3ab101bf68b0",
+  "elapsed_seconds": 10.832664251327515,
+  "quartus_launched": false,
+  "deployed": false
+}

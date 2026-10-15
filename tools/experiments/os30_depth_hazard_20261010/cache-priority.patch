@@ -1,0 +1,42 @@
+--- a/src/fpga/common/gpu_color_depth_cache.sv
++++ b/src/fpga/common/gpu_color_depth_cache.sv
+@@ -300,8 +300,28 @@
+ assign has_lines=(live_lines!=0);
+ assign busy=(state!=IDLE && state!=MAINT_DONE) || wb_any;
+ assign flush_done=state==MAINT_DONE && !wb_any;
+-assign s_awready=state==IDLE && !flush_req;
+-assign s_arready=state==IDLE && !flush_req && !s_awvalid;
++// The optional depth-hazard experiment may present AR before unrelated
++// GPU writes drain. Admit that read ahead of an unaccepted AW only when the
++// COMPLETE bursts occupy disjoint cache lines. Same-line aliases (including
++// partial masks), boundary crossings and longer bursts keep AW priority.
++// Restrict the feature to registered reads: IDLE can retain its hot-write
++// speculation, while the accepted AR is looked up from owned addr in R_ACCEPT.
++`ifdef INCLUDE_GPU_CACHE_READ_PRIORITY
++localparam ADMIT_SUM_BITS = ((WORD_BITS > 8) ? WORD_BITS : 8) + 1;
++wire [ADMIT_SUM_BITS-1:0] admit_read_last =
++    ADMIT_SUM_BITS'(s_araddr[2+:WORD_BITS]) + ADMIT_SUM_BITS'(s_arlen);
++wire [ADMIT_SUM_BITS-1:0] admit_write_last =
++    ADMIT_SUM_BITS'(s_awaddr[2+:WORD_BITS]) + ADMIT_SUM_BITS'(s_awlen);
++wire cache_prefer_read = REGISTER_READ_LOOKUP && s_arvalid && s_awvalid
++    && s_araddr[1:0]==0 && s_awaddr[1:0]==0
++    && admit_read_last < ADMIT_SUM_BITS'(WORDS)
++    && admit_write_last < ADMIT_SUM_BITS'(WORDS)
++    && s_araddr[ADDR_W-1:LINE_BITS] != s_awaddr[ADDR_W-1:LINE_BITS];
++`else
++wire cache_prefer_read = 1'b0;
++`endif
++assign s_awready=state==IDLE && !flush_req && !cache_prefer_read;
++assign s_arready=state==IDLE && !flush_req && (!s_awvalid || cache_prefer_read);
+ // A full word replaces all 40 data/valid/dirty bits. W_WAIT already
+ // owns its slot and metadata, so its stale data_q is irrelevant for this beat.
+ wire write_get=(state==W_GET) || (SPECULATE_WRITE_HOT0 && state==W_WAIT && s_wstrb==4'hf);
+@@ -416,7 +436,7 @@
+                     walk<=0; maintenance<=1; state<=MAINT_WAIT;
+                     hot0_valid<=0; hot1_valid<=0;
+                 end
+-                else if(s_awvalid) begin
++                else if(s_awvalid && !cache_prefer_read) begin
+                     // The accepted AW owns this candidate slot. On a miss,
+                     // LOOK replaces it before any data/metadata consumer;
+                     // bypass states never consume it. Flush still wins above.

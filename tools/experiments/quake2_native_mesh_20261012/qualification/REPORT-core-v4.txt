@@ -1,0 +1,10 @@
+Native mesh core v4 output-mux qualification: PASS
+
+App SHA256: 44f668ef55af64b579f3800d57567b7da7a2b3f9e16c325976d021d9237595b4
+Worker SHA256: 829827085023e6bf62832595e8f75ee57558d232e478640a6e65b4c728abdca5
+
+Ten full GPU replays: six final-app frames plus four legacy-command frames.
+All complete output bytes, GPU cycle counts, worker counters and physical-memory transaction counters are identical to the prior v2 worker.
+Only changed source: gpu_geometry_worker.v, EMIT case(index) -> case(index[2:0]).
+App CPU, sound-gate and map-lifetime qualification remain unchanged; see REPORT-v3.txt.
+Physical fit/timing are separate.

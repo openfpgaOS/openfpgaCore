@@ -1,0 +1,6 @@
+PASS particles640 mixed jobs, 490418 exact output words, six malformed contexts, RNE/bbox/alpha/cull and preserved native context (4746698 cycles)
+PASS particle invalid record8/overflow1: no indexed triangle or hang
+PASS particle reset18 at divide/emit/alpha/basis/space/triangle; stale context rejects; fresh rebind recovers
+PASS: 1920 mixed vertex batches, 7680 winding tests, 162828 exact output words, wrap/backpressure/enable/reset (3071991 cycles)
+PASS signed near-plane boundaries: 11 planes, 641 explicit legacy vertices, 89109 cycles
+PASS cycle lockstep 8188415 cycles, busy-publication 103477; divides raw=20533 clip=872 native=0 particle=21366

@@ -1,0 +1,38 @@
+{
+  "status": "PASS",
+  "checks": 20321,
+  "repeated_exact_keys": 10000,
+  "collision_chain": 16,
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app-v3/evidence/test_hint.py": "0fd898fd9e2f30e2f7f5a0916b9bbc845acca4c7bc8076f59ba19443b854ca3a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app-v3/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "339d52458bb8310b872d39676d5ff8e022fe4130f102a210aecc68d543a4f23e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app-v3/src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "5c8deff434191353d1b9e397a1de965441e7a2bc4437935230a23f48b016654f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app-v3/evidence/hint-tests-v1/test.c": "072401ad8881a471dfc56cf2ecc48ce8ee5e87c8a9a7f128dc634e423d7d910d"
+  },
+  "extracted_functions_sha256": {
+    "gfx_async_note_repair": "f9e25d3eb5644011d2277d286830000e67c3778a24ef4899d6f81d2aced4410e",
+    "gfx_async_dead_suffix": "ff9e101d1e717602b408067c4f3b6a6d91f9dbf60265721db2215c10175ffea3",
+    "gfx_mesh_lookup": "f7c2bf961de468f413a85df645b3f08c2ea3881bcf9c8dc77ead4733d669ee9e"
+  },
+  "scope": [
+    "Unmodified actual C note-repair, topology lookup and suffix helpers. Exact key, full16-entry collision chain, probe exhaustion, repeated feedback, cache reset/replacement and invalid input.",
+    "Static source assertions require the hint route check before all material work and feedback only after completed repair/epoch-token checks.",
+    "The hint is conservative route selection only; geometry does not inherit prior clip/cull outcomes. Full-frame performance/equality remains a separate gate."
+  ],
+  "commands": [
+    [
+      "cc",
+      "-std=c11",
+      "-O1",
+      "-g",
+      "-fsanitize=address,undefined",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app-v3/evidence/hint-tests-v1/test.c",
+      "-o",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app-v3/evidence/hint-tests-v1/test"
+    ],
+    [
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app-v3/evidence/hint-tests-v1/test"
+    ]
+  ],
+  "sanitizers": "ASan+UBSan; LSan disabled under ptrace"
+}

@@ -1,0 +1,26 @@
+{
+  "passed": true,
+  "checks": {
+    "package inventory, prepared pins, full fit-input pins and forward/reverse patch": true,
+    "fresh stage and all staged source pins": true,
+    "existing stage refused without mutation": true,
+    "changed staged source rejected": true,
+    "changed package payload rejected": true,
+    "omitted without-mixer transformation rejected": true,
+    "changed non-QSF fit input pin rejected": true,
+    "unknown and duplicate build flags rejected": true,
+    "missing and repeated mixer macro rejected": true,
+    "unsafe paths rejected": true,
+    "actual build recipe derives every recorded fit input hash without running Quartus": true,
+    "all worker test inputs match already executed core-v2 receipt": true
+  },
+  "manifest_sha256": "6dbc29be675113313c1c28f3a7ddc474f3413b6aaf00a0fc38e6f4f436b01ea7",
+  "build_args": [
+    "--without-mixer"
+  ],
+  "fit_input_count": 127,
+  "worker_sha256": "61933f99a779ebb64ffe52e22d79c1905975218db58d043971014e49818a7781",
+  "source_only": true,
+  "qualification": "PENDING: silent-core fit and physical timing selection incomplete; no bitstream selected or deployed.",
+  "physical_fit_or_deployment_performed": false
+}

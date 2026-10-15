@@ -1,0 +1,23 @@
+{
+  "passed": true,
+  "command": [
+    "cc",
+    "-std=c11",
+    "-O1",
+    "-g",
+    "-fsanitize=address,undefined",
+    "-fno-omit-frame-pointer",
+    "-fno-pie",
+    "-no-pie",
+    "-I/tmp/q2-opaque-74v28gi8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/alias/tools/tests/quake2_opaque_batch_test.c",
+    "-o",
+    "/tmp/q2-opaque-74v28gi8/test"
+  ],
+  "stdout": "PASS: 6270 bounded capacity/partial/empty scopes; 20484660 word checks; 65 triangles use 9 reserve/commit pairs; refusal and mixed-scope ordering\n",
+  "sha256": {
+    "src/quake2/openfpga/of_emit_q2.c": "c76ef94e560e69f06247140fe498a1aa65539cfdcd2befdc8ffc61486241d18b",
+    "tools/check_quake2_opaque_batch.py": "4a92ba569500c52c715bfe525c1a11d48f6fbc2404d0663666f6ea629da3406f",
+    "tools/tests/quake2_opaque_batch_test.c": "bca53705e97e0b60b7d9232d782de44ee24039bf4dc2415d728d3fab58162f33"
+  }
+}

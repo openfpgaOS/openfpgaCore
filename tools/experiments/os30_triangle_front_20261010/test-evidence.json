@@ -1,0 +1,62 @@
+{
+  "scope": "Native simulation and source-level tests only; no FPGA qualification.",
+  "evidence_root": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1",
+  "tests": {
+    "tests/controller-v1/manifest.json": {
+      "sha256": "64577649279d4e09418a6486eb464ff1984cf8a4f8a9d66a94d74550d357d51d",
+      "result": {
+        "pass": true,
+        "native_vectors": 4426,
+        "arithmetic_triangles": 2761,
+        "supported": 2622,
+        "fallback": 1804,
+        "exact_FP_stage_checks": 18983,
+        "checks": 922696,
+        "cycles": 356367
+      }
+    },
+    "tests/wrapper-v3/manifest.json": {
+      "sha256": "1e19268aa9cde072acb0cfe04d19080b29618738dfa40203f5062ce6ec8cf207",
+      "result": {
+        "pass": true,
+        "checks": 376,
+        "scope": "Actual phase10 + BIM2 + TFP + sharedFMA; transaction producer stubbed"
+      }
+    },
+    "tests/cpu-arithmetic-v1/result.json": {
+      "sha256": "098242561b986dcb4b3f0293c3d4111a92d9d7532d69f69a2e76af66aa5dd46f",
+      "result": {
+        "pass": true,
+        "vectors": 4426,
+        "status": 1611516670,
+        "cycles": 1310523,
+        "last_pc": 272630232,
+        "mcause": 0,
+        "mepc": 0,
+        "mtval": 0
+      }
+    },
+    "tests/lazy-bulk-v3/report.json": {
+      "sha256": "253d19d9132f6d09613895daf75cef1b8eb112ae21a4536408cb58e19edb28da",
+      "result": {
+        "pass": true,
+        "loads": 8000,
+        "checks": 322014,
+        "explicit_consumes": 4968,
+        "materialized_slots": 52519,
+        "copy_calls": 5023
+      }
+    },
+    "tests/lazy-bulk-v2/report.json": {
+      "sha256": "b8704e7012f20130cf74621b5839b30933d521fef851baf49c6b476318fec8af",
+      "result": {
+        "pass": true,
+        "loads": 8000,
+        "checks": 322014,
+        "explicit_consumes": 4968,
+        "materialized_slots": 52519,
+        "copy_calls": 5023
+      }
+    }
+  }
+}

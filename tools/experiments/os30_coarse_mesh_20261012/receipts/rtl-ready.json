@@ -1,0 +1,46 @@
+{
+  "status": "READY_FOR_NATIVE_ONLY",
+  "abi": "AJ03 0x414a3033; GROUP0x65000007; oldJOB0x64 retained",
+  "source_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/frozen/src/fpga/common/geometry_mesh_task_ctrl.v": "49a70c3174f91d698916dd6eca0e826f00e91a6f641cfc015ed30c0848740133",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/frozen/src/fpga/common/geometry_mesh_raw_frontend.v": "1d4397db226cd152e73f0ef59804cd396ab0ea3abb135a86625abfdee7f22d5b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/frozen/src/fpga/common/geometry_mesh_task_engine.v": "4099d6ea9c34007ed4bdbb8f43ca0aa91167ee9eeee4c38b860c5c331a1fde99",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/frozen/src/fpga/common/geometry_float_cull_mem.v": "53163df4519861d2ffa3d115b45656a90f03e6ef869a02188d1344710931f2ac",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/frozen/src/fpga/common/geometry_raw_load.v": "fc0396d92eeed2ba22a89af7a844fa85bf24353fb00b1c0b4b681574799cc4cf",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/frozen/src/fpga/common/geometry_transform_light.v": "6987e27771c84173b31eb53e9f3bce4e7337437414548ef089f3adfe430c810f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/frozen/src/fpga/common/GeometryFmaProbe.v": "348d11609de14326dc9408c11e39a385a85a4e0678eaaf5d69f39d6cfba38088",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/frozen/src/fpga/common/phase10_raw_vtx_dma.v": "ce51296a880ef212cacffbe4bb4c1728fc1bc9976d3504dd91883882d4316f81",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/frozen/src/fpga/common/geometry_float_batch_recip.v": "c3cc22d4aa4559d0cfe087c6556361eec22e363fbff79072bb65a1028c3dfd9b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/frozen/src/fpga/common/phase10_float_recip2.v": "d68bc3fcdcb750f88cebf9aa8ed890a499d12210cbd50fe9d3a049c168bea5cc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/frozen/src/fpga/common/geometry_color_rtz.v": "27025e32c4c8f42168db8e49149d9ee7cd2255d606ddb7ed0f5c932bedd1a335",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/frozen/src/fpga/common/geometry_mesh_stream.v": "d6b5d7b0b7ff71ceaba3498b2a438b8087441155f3a977a061b261d722c0383f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/frozen/src/fpga/common/geometry_mesh_packet.v": "59781cee057d8fbeaec43f96ed9eb4cca8b44484be8dd125f0466a1080b694fc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/frozen/src/fpga/common/geometry_mesh_command_fetch.v": "a740d2c2d961bcbe3421e7de594ca842b3c3caf2a38dff7de89ff067c9b93cf8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/frozen/src/fpga/common/geometry_import_convert.v": "3beac876e469ec45ff3d3e81c9645671dcb92737d1f84dd188ca454fbbcf7526",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/frozen/src/fpga/common/phase10_load_alias.v": "2aedc1e5a1c3a3f2b2c7a535633e9bbd598494bcb9692a4f8269bb9d809e8ce0",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/frozen/src/fpga/common/geometry_async_mesh.v": "4cf923a0f63f3e39c6e8fcba5fdb5aa3bda1ba008aa0284f16c2db800f70ee20",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/frozen/src/fpga/common/gpu_mesh_job_front.v": "02f0b4c5cf3a09e3801d993044b6288417a6983d587f349acbf5add83067c5ba"
+  },
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/design/group-abi.md": "a118ce625a8c7cf4ad4dd642d2ea4884f3e24d5e2ce6ffc25282e036e02b51c3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/changed-inputs-v2.json": "1afc5845b941a89e305763f63358dafd40be46dbe35c98c951d6206cbd00c9be",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/coarse-v2.patch": "b09fe4e35e97c7f549ae3c8873ca52ed6fb58164abb888d754cc63f109dfb8fc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/tests/selected-v2.json": "72cc62f2bc170a8333b8ec4b8446a981679c39a17ba6a48b22ea4316fa4e4c23",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/new-sources.json": "e94ee504aa7265b1dd265f3fbf54c2e64cf54deb9c1bd30c4c0856496fcc52bc"
+  },
+  "test_cases": 160,
+  "test_checks": 133895,
+  "tests": [
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/tests/wrapper-v3/manifest.json",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/tests/faults-v1/manifest.json",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/tests/combined-v2/manifest.json"
+  ],
+  "resource_scope": "No additional FPU or M10K: existing attribute words96..123 become protected context shadow; existing two-word commandreader reused for descriptor pairs; existing output/snapshot/raw memories retained. Additional control/register/mux area and timing are unqualified.",
+  "scope": "Individually admitted immutable members only, <=32; no new canonical handback or broader admission.",
+  "corrections": [
+    "Descriptor-start launch now uses a ready signal independent of its own start, eliminating first-draft combinational feedback.",
+    "Test priority request moved after actual member snapshot when checking early-detachment; acquisition before first member is explicitly legal.",
+    "Final front rejects reserved internal GROUP bit31 on oldJOB, closing malformed-input ambiguity."
+  ],
+  "next": "Native paired full-frame correctness and total-cycle measurement before any physical build."
+}

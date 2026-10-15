@@ -1,0 +1,12 @@
+{
+  "passed": true,
+  "variant": "native-v3",
+  "fresh_stage": "/tmp/q2-native-v3-package-rebuild-20261012",
+  "elf_sha256": "44f668ef55af64b579f3800d57567b7da7a2b3f9e16c325976d021d9237595b4",
+  "source_date_epoch": 1791806400,
+  "compiler": "riscv64-elf-gcc (Arch Linux Repositories) 15.2.0",
+  "renderer_host": "PASS18groups including native mixer-less startup",
+  "geometry_host": "PASS including map lifecycle",
+  "textures_host": "PASS",
+  "production_delta_from_v2": "Only SDL_BackendInit native-cap/no-hardware-mixer admission before any audio/mixer initialization"
+}

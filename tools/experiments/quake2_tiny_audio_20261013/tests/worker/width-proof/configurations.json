@@ -1,0 +1,142 @@
+[
+  {
+    "ADDR_BITS": 1,
+    "QUEUE_BITS": 1
+  },
+  {
+    "ADDR_BITS": 2,
+    "QUEUE_BITS": 1
+  },
+  {
+    "ADDR_BITS": 2,
+    "QUEUE_BITS": 2
+  },
+  {
+    "ADDR_BITS": 3,
+    "QUEUE_BITS": 1
+  },
+  {
+    "ADDR_BITS": 3,
+    "QUEUE_BITS": 3
+  },
+  {
+    "ADDR_BITS": 4,
+    "QUEUE_BITS": 1
+  },
+  {
+    "ADDR_BITS": 4,
+    "QUEUE_BITS": 2
+  },
+  {
+    "ADDR_BITS": 4,
+    "QUEUE_BITS": 4
+  },
+  {
+    "ADDR_BITS": 6,
+    "QUEUE_BITS": 1
+  },
+  {
+    "ADDR_BITS": 6,
+    "QUEUE_BITS": 4
+  },
+  {
+    "ADDR_BITS": 6,
+    "QUEUE_BITS": 6
+  },
+  {
+    "ADDR_BITS": 10,
+    "QUEUE_BITS": 1
+  },
+  {
+    "ADDR_BITS": 10,
+    "QUEUE_BITS": 4
+  },
+  {
+    "ADDR_BITS": 10,
+    "QUEUE_BITS": 8
+  },
+  {
+    "ADDR_BITS": 10,
+    "QUEUE_BITS": 10
+  },
+  {
+    "ADDR_BITS": 11,
+    "QUEUE_BITS": 1
+  },
+  {
+    "ADDR_BITS": 11,
+    "QUEUE_BITS": 4
+  },
+  {
+    "ADDR_BITS": 11,
+    "QUEUE_BITS": 9
+  },
+  {
+    "ADDR_BITS": 11,
+    "QUEUE_BITS": 11
+  },
+  {
+    "ADDR_BITS": 12,
+    "QUEUE_BITS": 1
+  },
+  {
+    "ADDR_BITS": 12,
+    "QUEUE_BITS": 4
+  },
+  {
+    "ADDR_BITS": 12,
+    "QUEUE_BITS": 10
+  },
+  {
+    "ADDR_BITS": 12,
+    "QUEUE_BITS": 12
+  },
+  {
+    "ADDR_BITS": 16,
+    "QUEUE_BITS": 1
+  },
+  {
+    "ADDR_BITS": 16,
+    "QUEUE_BITS": 4
+  },
+  {
+    "ADDR_BITS": 16,
+    "QUEUE_BITS": 14
+  },
+  {
+    "ADDR_BITS": 16,
+    "QUEUE_BITS": 16
+  },
+  {
+    "ADDR_BITS": 31,
+    "QUEUE_BITS": 1
+  },
+  {
+    "ADDR_BITS": 31,
+    "QUEUE_BITS": 4
+  },
+  {
+    "ADDR_BITS": 31,
+    "QUEUE_BITS": 29
+  },
+  {
+    "ADDR_BITS": 31,
+    "QUEUE_BITS": 31
+  },
+  {
+    "ADDR_BITS": 32,
+    "QUEUE_BITS": 1
+  },
+  {
+    "ADDR_BITS": 32,
+    "QUEUE_BITS": 4
+  },
+  {
+    "ADDR_BITS": 32,
+    "QUEUE_BITS": 30
+  },
+  {
+    "ADDR_BITS": 32,
+    "QUEUE_BITS": 32
+  }
+]

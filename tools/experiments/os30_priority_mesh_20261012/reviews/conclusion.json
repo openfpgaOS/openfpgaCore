@@ -1,0 +1,76 @@
+{
+  "status": "CORRECT_CPU_OUTPUT_WAIT_REMOVED_BUT_NO_NET_SPEEDUP",
+  "selected_native": "native-v2",
+  "selected_app": "F24 PRI2",
+  "same_F23_hardware_comparison": {
+    "priority_cycles": [
+      4647402,
+      4794375
+    ],
+    "snapshot_cycles": [
+      4624527,
+      4657010
+    ],
+    "warm_lease_wait_before": 204231,
+    "warm_lease_wait_after": 8372,
+    "warm_lease_wait_reduction_percent": 95.90072026283963,
+    "warm_whole_interval_reduction_percent": 2.865128405683748
+  },
+  "final_same_F24_comparison": {
+    "candidate_cycles": [
+      4619218,
+      4591166
+    ],
+    "control_cycles": [
+      4186769,
+      4536880
+    ],
+    "combined_cycle_change_percent": 5.579488583275194,
+    "warm_cycle_change_percent": 1.1965491703549658,
+    "warm_lease_wait_cycles": 9805,
+    "warm_raw_transform_cycles": 202598,
+    "warm_output_full_cycles": 1143120
+  },
+  "actual_overlap_proof": {
+    "early_snapshot_grants": 56,
+    "concurrent_legacy_raw_starts": 40,
+    "snapshot_jobs": 124,
+    "physical_snapshot_writes": 12151,
+    "original_LOAD_calls": 708,
+    "exact_raw_contexts": 652,
+    "negative_witness_cases": 11
+  },
+  "decision": "Preserve isolated source/evidence experiment. Do not fit or deploy this measured regression.",
+  "physical_fit_run": false,
+  "seed_sweep_run": false,
+  "deployed": false,
+  "production_modified": false,
+  "limits": [
+    "Two bounded native intervals with synthetic scan/audio and bounded guest services; not sustained Pocket FPS.",
+    "One captured scene; no all-level, game or Quake2 performance claim.",
+    "Warm wait reduction compares identical F23 ELF and fixture. Final performance compares identical F24 ELF and fixture.",
+    "Snapshot storage reuses the AJ02 survivor block; overall candidate ALM/BRAM/timing have not been physically fitted.",
+    "Cold clipping/numeric repair still blocks the CPU. This change targets ordinary packet-output ownership.",
+    "Function gap buckets are diagnostic and overlapping state counters cannot be summed into saved cycles."
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/analysis/conclude_v1.py": "7666f7df0e8e0ac531e7900d0ef415351f59836fc7969e0e8654dff6bd3a9b2a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/analysis/native-v1.json": "8eaeab3dc597426c013a013f7b233c0b6a6020c5684d279b236aaf3d57f92f07",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/analysis/native-v2-f23.json": "8a36a55f9de1eee102149278dfe6e6172caecefbcb3d7c8960f4e3292abe25bf",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/analysis/native-v2.json": "fafa0de77b2a3e79b00249691f1826a3d2b8f1eedb457eac1d9de8cc7ff1abe6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/analysis/phases-v2.json": "efbbf8751fe98f5609b98693021d3a14bfe2cbd8a26bfeefb478fed21eba523d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/control-v1/check-independent-v1.json": "065ec43080d8d5bfe4248640b3317718d212788fdf78f66a8a33bab4b7b9bde8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v1/check-independent-v1.json": "7ee241f926476d7ae81d47a5f5521a05f1e801e084c5da58e5d410fde95ad618",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/control-v2/check-independent-v2.json": "29a4a2042b2134c34fc803164a9e6ca018f8ec1f53a3b69de7928196fe2073d7",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2/check-independent-v2.json": "40eaeb862177f104a3e54a9dbfc3df808155332d7e31c7d19961cbdc55c38eb9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/check-independent-v2.json": "366dcecc60b750a3e4a2b2e9ed3e7bd42025790bc993ab4b1a413b935f9decfe",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/lifetime-negative-v2/result.json": "99a77d4ee472fa05b41654810a0a452d9b3442af09d1f31ae7bf257d58846cc7",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/lifetime-negative-v1/result.json": "c29e3753031e543b5ad210dae692fbdaba873d109c59df91c01120cbc8f941b2",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/wait-coverage-v1/result.json": "34e9709929e894e194dbe8b97f79225eb5d44d20c19b43a2a4025263e9d80439",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/wait-coverage-v2/result.json": "5a976e9dc071173deecc2ffcb68f437f2d2662439976cf8da1447045f3b42967",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-core-v2/rtl-ready-v1.json": "fb447dd63e5083a4f4b15a9b7f8694f5e8bcf6e1045af585a4ecae44b4b51250",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app-v2/evidence/app-build-v2/build-result.json": "f3c3a4bea092749532e7796a487d8a4b00188d68939760d3b2e9183e0f51d4e6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/physical/review-v2.json": "7a2981f4ccf8de35c42aa23f3b06a288073f2b69974fe188231312fc938beea1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/analysis/app-review-v2.json": "896e61fbad79abde721b6fc23720cd117673d7130547284376a5a556799c7437"
+  }
+}

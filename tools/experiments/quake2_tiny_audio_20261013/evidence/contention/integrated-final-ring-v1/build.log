@@ -1,0 +1,453 @@
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/axi_sdram_arbiter.v:283:40: Operator GTE expects 5 bits on the RHS, but RHS's CONST '4'h2' generates 4 bits.
+                                                                                                                                                                         : ... note: In instance 'tb_contention.arb'
+  283 | wire gwq_c1 = gwq_fs0 && (gpu_wq_count >= 4'd2) && !gpu_wq_last[gwq_p0] && gpu_wq_full_strobe[gwq_p1];
+      |                                        ^~
+                      ... For warning description see https://verilator.org/warn/WIDTHEXPAND?v=5.052
+                      ... Use "/* verilator lint_off WIDTHEXPAND */" and lint_on around source to disable this message.
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/axi_sdram_arbiter.v:284:40: Operator GTE expects 5 bits on the RHS, but RHS's CONST '4'h3' generates 4 bits.
+                                                                                                                                                                         : ... note: In instance 'tb_contention.arb'
+  284 | wire gwq_c2 = gwq_c1  && (gpu_wq_count >= 4'd3) && !gpu_wq_last[gwq_p1] && gpu_wq_full_strobe[gwq_p2];
+      |                                        ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/axi_sdram_arbiter.v:285:40: Operator GTE expects 5 bits on the RHS, but RHS's CONST '4'h4' generates 4 bits.
+                                                                                                                                                                         : ... note: In instance 'tb_contention.arb'
+  285 | wire gwq_c3 = gwq_c2  && (gpu_wq_count >= 4'd4) && !gpu_wq_last[gwq_p2] && gpu_wq_full_strobe[gwq_p3];
+      |                                        ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/axi_sdram_arbiter.v:286:40: Operator GTE expects 5 bits on the RHS, but RHS's CONST '4'h5' generates 4 bits.
+                                                                                                                                                                         : ... note: In instance 'tb_contention.arb'
+  286 | wire gwq_c4 = gwq_c3  && (gpu_wq_count >= 4'd5) && !gpu_wq_last[gwq_p3] && gpu_wq_full_strobe[gwq_p4];
+      |                                        ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/axi_sdram_arbiter.v:287:40: Operator GTE expects 5 bits on the RHS, but RHS's CONST '4'h6' generates 4 bits.
+                                                                                                                                                                         : ... note: In instance 'tb_contention.arb'
+  287 | wire gwq_c5 = gwq_c4  && (gpu_wq_count >= 4'd6) && !gpu_wq_last[gwq_p4] && gpu_wq_full_strobe[gwq_p5];
+      |                                        ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/axi_sdram_arbiter.v:288:40: Operator GTE expects 5 bits on the RHS, but RHS's CONST '4'h7' generates 4 bits.
+                                                                                                                                                                         : ... note: In instance 'tb_contention.arb'
+  288 | wire gwq_c6 = gwq_c5  && (gpu_wq_count >= 4'd7) && !gpu_wq_last[gwq_p5] && gpu_wq_full_strobe[gwq_p6];
+      |                                        ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/axi_sdram_arbiter.v:289:40: Operator GTE expects 5 bits on the RHS, but RHS's CONST '4'h8' generates 4 bits.
+                                                                                                                                                                         : ... note: In instance 'tb_contention.arb'
+  289 | wire gwq_c7 = gwq_c6  && (gpu_wq_count >= 4'd8) && !gpu_wq_last[gwq_p6] && gpu_wq_full_strobe[gwq_p7];
+      |                                        ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/axi_sdram_arbiter.v:307:47: Operator GTE expects 5 bits on the RHS, but RHS's CONST '4'h2' generates 4 bits.
+                                                                                                                                                                         : ... note: In instance 'tb_contention.arb'
+  307 |                                 (gpu_wq_count >= 4'd2));
+      |                                               ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/axi_sdram_arbiter.v:410:41: Operator COND expects 5 bits on the Conditional True, but Conditional True's CONST '4'h1' generates 4 bits.
+                                                                                                                                                                         : ... note: In instance 'tb_contention.arb'
+  410 |                       + (m0_w_post_fire ? 4'd1 : 4'd0)
+      |                                         ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/axi_sdram_arbiter.v:410:41: Operator COND expects 5 bits on the Conditional False, but Conditional False's CONST '4'h0' generates 4 bits.
+                                                                                                                                                                         : ... note: In instance 'tb_contention.arb'
+  410 |                       + (m0_w_post_fire ? 4'd1 : 4'd0)
+      |                                         ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:240:31: Operator EQ expects 6 bits on the RHS, but RHS's VARREF 'S_IDLE' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  240 | wire cpu_fsm_q_drain = (state == S_IDLE) && !cpu_fsm_q_empty;
+      |                               ^~
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:434:17: Operator ASSIGNDLY expects 8 bits on the Assign RHS, but Assign RHS's SHIFTR generates 16 bits.
+                                                                                                                                                                  : ... note: In instance 'tb_contention.mixer'
+  434 |         gxm_0_r <= ({8'd0, group_vol_0} * {8'd0, master_vol}) >> 8;
+      |                 ^~
+                     ... For warning description see https://verilator.org/warn/WIDTHTRUNC?v=5.052
+                     ... Use "/* verilator lint_off WIDTHTRUNC */" and lint_on around source to disable this message.
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:435:17: Operator ASSIGNDLY expects 8 bits on the Assign RHS, but Assign RHS's SHIFTR generates 16 bits.
+                                                                                                                                                                  : ... note: In instance 'tb_contention.mixer'
+  435 |         gxm_1_r <= ({8'd0, group_vol_1} * {8'd0, master_vol}) >> 8;
+      |                 ^~
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:436:17: Operator ASSIGNDLY expects 8 bits on the Assign RHS, but Assign RHS's SHIFTR generates 16 bits.
+                                                                                                                                                                  : ... note: In instance 'tb_contention.mixer'
+  436 |         gxm_2_r <= ({8'd0, group_vol_2} * {8'd0, master_vol}) >> 8;
+      |                 ^~
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:437:17: Operator ASSIGNDLY expects 8 bits on the Assign RHS, but Assign RHS's SHIFTR generates 16 bits.
+                                                                                                                                                                  : ... note: In instance 'tb_contention.mixer'
+  437 |         gxm_3_r <= ({8'd0, group_vol_3} * {8'd0, master_vol}) >> 8;
+      |                 ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:543:27: Operator EQ expects 6 bits on the RHS, but RHS's VARREF 'S_NEXT_VOICE' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  543 |     if (!reset_n || state == S_NEXT_VOICE || state == S_IDLE)
+      |                           ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:543:52: Operator EQ expects 6 bits on the RHS, but RHS's VARREF 'S_IDLE' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  543 |     if (!reset_n || state == S_NEXT_VOICE || state == S_IDLE)
+      |                                                    ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:703:31: Operator EQ expects 6 bits on the RHS, but RHS's VARREF 'S_WR_VOL_RAMP' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  703 | wire       ramp_is_l = (state == S_WR_VOL_RAMP);
+      |                               ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:713:31: Operator EQ expects 6 bits on the RHS, but RHS's VARREF 'S_FETCH_SEAM_AR' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  713 | wire [21:0] samp_idx = (state == S_FETCH_SEAM_AR) ? cur_loop_start
+      |                               ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:727:30: Operator EQ expects 6 bits on the RHS, but RHS's VARREF 'S_ADV_COMPUTE' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  727 | wire position_carry = (state == S_ADV_COMPUTE) ? adv_frac_carry : position_sub;
+      |                              ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:734:5: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_FETCH_TAP1_NXT_CALC' generates 5 bits.
+                                                                                                                                                                  : ... note: In instance 'tb_contention.mixer'
+  734 |     case (state)
+      |     ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:734:5: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_ADV_COMPUTE' generates 5 bits.
+                                                                                                                                                                  : ... note: In instance 'tb_contention.mixer'
+  734 |     case (state)
+      |     ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:734:5: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_ADVANCE' generates 5 bits.
+                                                                                                                                                                  : ... note: In instance 'tb_contention.mixer'
+  734 |     case (state)
+      |     ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:734:5: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_LERP_INTERP' generates 5 bits.
+                                                                                                                                                                  : ... note: In instance 'tb_contention.mixer'
+  734 |     case (state)
+      |     ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:778:26: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_IDLE' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  778 |         state            <= S_IDLE;
+      |                          ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:801:15: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_NEXT_VOICE' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  801 |         state <= S_NEXT_VOICE;
+      |               ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:808:19: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_IDLE' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  808 |             state <= S_IDLE;
+      |                   ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:814:24: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_START_SAMPLE' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  814 |             state      <= S_START_SAMPLE;
+      |                        ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:826:19: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_NEXT_VOICE' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  826 |             state <= S_NEXT_VOICE;
+      |                   ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:829:25: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_RD_CTRL_W' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  829 |             state       <= S_RD_CTRL_W;
+      |                         ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:837:18: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_CHECK_ACTIVE' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  837 |         state    <= S_CHECK_ACTIVE;
+      |                  ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:844:19: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_NEXT_VOICE' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  844 |             state <= S_NEXT_VOICE;
+      |                   ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:847:25: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_RD_POS_W' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  847 |             state       <= S_RD_POS_W;
+      |                         ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:854:21: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_RD_BASE' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  854 |         state       <= S_RD_BASE;
+      |                     ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:860:22: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_RD_BASE_W' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  860 |         state        <= S_RD_BASE_W;
+      |                      ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:867:15: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_RD_VOL_RATE' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  867 |         state <= S_RD_VOL_RATE;
+      |               ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:873:22: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_RD_LOOP_END' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  873 |         state        <= S_RD_LOOP_END;
+      |                      ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:897:26: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_FETCH_TAP0_CALC' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  897 |             state        <= S_FETCH_TAP0_CALC;
+      |                          ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:930:19: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_RAMP_STEP' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  930 |             state <= S_RAMP_STEP;      
+      |                   ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:932:19: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_FETCH_TAP0_CALC' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  932 |             state <= S_FETCH_TAP0_CALC;
+      |                   ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:969:19: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_VOICE_END' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  969 |             state <= S_VOICE_END;
+      |                   ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:979:15: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_FETCH_TAP1_NXT_CALC' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  979 |         state <= S_FETCH_TAP1_NXT_CALC;
+      |               ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1011:26: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_FETCH_TAP0_AR' generates 5 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1011 |         state            <= S_FETCH_TAP0_AR;
+      |                          ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1017:19: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_FETCH_TAP0_R' generates 5 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1017 |         state     <= S_FETCH_TAP0_R;
+      |                   ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1039:23: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_FETCH_TAP1_R' generates 5 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1039 |                 state <= S_FETCH_TAP1_R;
+      |                       ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1046:26: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_FETCH_SEAM_AR' generates 5 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1046 |                 state    <= S_FETCH_SEAM_AR;
+      |                          ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1053:26: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_LERP_INTERP' generates 5 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1053 |                 state    <= S_LERP_INTERP;
+      |                          ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1060:26: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_LERP_INTERP' generates 5 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1060 |                 state    <= S_LERP_INTERP;
+      |                          ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1066:26: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_LERP_INTERP' generates 5 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1066 |                 state    <= S_LERP_INTERP;
+      |                          ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1082:23: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_FETCH_SEAM_R' generates 5 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1082 |         state         <= S_FETCH_SEAM_R;
+      |                       ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1098:22: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_LERP_INTERP' generates 5 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1098 |             state    <= S_LERP_INTERP;
+      |                      ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1119:22: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_LERP_INTERP' generates 5 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1119 |             state    <= S_LERP_INTERP;
+      |                      ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1153:43: Operator ADD expects 33 bits on the LHS, but LHS's SIGNED generates 16 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1153 |                 tap1_l <= $signed(tap0_l) + (delta_l_reg >>> 16);
+      |                                           ^
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1153:24: Operator ASSIGNDLY expects 16 bits on the Assign RHS, but Assign RHS's ADD generates 33 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+ 1153 |                 tap1_l <= $signed(tap0_l) + (delta_l_reg >>> 16);
+      |                        ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1154:43: Operator ADD expects 33 bits on the LHS, but LHS's SIGNED generates 16 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1154 |                 tap1_r <= $signed(tap0_r) + (delta_r_reg >>> 16);
+      |                                           ^
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1154:24: Operator ASSIGNDLY expects 16 bits on the Assign RHS, but Assign RHS's ADD generates 33 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+ 1154 |                 tap1_r <= $signed(tap0_r) + (delta_r_reg >>> 16);
+      |                        ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1156:28: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_LERP_MIX' generates 5 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1156 |                 state      <= S_LERP_MIX;
+      |                            ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1169:32: Operator ADD expects 21 bits on the RHS, but RHS's SIGNED generates 16 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1169 |             accum_l <= accum_l + $signed(scaled_l[23:8]);
+      |                                ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1170:32: Operator ADD expects 21 bits on the RHS, but RHS's SIGNED generates 16 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1170 |             accum_r <= accum_r + $signed(scaled_r[23:8]);
+      |                                ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1188:15: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_ADV_COMPUTE' generates 5 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1188 |         state <= S_ADV_COMPUTE;
+      |               ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1193:15: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_ADVANCE' generates 5 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1193 |         state <= S_ADVANCE;
+      |               ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1221:25: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_VOICE_END' generates 5 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1221 |             state       <= S_VOICE_END;
+      |                         ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1242:31: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_WR_POS_FRAC' generates 5 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1242 |         state                 <= S_WR_POS_FRAC;
+      |                               ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1249:21: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_RAMP_STEP' generates 5 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1249 |         state       <= S_RAMP_STEP;
+      |                     ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1281:21: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_WR_VOL_MULT' generates 5 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1281 |         state       <= S_WR_VOL_MULT;
+      |                     ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1305:23: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_NEXT_VOICE' generates 5 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1305 |                 state <= S_NEXT_VOICE;
+      |                       ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1307:23: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_WR_VOL_RAMP' generates 5 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1307 |                 state <= S_WR_VOL_RAMP;
+      |                       ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1324:17: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_WR_VOL' generates 5 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1324 |         state   <= S_WR_VOL;
+      |                 ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1333:15: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_NEXT_VOICE' generates 5 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1333 |         state <= S_NEXT_VOICE;
+      |               ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1343:21: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_NEXT_VOICE' generates 5 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1343 |         state       <= S_NEXT_VOICE;
+      |                     ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1354:19: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_OUTPUT' generates 5 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1354 |             state <= S_OUTPUT;
+      |                   ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1357:23: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_START_SAMPLE' generates 5 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1357 |             state     <= S_START_SAMPLE;
+      |                       ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1383:25: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_IDLE' generates 5 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1383 |             state       <= S_IDLE;
+      |                         ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:1387:20: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'S_IDLE' generates 5 bits.
+                                                                                                                                                                    : ... note: In instance 'tb_contention.mixer'
+ 1387 |     default: state <= S_IDLE;
+      |                    ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:803:14: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_IDLE' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  803 |     end else case (state)
+      |              ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:803:14: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_START_SAMPLE' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  803 |     end else case (state)
+      |              ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:803:14: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_RD_CTRL_W' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  803 |     end else case (state)
+      |              ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:803:14: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_CHECK_ACTIVE' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  803 |     end else case (state)
+      |              ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:803:14: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_RD_POS_W' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  803 |     end else case (state)
+      |              ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:803:14: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_RD_BASE' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  803 |     end else case (state)
+      |              ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:803:14: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_RD_BASE_W' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  803 |     end else case (state)
+      |              ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:803:14: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_RD_VOL_RATE' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  803 |     end else case (state)
+      |              ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:803:14: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_RD_LOOP_END' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  803 |     end else case (state)
+      |              ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:803:14: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_FETCH_TAP0_CALC' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  803 |     end else case (state)
+      |              ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:803:14: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_FETCH_TAP1_NXT_CALC' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  803 |     end else case (state)
+      |              ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:803:14: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_FETCH_TAP0_AR' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  803 |     end else case (state)
+      |              ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:803:14: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_FETCH_TAP0_R' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  803 |     end else case (state)
+      |              ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:803:14: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_FETCH_SEAM_AR' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  803 |     end else case (state)
+      |              ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:803:14: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_FETCH_SEAM_R' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  803 |     end else case (state)
+      |              ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:803:14: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_FETCH_TAP1_R' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  803 |     end else case (state)
+      |              ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:803:14: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_LERP_INTERP' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  803 |     end else case (state)
+      |              ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:803:14: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_LERP_MIX' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  803 |     end else case (state)
+      |              ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:803:14: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_ADV_COMPUTE' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  803 |     end else case (state)
+      |              ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:803:14: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_ADVANCE' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  803 |     end else case (state)
+      |              ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:803:14: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_WR_POS_FRAC' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  803 |     end else case (state)
+      |              ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:803:14: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_RAMP_STEP' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  803 |     end else case (state)
+      |              ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:803:14: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_WR_VOL_MULT' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  803 |     end else case (state)
+      |              ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:803:14: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_WR_VOL_RAMP' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  803 |     end else case (state)
+      |              ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:803:14: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_WR_VOL' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  803 |     end else case (state)
+      |              ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:803:14: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_VOICE_END' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  803 |     end else case (state)
+      |              ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:803:14: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_NEXT_VOICE' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  803 |     end else case (state)
+      |              ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:803:14: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'S_OUTPUT' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  803 |     end else case (state)
+      |              ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:795:38: Operator NEQ expects 6 bits on the RHS, but RHS's VARREF 'S_IDLE' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  795 |     end else if (cur_cancel && state != S_IDLE && state != S_START_SAMPLE &&
+      |                                      ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:795:57: Operator NEQ expects 6 bits on the RHS, but RHS's VARREF 'S_START_SAMPLE' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  795 |     end else if (cur_cancel && state != S_IDLE && state != S_START_SAMPLE &&
+      |                                                         ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:796:24: Operator NEQ expects 6 bits on the RHS, but RHS's VARREF 'S_NEXT_VOICE' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  796 |                  state != S_NEXT_VOICE && state != S_OUTPUT &&
+      |                        ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:796:49: Operator NEQ expects 6 bits on the RHS, but RHS's VARREF 'S_OUTPUT' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  796 |                  state != S_NEXT_VOICE && state != S_OUTPUT &&
+      |                                                 ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:797:24: Operator NEQ expects 6 bits on the RHS, but RHS's VARREF 'S_FETCH_TAP0_R' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  797 |                  state != S_FETCH_TAP0_R && state != S_FETCH_TAP1_R &&
+      |                        ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:797:51: Operator NEQ expects 6 bits on the RHS, but RHS's VARREF 'S_FETCH_TAP1_R' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  797 |                  state != S_FETCH_TAP0_R && state != S_FETCH_TAP1_R &&
+      |                                                   ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/audio_mixer.v:798:24: Operator NEQ expects 6 bits on the RHS, but RHS's VARREF 'S_FETCH_SEAM_R' generates 5 bits.
+                                                                                                                                                                   : ... note: In instance 'tb_contention.mixer'
+  798 |                  state != S_FETCH_SEAM_R) begin
+      |                        ^~
+make: Entering directory '/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/obj'
+g++  -I.  -MMD -I/usr/share/verilator/include -I/usr/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=0 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=0 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable    -O3   -Os  -c -o main.o /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/inputs/main.cpp
+g++ -Os  -I.  -MMD -I/usr/share/verilator/include -I/usr/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=0 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=0 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable    -O3   -c -o verilated.o /usr/share/verilator/include/verilated.cpp
+g++ -Os  -I.  -MMD -I/usr/share/verilator/include -I/usr/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=0 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=0 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable    -O3   -c -o verilated_dpi.o /usr/share/verilator/include/verilated_dpi.cpp
+g++ -Os  -I.  -MMD -I/usr/share/verilator/include -I/usr/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=0 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=0 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable    -O3   -c -o verilated_threads.o /usr/share/verilator/include/verilated_threads.cpp
+python3 /usr/share/verilator/bin/verilator_includer -DVL_INCLUDE_OPT=include Vtb_contention.cpp Vtb_contention___024root__0.cpp Vtb_contention__Dpi.cpp Vtb_contention__ConstPool__0__Slow.cpp Vtb_contention___024root__Slow.cpp Vtb_contention___024root__0__Slow.cpp Vtb_contention__Syms__Slow.cpp > Vtb_contention__ALL.cpp
+g++ -Os  -I.  -MMD -I/usr/share/verilator/include -I/usr/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=0 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=0 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable    -O3   -c -o Vtb_contention__ALL.o Vtb_contention__ALL.cpp
+g++    main.o verilated.o verilated_dpi.o verilated_threads.o Vtb_contention__ALL.a    -pthread -lpthread -latomic   -o Vtb_contention
+rm Vtb_contention__ALL.verilator_deplist.tmp
+make: Leaving directory '/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/contention/integrated-final-ring-v1/obj'
+- V e r i l a t i o n   R e p o r t: Verilator 5.052 2026-09-05 rev v5.052
+- Verilator: Built from 0.299 MB sources in 5 modules, into 0.329 MB in 7 C++ files needing 0.001 MB
+- Verilator: Walltime 5.051 s (elab=0.008, cvt=0.031, bld=5.002); cpu 0.052 s on 4 threads; allocated 20.918 MB

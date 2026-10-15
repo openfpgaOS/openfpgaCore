@@ -1,0 +1,16 @@
+{
+  "deployed": true,
+  "normal_app": true,
+  "readback_sha256": {
+    "Assets/quake2/common/quake2.elf": "44f668ef55af64b579f3800d57567b7da7a2b3f9e16c325976d021d9237595b4",
+    "Cores/thinkelastic.quake2/os30.rbf_r": "a74fd5479299e9cb6d3c3121becb7e936ff6c09498b38887822e44ea5db1dbb1",
+    "Cores/thinkelastic.quake2/core.json": "6760fc8eb91c4d4b3992ea7c3ad125cde76cec0f71d37479e64553de89b415c4",
+    "Assets/quake2/common/os.bin": "054abd4b3d2c57d55b4ecec23f2fcaa3703206db3df14ebe7793c22941d34ef7",
+    "Cores/thinkelastic.quake2/loader.bin": "fc1f8d37eb0fb322006b4428f0b59d2801c9b74978bd3f24103f5f9bbfca3c99"
+  },
+  "backup_verified": true,
+  "backup": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-native-mesh-20261012/deployment-native-v3/backups/before-20261012T222751Z-n3_5ykzd",
+  "prepared_and_fixture_tested_manifest_sha256": "2dc5eaa933466d9075989a471a4e754efe608b4f12eaf75a2b78406f759355b4",
+  "receipt": "last-deployment.json",
+  "safely_unmounted": true
+}

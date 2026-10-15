@@ -1,0 +1,10 @@
+{
+  "passed": true,
+  "silent_audio_manifest_sha256": "831c4025cb455d0d6075f889269b826c29fe6ecd73297eeecd72b63533f974e2",
+  "core_v4_manifest_sha256": "3c89b2a398aded2ef27e921a1ae04fd7f6b60fdaaead41d08bfd30f6c8922cea",
+  "core_top_recipe_exact_fit_match": true,
+  "all_QSF_VERILOG_MACRO_lines_exact": true,
+  "whole_QSF_byte_exact": false,
+  "QSF_difference": "Silent-test source was captured after Quartus normalized optimization assignment lines; all functional Verilog macro assignments match the pre-fit receipt.",
+  "physical_timing_qualified": false
+}

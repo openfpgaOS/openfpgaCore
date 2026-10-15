@@ -1,0 +1,99 @@
+{
+  "status": "PASS_SIXTEEN_CORRUPTIONS_REJECTED",
+  "cases": [
+    {
+      "case": "source_vertex_word",
+      "status": "REJECTED",
+      "message": "PSRAM task source differs from immutable CPU bytes"
+    },
+    {
+      "case": "accepted_context_word",
+      "status": "REJECTED",
+      "message": "physical protected context differs from accepted ingress"
+    },
+    {
+      "case": "legacy_granted_ticket",
+      "status": "REJECTED",
+      "message": ""
+    },
+    {
+      "case": "CPU_LOAD_identity",
+      "status": "REJECTED",
+      "message": "real CPU calls plus explicit GROUP members do not reproduce original traversal"
+    },
+    {
+      "case": "grant_during_open_context",
+      "status": "REJECTED",
+      "message": ""
+    },
+    {
+      "case": "actual_matrix_write_data",
+      "status": "REJECTED",
+      "message": ""
+    },
+    {
+      "case": "snapshot_converted_halfword",
+      "status": "REJECTED",
+      "message": "('physical store differs from pre-edge source', 3, 500620)"
+    },
+    {
+      "case": "raw_read_after_detachment",
+      "status": "REJECTED",
+      "message": ""
+    },
+    {
+      "case": "lease_before_snapshot",
+      "status": "REJECTED",
+      "message": ""
+    },
+    {
+      "case": "survivor_index_storage",
+      "status": "REJECTED",
+      "message": "('physical store differs from pre-edge source', 3, 499791)"
+    },
+    {
+      "case": "actual_post_edge_snapshot_store",
+      "status": "REJECTED",
+      "message": "('physical store differs from pre-edge source', 3, 500620)"
+    },
+    {
+      "case": "physical_group_descriptor",
+      "status": "REJECTED",
+      "message": ""
+    },
+    {
+      "case": "accepted_group_descriptor_pair",
+      "status": "REJECTED",
+      "message": ""
+    },
+    {
+      "case": "physical_protected_context",
+      "status": "REJECTED",
+      "message": "physical protected context differs from accepted ingress"
+    },
+    {
+      "case": "restored_group_context",
+      "status": "REJECTED",
+      "message": ""
+    },
+    {
+      "case": "internal_member_identity",
+      "status": "REJECTED",
+      "message": ""
+    }
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/independent_lifetime_v2.py": "37fd49b83417083fbea00625ecf551682749db117c07ca95223e260101f8528d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/independent_group_v1.py": "1f7bd962663d56e2bd1085c6dd3f1214bf9063aeb8a931aa38a3758f14cd5ab4",
+    "docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v3/check-independent-v2.json": "e40a81cf8b44b7be9de36a08e1be3c5f26ac2b32f4d59fd728a0c31a868b68ec",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v3/build.json": "bcdbddeadcef34cea6392ae0f1bcd5bf58f188b7b8ad8ec8fb3ee023faa8c252",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v3/run/job-sources.tsv": "51c514cec9df809a736c7a9daf3a751033f6c176ee285b19c2dd468c155dd4fb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v3/run/async-events.tsv": "96d21f6230e9bf35a18c1cedbd67e1e8304d0da24d8f875d4658b49cf236ee4d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v3/run/vtx-calls.tsv": "32087b4c43f2a706ebbbe11be6f6d6db70cb4461b79b206b80c20104ddffb0ed",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v3/run/snapshot-stores.tsv": "675d20b6b2b1384c5540a1d3b5d708f05017498e6c84324f045dc61b9cafa5b1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v3/run/group-descriptors.tsv": "ac3aff5464c1d20cab579afaec0a3fa0c77558395d96e2e0703d35b41d32b3c1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v3/run/context-stores.tsv": "33960c93064c7939091ca45425a2daeed39f6391acc0b75f0f21245239ca4d53"
+  },
+  "script_sha256": "98c23df28009c075316f1e59fa030e975b34fa36b23b8166f93f88436efec0f3",
+  "measured_inputs_unchanged": true
+}

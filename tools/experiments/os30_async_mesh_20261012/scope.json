@@ -1,0 +1,27 @@
+{
+  "status": "prototype under development; not qualified or deployed",
+  "base": "mesh-integrated-v1/native-v7/frozen; hardware arithmetic reuse, new input scheduling",
+  "objective": "queue immutable raw draw jobs and their context in existing ingress RAM; remove synchronous CPU preflight/ARM handoffs",
+  "scope": [
+    "os30 only",
+    "cached MTF2-eligible material including its resolved fog-alpha convention",
+    "immutable bounded VTX/TRI spans",
+    "conservative straight-line overwrite-before-read proof for canonical slots",
+    "ordered pure CPU repair for clipping, W and arithmetic failures",
+    "legacy raw lease after earlier queued geometry output publication; no forced full raster drain",
+    "repair-aware source pool reclamation"
+  ],
+  "gates": [
+    "full native same-ELF correctness and total cycles",
+    "compare prior qualified app/core as well",
+    "physical area/timing only after useful measured benefit",
+    "no full seed sweep",
+    "no unqualified Pocket deployment"
+  ],
+  "ownership": {
+    "startup_rtl": "common RTL except gpu_core.v",
+    "startup_review": "pure repair helper and arithmetic tests",
+    "startup_trace": "app clone and integration except pure repair helper",
+    "root": "gpu_core.v, tb_irq.v, build/replay orchestration and final review"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "source_vertex_bytes": 24,
+  "proof": "Actual bound raw DMA component documents24B and consumes raw_word0..5",
+  "raw_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/geometry_raw_load.v",
+  "sha256": "ade3041bfd27ab6200c5d6356775adac778a34eb0d81c1f253ff83367627c144"
+}

@@ -1,0 +1,16 @@
+{
+  "status": "PASS",
+  "miter_random_words_total": 144000,
+  "miter_random_bursts_total": 32000,
+  "all_strobes_and_warm_reset": true,
+  "exact_current_qsf_gpu_sdram_color_depth_cycles": true,
+  "remaining_gate": "Integrated physical area and timing, including SDRAM electrical timing; no physical qualification claimed here.",
+  "pins": {
+    "receipt.json": "d449d03e35e8b2f624b226a59c36cbf0f6bff5766beca500d2c9590c6a3f4d78",
+    "mixed-receipt.json": "9c3d8e9f4f220a2f70b797199c1063e2384b3a8fc6e71358b8918a448866169d",
+    "integration-comparison-v2.json": "cf0a6ed5c769a0523ce204db33f5ff965ff9a9a16e6f3fbf664757b7576431c4",
+    "PROOF.txt": "b93a3cba512472523766c2c4edbe5630efb255706aac9b85c373a915d575993d",
+    "full-strobe/axi_sdram_arbiter.v": "5e9e06dca5ccf978a89f0aaacba05aa295ed7706636d8abed85ef2601ee037f1",
+    "replay_integration.py": "b341090bf4096b3b4c9e39096fd44677df5cf22c09dc075802fcf15a6f99f304"
+  }
+}

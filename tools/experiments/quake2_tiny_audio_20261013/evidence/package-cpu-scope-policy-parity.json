@@ -1,0 +1,94 @@
+{
+  "passed": true,
+  "package_recipe_sha256": "565e14445a44bf9148a53a768b79c611aa0b7bd4be59fd476a49ae139fe35dbc",
+  "sweep_recipe_sha256": "39dac3dda28769a0f3b69bd1775df3bd5ba0c77cfeb5700789fe9b4a56937852",
+  "inputs": [
+    {
+      "qsf": "docs/measurements/quake2-tiny-audio-20261013/area-optimization/mixer-reuse-readaddr-fast/source-ready/src/fpga/targets/pocket/ap_core.qsf",
+      "sha256": "fdc2b60dc35fd47a536874edd5e5cae1089249887ce13afdf3658f548b7c5e59",
+      "settings": {
+        "global_setting": {
+          "effective": "AREA",
+          "assignments": [
+            "SPEED",
+            "AREA",
+            "SPEED",
+            "AREA"
+          ]
+        },
+        "instance_assignments": [
+          "set_instance_assignment -name OPTIMIZATION_TECHNIQUE SPEED -to ic|cpu|cpu"
+        ],
+        "physical_synthesis": {
+          "PHYSICAL_SYNTHESIS_COMBO_LOGIC": {
+            "effective": "ON",
+            "assignments": [
+              "OFF",
+              "ON"
+            ]
+          },
+          "PHYSICAL_SYNTHESIS_EFFORT": {
+            "effective": "FAST",
+            "assignments": [
+              "NORMAL",
+              "FAST"
+            ]
+          }
+        },
+        "cpu_combo_scope": {
+          "present": false,
+          "target": null,
+          "effective": null,
+          "assignments": []
+        }
+      }
+    },
+    {
+      "qsf": "docs/measurements/quake2-tiny-audio-20261013/area-optimization/geometry-cpu-combo/source-ready/src/fpga/targets/pocket/ap_core.qsf",
+      "sha256": "351431b8158de34a5a18361c8ae8a9d5d94a81b714c3853dfa3d315a47c1f1d1",
+      "settings": {
+        "global_setting": {
+          "effective": "AREA",
+          "assignments": [
+            "SPEED",
+            "AREA",
+            "SPEED",
+            "AREA"
+          ]
+        },
+        "instance_assignments": [
+          "set_instance_assignment -name OPTIMIZATION_TECHNIQUE SPEED -to ic|cpu|cpu"
+        ],
+        "physical_synthesis": {
+          "PHYSICAL_SYNTHESIS_COMBO_LOGIC": {
+            "effective": "OFF",
+            "assignments": [
+              "OFF",
+              "ON",
+              "OFF"
+            ]
+          },
+          "PHYSICAL_SYNTHESIS_EFFORT": {
+            "effective": "NORMAL",
+            "assignments": [
+              "NORMAL",
+              "FAST",
+              "NORMAL"
+            ]
+          }
+        },
+        "cpu_combo_scope": {
+          "present": true,
+          "target": "ic|cpu|cpu",
+          "effective": "ON",
+          "assignments": [
+            {
+              "target": "ic|cpu|cpu",
+              "value": "ON"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

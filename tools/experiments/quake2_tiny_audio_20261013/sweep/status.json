@@ -1,0 +1,11 @@
+{
+  "state": "complete",
+  "seeds_completed": 30,
+  "selection": {
+    "all_seeds_attempted": true,
+    "eligible_seeds": [],
+    "selected_seed": null,
+    "selected_timing_closed_at_100_mhz": false,
+    "criterion": "100 MHz closure first, then highest worst-corner restricted main Fmax among >90 MHz candidates with clean cross-clock/input setup and nonsetup/nonmain checks."
+  }
+}

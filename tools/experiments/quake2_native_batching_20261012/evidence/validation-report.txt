@@ -1,0 +1,44 @@
+PASS: final native5 application qualification against deployed native4.
+Baseline app SHA256: 13c8f43af0ca9ea84b84cf1cd9e824bd6f0c1d39eb2b65dc01337408102862a0
+Final app SHA256: c08bed78555f08252c9694c1f019db968e2ce79809ff41b909cfdd61b30e743b
+Core unchanged, SHA256: 542029e588e2a646f20fc98f1dbaf89a667ced48c75de9e89354df74da8622b6
+
+Correctness: all 1,920 application frames preserve every command word, order,
+frame assignment, trailing command, full CPU RGB565 framebuffer, and sound
+service counts. This covers native600, demo2 120, old-worker600 and CPU600.
+Eight samples also match complete actual-RTL color/depth against baseline;
+paced and unpaced replay of each final sample produce identical whole outputs.
+
+Startup-excluded native CPU estimates (cycles/frame; not device FPS):
+workload       baseline       final      change
+main          3601125      3438326    -4.52%
+sound         3897395      3777981    -3.06%
+live          4020670      3953935    -1.66%
+demo2         3100322      3037013    -2.04%
+
+Actual GPU RTL with approximate CPU producer timing:
+scene           baseline       final     throughput gain
+main20          4876283      4864878     0.23%
+main80          5029624      5019454     0.20%
+main92          7668318      7416421     3.40%
+main94          7096300      7036799     0.85%
+main148         6989415      6646207     5.16%
+main180         6005220      5729971     4.80%
+main300         3417528      3393667     0.70%
+live81         13441894     13415394     0.20%
+
+Limits:
+- CPU work uses approximate scalar OS25-derived timing with os30 cache sizes, not actual Vexii instruction timing.
+- GPU raster/cache/mesh arbitration and 100MHz16-bit PSRAM controller/PHY timing are simulated using actual RTL.
+- Frames start with an idle GPU and resident snapshot; carryover from prior frames, CPU/scanout SDRAM contention, audio/OS ISR costs and vblank are absent.
+- The recorded CPU branch/control path is retained. Real ring-full, fence, and upload-busy waits stretch the producer; additional polling instruction costs are not executed.
+- GPU unpublished command writes are packed at the end of the measured submission interval while preserving publish timing; reserve capacity is checked before CPU submission work.
+- CPU non-framebuffer snapshots are installed after preceding fences and before submission. This validates these captured rendering outputs, not all CPU/GPU memory races.
+- The render gate omits CPU framebuffer snapshots; full CPU framebuffer output has separate600-frame exact tests. Complete rendered color/depth match for every sample.
+- All baseline scenes are pinned deployed13c8 app/currentMAC+CB4 core controls. Live81 reconstructs exactly one frame-start clear from independent command trace.
+- Initial paced v1 serialized uploads after every word and overestimated extra upload delay. Only asynchronous issue/recorded busy-poll modelv3 and vectorsv2 are used here.
+- Relative throughput estimates are scenario comparisons, not a measured Pocket FPS claim.
+
+No Quartus rebuild, seed sweep, clock change, or hardware FPS claim.
+The RTL timing model uses the unchanged actual GPU and 100MHz16-bit
+PSRAM controller/PHY, with real ring/fence/upload backpressure.

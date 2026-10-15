@@ -1,0 +1,42 @@
+AJ01 asynchronous geometry experiment — measured decision
+
+RETAIN_QUALIFIED_BASELINE_NO_PHYSICAL_FIT_OR_DEPLOYMENT
+
+Revision          Control cycles (cold / warm)     AJ01 cycles (cold / warm)       Total change
+F20 JOB1          4,229,803 / 4,585,990       4,957,877 / 5,226,083       +15.52%
+F21 JOB2          4,229,803 / 4,608,537       4,885,465 / 5,163,570       +13.70%
+F22 JOB3          4,267,043 / 4,633,123       4,876,661 / 5,105,025       +12.15%
+
+Positive change means slower. The best trial remains 19.57% slower in total
+than the previous qualified app/core (different ELF: 3,980,965 / 4,366,717).
+
+Implemented: immutable context/job packets in the existing ingress RAM;
+autonomous transform/cull/packet generation through the existing arithmetic unit;
+ordered CPU clipping repair; lazy legacy raw leases; cached dead-slot admission.
+V2 reduces polling. V3 remembers exact immutable meshes that needed repair and
+routes later occurrences through the original renderer without assuming clip results.
+
+Correctness: all three paired runs pass exact frame/depth/history, game state,
+FCSR/register, resolved draw/state/order and independent source/ownership checks.
+All 708 original vertex-load call identities and 652 transform contexts reconcile.
+Focused actual RTL tests cover full ingress/output, repair, lease and reset;
+repair arithmetic is checked on the real CPU for 1,184 tasks and 66,348 words.
+
+V3 warm evidence: 76 queued jobs, zero repairs, 5,105,025 cycles (+10.19% versus
+its control). Legacy lease pending: 599,773 cycles, including 524,552 while GPU
+fragment processing was active. Output full: 580,588 cycles; 539,898 overlap GPU
+fragment processing. Raw transform active: 202,210 cycles. These counts overlap
+and must not be added or treated as removable frame time.
+
+The CPU is still blocked by sharing raw storage with queued work whose output
+must drain into the GPU. Cutting repeated repair does not remove that dependency.
+The next structural hypothesis is priority legacy access at safe engine boundaries,
+with full context restoration and a proven ingress-full release path. It is not
+implemented here and no performance gain is assumed.
+
+No physical compile, timing sweep or deployment was performed. The existing
+production sources and installed core remain unchanged. The experiment is isolated.
+
+These are two prepared full native intervals, with bounded services and synthetic
+scan/audio traffic. They are not sustained device FPS or physical timing results.
+Detailed source-bound evidence: analysis/conclusion-v1.json and paired strict receipts.

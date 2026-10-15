@@ -1,0 +1,39 @@
+{
+  "passed": true,
+  "command": [
+    "verilator",
+    "--cc",
+    "--exe",
+    "--build",
+    "--assert",
+    "-j",
+    "3",
+    "-Wno-fatal",
+    "--top-module",
+    "audio_sample_cache",
+    "--Mdir",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/cache/tail-v2/obj",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/cache/tail-v2/audio_sample_cache.v",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/cache/tail-v2/test.cpp"
+  ],
+  "sources": {
+    "audio_sample_cache.v": "ac018efd17a7e1012d1456f12375575a4c4f57784ab6a03c2132bb00795c111d",
+    "test.cpp": "f0577380fa9487f62bc68bddcda9edf69e90a1fa8183c4e2513666db0fcde2f6",
+    "run.py": "4e646b696beedc9845ff6dace80ca5d85a972d7defb1246977aec2a56813ed4a"
+  },
+  "result": {
+    "passed": true,
+    "directed_and_random_checks": 12130,
+    "random_response_beats": 127683,
+    "total_cycles": 1408139,
+    "audio_11k_48k_outputs": 48000,
+    "uncached_requests": 48000,
+    "cache_requests": 3689,
+    "uncached_beats": 71999,
+    "cache_beats": 8519
+  },
+  "limits": [
+    "Standalone AXI cache model with synthetic bounded stalls, not physical SDRAM or mixer integration.",
+    "Dynamic tests, not a formal proof."
+  ]
+}

@@ -1,0 +1,363 @@
+{
+  "binding": {
+    "bound_files": 44,
+    "model_sources": 179
+  },
+  "health": {
+    "cycles": [
+      4308244,
+      4570541
+    ],
+    "latency_maxima": {
+      "0": {
+        "scan_latency": 0,
+        "audio_latency": 0,
+        "audio_queue_latency": 0
+      },
+      "1": {
+        "scan_latency": 383,
+        "audio_latency": 431,
+        "audio_queue_latency": 377
+      },
+      "2": {
+        "scan_latency": 383,
+        "audio_latency": 415,
+        "audio_queue_latency": 367
+      }
+    },
+    "gpu_counters_reconcile": true,
+    "commands": 5562,
+    "command_words": 21908
+  },
+  "frames": [
+    {
+      "frame": 1,
+      "buffer": 0,
+      "sha256": "b7a2e67c63ec5f1ce5f787bedad2fff8743d2c7a1edadaf9bcb8d274fe3ac5bc"
+    },
+    {
+      "frame": 2,
+      "buffer": 2,
+      "sha256": "a42df17ef68b61162980c48170bf3a307ce909b7d1c1ba265f1b3a1b2b1bb8eb"
+    }
+  ],
+  "register_differences": {
+    "entry-regs.bin": {},
+    "entry-2.bin": {
+      "21": [
+        3539150,
+        1805536689
+      ]
+    },
+    "entry-3.bin": {
+      "21": [
+        8114148,
+        1811689125
+      ]
+    }
+  },
+  "all_FCSR_and_FP_registers_exact": true,
+  "final_surface_pool_sha256": "7905a30c1d68a51e8a23e1d8106df009a1f16be7d1f7bc70001517e35af62845",
+  "untouched_buffer_history_exact": true,
+  "removed_reference_clear": [
+    {
+      "word": 23036,
+      "payload": [
+        270532608,
+        41943280,
+        41943040
+      ]
+    }
+  ],
+  "front_preparation": {
+    "probe_address": 288685640,
+    "probe_before": 2,
+    "probe_after": 0
+  },
+  "mesh_preparation": {
+    "probe_address": 288685744,
+    "probe_before": 2,
+    "probe_after": 0
+  },
+  "pair": {
+    "elf_sha256": "691aefd7d76351a512fed71c3b79d55f1832b5d0b7d7b9c0e38a6d0b5e9d5c81",
+    "identical_prepared_inputs": true
+  },
+  "semantics": {
+    "indexed_draws": 1708,
+    "all_effective_draw_payloads_and_state_exact": true
+  },
+  "mesh_lifetime": {
+    "abi": "MTF2",
+    "status": "PASS",
+    "mesh_tasks": 628,
+    "legacy_loads": 14,
+    "packets": 316,
+    "copied_words": 25708,
+    "ordinary_output_words": 46036,
+    "discarded_tasks": 312,
+    "packet_payloads_immutable_through_raw_reuse": true,
+    "no_GPU_output_before_copy_commit_and_exact_marker": true,
+    "raw_release_only_after_private_copy": true,
+    "queue_release_only_after_final_GPU_handshake": true,
+    "maximum_simultaneous_reserved_packets": 9,
+    "maximum_reserved_words": 512,
+    "raw_context": {
+      "effective_started_task_contexts_exact": true,
+      "raw_context_writes_only_when_unowned": true,
+      "omitted_raw_job_indices": [
+        236,
+        242,
+        246,
+        249,
+        320,
+        562,
+        568,
+        572,
+        575,
+        646
+      ],
+      "omitted_shapes": [
+        4,
+        4,
+        4,
+        4,
+        12,
+        4,
+        4,
+        4,
+        4,
+        12
+      ],
+      "unused_disabled_lighting_differences": [
+        {
+          "reference_job": 321,
+          "candidate_job": 316,
+          "unused_registers": [
+            6,
+            7,
+            8,
+            9,
+            10
+          ]
+        },
+        {
+          "reference_job": 322,
+          "candidate_job": 317,
+          "unused_registers": [
+            6,
+            7,
+            8,
+            9,
+            10
+          ]
+        },
+        {
+          "reference_job": 323,
+          "candidate_job": 318,
+          "unused_registers": [
+            6,
+            7,
+            8,
+            9,
+            10
+          ]
+        },
+        {
+          "reference_job": 324,
+          "candidate_job": 319,
+          "unused_registers": [
+            6,
+            7,
+            8,
+            9,
+            10
+          ]
+        },
+        {
+          "reference_job": 325,
+          "candidate_job": 320,
+          "unused_registers": [
+            6,
+            7,
+            8,
+            9,
+            10
+          ]
+        },
+        {
+          "reference_job": 647,
+          "candidate_job": 637,
+          "unused_registers": [
+            6,
+            7,
+            8,
+            9,
+            10
+          ]
+        },
+        {
+          "reference_job": 648,
+          "candidate_job": 638,
+          "unused_registers": [
+            6,
+            7,
+            8,
+            9,
+            10
+          ]
+        },
+        {
+          "reference_job": 649,
+          "candidate_job": 639,
+          "unused_registers": [
+            6,
+            7,
+            8,
+            9,
+            10
+          ]
+        },
+        {
+          "reference_job": 650,
+          "candidate_job": 640,
+          "unused_registers": [
+            6,
+            7,
+            8,
+            9,
+            10
+          ]
+        },
+        {
+          "reference_job": 651,
+          "candidate_job": 641,
+          "unused_registers": [
+            6,
+            7,
+            8,
+            9,
+            10
+          ]
+        }
+      ],
+      "source_cache_fallback_evidence": {
+        "1": {
+          "source_calls": 319,
+          "vertex_success": 319,
+          "last_command_probe": 5,
+          "source_false_return": 5,
+          "source_fallback_block": 5,
+          "command_allocate_path": 274
+        },
+        "2": {
+          "source_calls": 319,
+          "vertex_success": 319,
+          "last_command_probe": 5,
+          "source_false_return": 5,
+          "source_fallback_block": 5,
+          "command_allocate_path": 0
+        }
+      }
+    },
+    "packets_still_queued_after_raw_owner_released": 316,
+    "overlap": {
+      "1": {
+        "cycles": 4308244,
+        "raw_active_cycles": 200924,
+        "raster_active_cycles": 1439153,
+        "raw_with_raster": 80035,
+        "cull_FMA_with_raster": 21459,
+        "CPU_retire_with_raw_and_raster": 18791,
+        "raw_with_older_queued_packet": 177887,
+        "raw_owner_with_older_queued_packet": 1062463,
+        "private_copy_words": 12834,
+        "queued_consume_words": 12834,
+        "arm_pending_cycles": 588746
+      },
+      "2": {
+        "cycles": 4570541,
+        "raw_active_cycles": 201050,
+        "raster_active_cycles": 1467405,
+        "raw_with_raster": 87662,
+        "cull_FMA_with_raster": 22667,
+        "CPU_retire_with_raw_and_raster": 20062,
+        "raw_with_older_queued_packet": 181445,
+        "raw_owner_with_older_queued_packet": 1363922,
+        "private_copy_words": 12874,
+        "queued_consume_words": 12874,
+        "arm_pending_cycles": 621220
+      }
+    },
+    "overlap_scope": "Actual simultaneous RTL activity, not a prediction of removable cycles or sustained hardware FPS."
+  },
+  "status": "PASS_MTF2_SAME_ELF_FULL_NATIVE_FUNCTIONAL_AND_ORDERED_SEMANTICS",
+  "fixture": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/fixture-v3",
+  "fixture_manifest_sha256": "0afaab1793738d54deac80ce78b9b89373827eb0c7a970bd41dd8318a42efcbc",
+  "evidence_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/input.cfg": "9afc5de3a0b86621ed53d4f3ffd21b776cef9c8c6749dae3329b4d3edf8b437d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/run.log": "8304f2ac21fe952479c8eb7e2ea829a273be9445dab6f48a60c03fa5a417e608",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/prepared-mesh.json": "6e8d7102d74629c13ccbb5aa2968e5ad55027a53cb641dcd64f30ab0fcb4ec7e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/prepared-memory.json": "988584d6e2773075e4091f4f735baa4b1db35ea64fc2d87d042692c55345236c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/prepared-front.json": "7e5e8fe6899c326e6685f7ac2524aa16f671fcb7f11886163dc0773d345bade1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/commands.bin": "d1ad7712144194c1002431d2d21fe2475da8538f03b09ca5442a12d66be2a8e5",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/mmio.tsv": "c3d7a4f3940d29d0be9cf15cfc66a886a0eb3f60aa3c8f8f8f1c5b75d4a60c35",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/result.json": "221acff53d8efbda3713e4a9f643e6fa6f919585db91d2b0ce603567c5f95014",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/pc.csv": "7ee9e7d29db0d1a3eb53b107ffce588fc7ae46c8970f85d7a69ea3f3cbfee6f8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/mesh-events.tsv": "f7ba2b5eeb0b11885cb2271da8265f835da8e5eb7a050bc95347f3693ec647a0",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/worker-commands.bin": "35ef4a4ae4f504d9a0a76e6f06342d9f42de75f7b33df8c26813468eeb895a82",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/worker-words.tsv": "eb26831081610bbec9b9bf123144889f9ff465f496016d4197c9a3ea82679873",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/mesh-copy-words.tsv": "6aed9d0a0f7a05b3c28f20e9ee413e86b06544931a585532f55873bbc4735889",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/boundaries.tsv": "2ebc9aee78bdef19c8c3c127b1b3988333349a8bf12bd200222d23182245e441",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/entry-regs.bin": "2d4853947186a13dfca7dc6ea8d6cadcfa23b635ebdbf4a0605720add6b63fe4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/entry-2.bin": "ad3197cdcadca52d4ab3153f366438e77b6c34bb89ef50caded621e7d6c94071",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/frame-1.bin": "b7a2e67c63ec5f1ce5f787bedad2fff8743d2c7a1edadaf9bcb8d274fe3ac5bc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/frame-1-buffer0.bin": "b7a2e67c63ec5f1ce5f787bedad2fff8743d2c7a1edadaf9bcb8d274fe3ac5bc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/frame-1-buffer1.bin": "5087dc62a353e03130310ca0925575785854d33dc6233b6dfb158ba0c07bfeb4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/frame-1-buffer2.bin": "1a74bac257b8449c58783ab93cc39ec07d83ba9ff9289e19d1bc49310b58fe4a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/entry-3.bin": "414a4828974f74e0813707c2a64ea40484fced9d74aad2edfbc805b5e6283270",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/frame-2.bin": "a42df17ef68b61162980c48170bf3a307ce909b7d1c1ba265f1b3a1b2b1bb8eb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/frame-2-buffer0.bin": "0fc3c70f9d86c5f4a655efa383ca56a2258c619a6ec004e8f80d684e476d210e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/frame-2-buffer1.bin": "2e0673ab3ba1900e839cfd476ef19e330e4f653b6d21be38fe74ebe7b5c9125e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/frame-2-buffer2.bin": "a42df17ef68b61162980c48170bf3a307ce909b7d1c1ba265f1b3a1b2b1bb8eb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/surface-arena.bin": "7905a30c1d68a51e8a23e1d8106df009a1f16be7d1f7bc70001517e35af62845",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/surface-arena.physical.bin": "7905a30c1d68a51e8a23e1d8106df009a1f16be7d1f7bc70001517e35af62845",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/surface-arena.json": "fe5e9724bb828dce7dd4e4364f57765ca749ce0c21029670b89532c5030b0fe2",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/import-stats.bin": "f1c19314208ec565b4e50664b650fc0d256b4eb5a177acdccefc78bef7543a6c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/import-stats.physical.bin": "f1c19314208ec565b4e50664b650fc0d256b4eb5a177acdccefc78bef7543a6c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/import-stats.json": "6a739650a7eaa84eea54f7b825c904318bf1d457fdcc67eff79e3d2242dff0bf",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/front-stats.bin": "f366f82b0177478c240783195f72602e8b14b8f4f683508ef88b05682d8ed539",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/front-stats.physical.bin": "f366f82b0177478c240783195f72602e8b14b8f4f683508ef88b05682d8ed539",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/front-stats.json": "ee19df878011ffe2529a1d03a17e76f2692fd84667abe4891ac9d1c6e78141e7",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/mesh-stats.bin": "ee8af7f2c4807765c9c524bdd2a7a0d4d2974b44abc7ce5641e1bf68e389cb5a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/mesh-stats.physical.bin": "ee8af7f2c4807765c9c524bdd2a7a0d4d2974b44abc7ce5641e1bf68e389cb5a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/mesh-stats.json": "8eaf56edf3847d80278b143c833136e4969c84b180aefc1efe563aa8581f26ac",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/frame.bin": "0fc3c70f9d86c5f4a655efa383ca56a2258c619a6ec004e8f80d684e476d210e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/stalls.json": "1e71c7e8fb0931533fe242e37ac62b7ec820374e612eb955a037a32bb772f36b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/stalls-pcs.csv": "85844ce4caa92a0e51ed5084361862de566c814f4568c4f04da0d4e23983d62b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/stalls-pages.csv": "cf7c9abfe3cfa443c56c64796f07fa3324420e24558f314a316910223c89b88c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/first-word.json": "078fea42b0842c324b67d412b482cdb83fdb55267d4ec0cf031a0d6782e30c81",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/gpu-profile.json": "afecd2b13f04c93bbbf2c83851f8842e917f1874e72c07bb0cd8010c80259e2d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/gpu-profile-timeline.csv": "226311d06b8fdb24b1564f15e03e996c736792e366c3a25385701b99d213b29d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/gpu-profile-events.csv": "b23dfa00aba62f4668d08210d2af5aa515111c1e8074b043053a69a32cb4489e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/pc-phase-1.csv": "cf8a3256fce337423911098911432b18a66d75e6b868588791f84855f82e4acf",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/pc-phase-2.csv": "b8552db12ee7755521979d7cc1acfea0bce6ecd8c5bd436b415cf407564a36f2",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/mesh-overlap.tsv": "45599866ec2fb777f890563b824a307dcabebff66a8e7db3f5e7a62ed68d09e9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/process.json": "4fbadbc77cf385a8d87109fdb4c5a4a64faa8f2d1e23c3806c2832b29a1bdb2c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/run/manifest.json": "920cbf7c28845f402faca8341f31fe744c1f7dc4de2d9a612d387f1b0443f38a"
+  },
+  "checker_sources_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/check_replays_v2.py": "272d35b1412a299845d1d43e6f79c3009cde14f356f8c23c226c901865ca6177",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/check_replays.py": "0b136a3a7d377af3e1268975d33995380fba9a5e275dbfdc2cd8e01497f70ba3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/tests/check_replays.py": "4dbf49fc2ccf0a416b21eadf4978dd93a1bd731a316e7e30c44b7caa140c92f9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/gpu-bottleneck-v1/review/check_runs.py": "cc73ef3582f0c4594162e3635bbb6704089ad5879f2c36441b8de04a5cef9793",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/mesh3_lifetime_appv3_v2.py": "5bd058244032c76e5a1425a0fa67ebdaaf0c5508fa620ef0fc8a977324dc3a5d"
+  },
+  "normalization": "Only known framebuffer bases/flip indices, the one prepared zero-clear, known s5 timestamp at later frame entries and redundant sticky material/vertex preparation. Every actual indexed draw resolves exact vertex payload and material/object state; other side effects retain exact order. Registers/FCSR otherwise remain strict.",
+  "limitations": [
+    "Two prepared, GPU-drained full game/render/audio intervals on actual native CPU and raster RTL.",
+    "Fixed synthetic display/audio arrivals and bounded service implementations; not sustained Pocket FPS or full OS/PCM/interrupt qualification.",
+    "No ideal producer, instruction-cost subtraction or assumed overlap is credited as a frame-time gain.",
+    "Physical area, timing and hardware behavior require separate qualification after measured benefit."
+  ]
+}

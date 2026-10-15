@@ -1,0 +1,131 @@
+{
+  "candidate_sha256": "e0f4ffbd20f2a20ab416543a0e9d830d7ec6b4d8d55df094479428b67f933fbb",
+  "reference_module_sha256": "80f2e11d90d9e8a223f2128e13b335aa404bd9213e981ed3ade08ceeafca1143",
+  "source_manifest": {
+    "baseline": "/home/alberto/Repos/openfpgaCore/tools/experiments/quake2_gpu_draws_20261013/core/worker-tests/gpu_geometry_worker.v",
+    "baseline_sha256": "164d5ce2eeeb478eb7504660b8a4afef4d8f6a16cf75372ba5eff26917305892",
+    "fixture_sources": {
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-gpu-draws-20261013/worker-descriptor-tests/geometry_worker_tb.v": "a75ab55b255cb9b4324ac85f7a95f1026f66aebe5d1c3b854376977a1b8fcaec",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-gpu-draws-20261013/worker-descriptor-tests/geometry_worker.cpp": "b2da77e3749e8568c8c3cbb77102161b4ccaa9b0aec1b1de1091b4423d73f569"
+    },
+    "generated": {
+      "geometry_worker_tb.v": "cebfda5c40ec7bb684810d754478368bad70739e84a565ac8703e633cb61a1ed",
+      "gpu_geometry_worker_reference.v": "80f2e11d90d9e8a223f2128e13b335aa404bd9213e981ed3ade08ceeafca1143",
+      "geometry_worker.cpp": "bcfa7d6991bb5063b1e5b2f05e01f96cee1842a172aa04b2b5e50d538b7bee7f"
+    },
+    "fixture_revision_note": "v1 arithmetic reference incorrectly expected output from native descriptors with nearclip <= 0. Native ABI rejects these jobs. v2 models rejection; old/new lockstep itself had not diverged."
+  },
+  "version": "Verilator 5.052 2026-09-05 rev v5.052",
+  "configurations": {
+    "native1-particles1": {
+      "command": [
+        "verilator",
+        "--cc",
+        "--exe",
+        "--build",
+        "-j",
+        "2",
+        "-Wno-fatal",
+        "--top-module",
+        "geometry_worker_tb",
+        "--Mdir",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/lockstep-gates/native1-particles1/obj",
+        "+define+TEST_NATIVE=1",
+        "+define+TEST_PARTICLES=1",
+        "-CFLAGS",
+        "-DTEST_NATIVE=1 -DTEST_PARTICLES=1",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/lockstep-fixtures-v2/geometry_worker_tb.v",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/gpu_geometry_worker.v",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/lockstep-fixtures-v2/gpu_geometry_worker_reference.v",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/lockstep-fixtures-v2/geometry_worker.cpp"
+      ],
+      "native": true,
+      "particles": true,
+      "result": "PASS particles640 mixed jobs, 520456 exact output words, six malformed contexts, RNE/bbox/alpha/cull and preserved native context (5401144 cycles)\nPASS particle invalid record8/overflow1: no indexed triangle or hang\nPASS particle reset18 at divide/emit/alpha/basis/space/triangle; stale context rejects; fresh rebind recovers\nPASS descriptor width: rejected108 high/alignment bits, immediate valid recovery, accepted10 count/address/end boundaries (859703 cycles)\nPASS malformed19, reset12 (request-held/before-data/mid/last; soft/ring/media), postreset reuse\nPASS: 1920 mixed vertex batches, 7680 winding tests, 199032 exact output words, wrap/backpressure/enable/reset (3958603 cycles)\nNative jobs120, meshlets240, burst reads25902, returnedbeats207216, beatswhilepaused23117\nPASS signed near-plane boundaries: 11 planes, 641 explicit legacy vertices, 134346 cycles\nPASS cycle lockstep 10722773 cycles, busy-publication 121421; divides raw=20574 clip=872 native=10897 particle=21526\n",
+      "passed": true
+    },
+    "native1-particles0": {
+      "command": [
+        "verilator",
+        "--cc",
+        "--exe",
+        "--build",
+        "-j",
+        "2",
+        "-Wno-fatal",
+        "--top-module",
+        "geometry_worker_tb",
+        "--Mdir",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/lockstep-gates/native1-particles0/obj",
+        "+define+TEST_NATIVE=1",
+        "+define+TEST_PARTICLES=0",
+        "-CFLAGS",
+        "-DTEST_NATIVE=1 -DTEST_PARTICLES=0",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/lockstep-fixtures-v2/geometry_worker_tb.v",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/gpu_geometry_worker.v",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/lockstep-fixtures-v2/gpu_geometry_worker_reference.v",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/lockstep-fixtures-v2/geometry_worker.cpp"
+      ],
+      "native": true,
+      "particles": false,
+      "result": "PASS descriptor width: rejected108 high/alignment bits, immediate valid recovery, accepted10 count/address/end boundaries (814225 cycles)\nPASS malformed19, reset12 (request-held/before-data/mid/last; soft/ring/media), postreset reuse\nPASS: 1920 mixed vertex batches, 7680 winding tests, 202484 exact output words, wrap/backpressure/enable/reset (4033870 cycles)\nNative jobs120, meshlets240, burst reads19283, returnedbeats154264, beatswhilepaused17389\nPASS signed near-plane boundaries: 11 planes, 641 explicit legacy vertices, 122832 cycles\nPASS cycle lockstep 5064373 cycles, busy-publication 75978; divides raw=20674 clip=872 native=8071 particle=0\n",
+      "passed": true
+    },
+    "native0-particles1": {
+      "command": [
+        "verilator",
+        "--cc",
+        "--exe",
+        "--build",
+        "-j",
+        "2",
+        "-Wno-fatal",
+        "--top-module",
+        "geometry_worker_tb",
+        "--Mdir",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/lockstep-gates/native0-particles1/obj",
+        "+define+TEST_NATIVE=0",
+        "+define+TEST_PARTICLES=1",
+        "-CFLAGS",
+        "-DTEST_NATIVE=0 -DTEST_PARTICLES=1",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/lockstep-fixtures-v2/geometry_worker_tb.v",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/gpu_geometry_worker.v",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/lockstep-fixtures-v2/gpu_geometry_worker_reference.v",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/lockstep-fixtures-v2/geometry_worker.cpp"
+      ],
+      "native": false,
+      "particles": true,
+      "result": "PASS particles640 mixed jobs, 490418 exact output words, six malformed contexts, RNE/bbox/alpha/cull and preserved native context (4746698 cycles)\nPASS particle invalid record8/overflow1: no indexed triangle or hang\nPASS particle reset18 at divide/emit/alpha/basis/space/triangle; stale context rejects; fresh rebind recovers\nPASS: 1920 mixed vertex batches, 7680 winding tests, 162828 exact output words, wrap/backpressure/enable/reset (3071991 cycles)\nPASS signed near-plane boundaries: 11 planes, 641 explicit legacy vertices, 89109 cycles\nPASS cycle lockstep 8188415 cycles, busy-publication 103477; divides raw=20533 clip=872 native=0 particle=21366\n",
+      "passed": true
+    },
+    "native0-particles0": {
+      "command": [
+        "verilator",
+        "--cc",
+        "--exe",
+        "--build",
+        "-j",
+        "2",
+        "-Wno-fatal",
+        "--top-module",
+        "geometry_worker_tb",
+        "--Mdir",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/lockstep-gates/native0-particles0/obj",
+        "+define+TEST_NATIVE=0",
+        "+define+TEST_PARTICLES=0",
+        "-CFLAGS",
+        "-DTEST_NATIVE=0 -DTEST_PARTICLES=0",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/lockstep-fixtures-v2/geometry_worker_tb.v",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/gpu_geometry_worker.v",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/lockstep-fixtures-v2/gpu_geometry_worker_reference.v",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/lockstep-fixtures-v2/geometry_worker.cpp"
+      ],
+      "native": false,
+      "particles": false,
+      "result": "PASS: 1920 mixed vertex batches, 7680 winding tests, 163988 exact output words, wrap/backpressure/enable/reset (3099045 cycles)\nPASS signed near-plane boundaries: 11 planes, 641 explicit legacy vertices, 88837 cycles\nPASS cycle lockstep 3188181 cycles, busy-publication 60835; divides raw=20701 clip=872 native=0 particle=0\n",
+      "passed": true
+    }
+  },
+  "scope": "Cycle-by-cycle external ports, command input addresses, busy/state/mode, published output and divider threshold; independent arithmetic reference and signed near-plane boundaries under asynchronous publication, enable/output stalls, resets. All four feature combinations.",
+  "passed": true
+}

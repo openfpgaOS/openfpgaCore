@@ -1,0 +1,15 @@
+AJ02 application and snapshot review — final v2
+
+The CPU ownership bottleneck was substantially removed, but this candidate should not be fitted or deployed. Keep the current production best.
+
+With the same F23 ELF, detached converted snapshots reduce warm legacy lease waiting from 204,231 to 8,372 cycles (95.90%). The warm full-frame interval improves from 4,794,375 to 4,657,010 cycles, a 137,365 cycle reduction. This isolates the hardware handoff change; the wait reduction itself is not an additional frame-time saving.
+
+The final F24 app plus snapshot core takes 4,619,218 /4,591,166 cycles against 4,186,769 /4,536,880 for its same-ELF capability-off control. It is 54,286 cycles (1.20%) slower warm and486,735 cycles (5.58%) slower across both intervals. Against the prior qualified implementation the combined regression is 10.33%. Strict functional, draw, state and ownership checks pass.
+
+Warm raw acquisition waiting is now9,805 cycles. Remaining added function-attributed gaps include admission 65,105, lookup 49,530, acquire 40,844, job construction 33,488 and service 25,105 cycles. These include the gaps preceding retirement; they are not exclusive removable execution time. The warm candidate already retires fewer instructions than control (2,114,706 versus 2,204,840), but elapsed time is worse.
+
+Output-full spans 1,143,120 warm cycles, of which1,033,860 overlap GPU fragment activity. More buffering is not established as a remedy, and these overlapping counters must not be added or subtracted to predict savings. The first interval also retains repair and cold setup costs.
+
+The next architectural hypothesis, if pursued separately, should amortize CPU admission, source resolution, context emission and ownership transitions across broader immutable compatible batches. First measure actual span/state compatibility and fallback boundaries; retain exact clipping, draw order, partial-slot canonical/fog lifetime, true source-consumer fences and reset/credit rules. A fresh same-ELF full native comparison must demonstrate a net gain before physical fit. No gain is predicted here.
+
+This is evidence from two prepared GPU-drained game/render/audio replay intervals, not sustained Pocket FPS. No new variant, test run, physical fit or deployment was performed for this review. Exact input hashes and attribution values are recorded in app-review-v2.json.

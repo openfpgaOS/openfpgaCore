@@ -1,0 +1,15 @@
+{
+  "passed": true,
+  "checks": {
+    "inventory, archive, executed worker/replay and source-to-artifact pins": true,
+    "fresh stage matches all127 pre-fit pins": true,
+    "existing stage refused": true,
+    "staged source tamper rejected": true,
+    "extra staged file rejected": true,
+    "portable recipe derives exact127 inputs and same five tool phases, Quartus mocked": true,
+    "strict all-corner failure retained with assembled artifact, Quartus mocked": true,
+    "raw-to-reversed bitstream conversion matches recorded artifact": true,
+    "unsafe source member names rejected": true
+  },
+  "physical_fit_reexecuted": false
+}

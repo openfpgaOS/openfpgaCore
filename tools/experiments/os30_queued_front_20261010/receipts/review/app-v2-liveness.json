@@ -1,0 +1,32 @@
+{
+  "status": "PASS_FROZEN_APP_V2_POLLING_LIVENESS_REVIEW",
+  "changes_exactly": [
+    "Service queued repair at gfx_run_dl entry instead of every decoded command.",
+    "Service during ordinary raw LOAD wait on the first busy observation and every16 busy polls thereafter."
+  ],
+  "unchanged_repair_and_sdk_sources": true,
+  "liveness_reasoning": [
+    "Worker drops shared FMA ownership before REPAIR, so delayed repair service cannot block arithmetic completion of the raw LOAD whose polling is throttled.",
+    "Raw timeout-drain/startup/busy-recovery loops still service each iteration.",
+    "Ring-space/DMA-descriptor/fence/translucency waits retain OF_GPU_WAIT_HOOK. Queue acquire, next display-list entry and frame end retain their explicit service points.",
+    "Independent fast-memory uploader polling does not depend on worker repair completion; it may defer repair service but cannot form that circular dependency.",
+    "Queue/snapshot pressure can force canonical fallback; ordered GPU stream and immutable repair operands are unchanged."
+  ],
+  "bounds": "During ordinary long raw waits, repair is checked at most16 busy polls apart. Moving DL polling to entry does not establish a hard wall-time repair latency bound between other service points.",
+  "limits": [
+    "This is a static liveness review, not a performance or sustained-hardware claim.",
+    "No repeated arithmetic/lazy tests needed because their actual function bodies and backend/SDK remain identical; final same-ELF replay remains required."
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "d3d0a0e3163be954f6086cf509620d18e750e152481df10a6e9e921cc1352cde",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64-v2/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "49a72cfd370563bb3c283a72d35a4d32007905565778259d8cad060e87fbd503",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64/src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "c8daac5bb1442fcb93310d2e7a01f307b9b1ac612d717ef253e412024174cf05",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64-v2/src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "c8daac5bb1442fcb93310d2e7a01f307b9b1ac612d717ef253e412024174cf05",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64/src/sdk/include/of_gpu.h": "7e4b105e444b7307b36010da87749eff445650b6983283eeab9223e6af3dc01d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64-v2/src/sdk/include/of_gpu.h": "7e4b105e444b7307b36010da87749eff445650b6983283eeab9223e6af3dc01d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64-v2/.obj/sm64-queued-front-v2-perfdiag/app.elf": "8375372557d3b62d12ae78f290f800bffe3fdf6d40605b8af2ebdebcda80ec8c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/model/frozen/src/fpga/common/gpu_queued_front.v": "ac978376a246b6860a4891fd23c9f4405ccb2e37362d0aa88091a29187b09dc6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/worker-v4/manifest.json": "bd7b9b8919db56eee85514a5bfdcdb3602104796ed7b1904995b534c38c59ec3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/repair-cpu-v1/manifest.json": "c7ec8ef7ef55a5555468d330be850d2078cf3b2fc6a65861e58c105b3c010ccf"
+  }
+}

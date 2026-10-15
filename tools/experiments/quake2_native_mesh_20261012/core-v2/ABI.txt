@@ -1,0 +1,43 @@
+Quake2 native MD2 mesh experiment, version 1
+
+Capability GPU_STATUS bit 12; GPU command 0x600000a4 (164 payload words).
+All addresses are aligned physical CRAM1 byte offsets, below 0x01000000.
+Only fully contained opaque nonshell MD2 draws are eligible initially.
+
+Payload:
+0 old frame base; 1 current frame base; 2 mesh stream base;
+3 meshlet count (1..4096); 4 cull flags (0,1,2);
+5 native source vertex count (1..4096); 6 mesh stream end (exclusive).
+7..30 three rows of eight signed words:
+  oldXYZ coefficients Q24, currentXYZ coefficients Q24, offset Q8, zero.
+31 xc; 32 yc; 33 xs; 34 ys; 35 nearclip (existing worker convention).
+36..163 normal lighting palette, two RGB565 entries per word, low first.
+
+Native frame word is MD2 little-endian bytes X,Y,Z,normal-index.
+Per row: clipQ8 = (sum of six byte * signedQ24 products >>16) + offsetQ8.
+Products accumulate modulo48 bits, matching existing worker MAC semantics.
+App must reject coefficients/ranges that cannot preserve the intended result.
+Current-frame normal index selects the draw-owned palette.
+
+Sequential mesh stream:
+ header bits7:0 = vertex count 1..32; bits23:8 = triangle count 1..64;
+ bits31:24 must be zero.
+ vertex entries: source vertex index, S_Q16, T_Q16 (three words each).
+ triangle entries: three five-bit local indices in bits14:0; bits31:15 zero.
+ Job cull flags enter triangle bits16:15 internally.
+Next meshlet immediately follows previous triangle entries.
+Frames and every mesh stream access must be in bounds. Malformed descriptors
+are consumed without issuing unchecked memory accesses. Invalid mesh data
+terminates the descriptor; already emitted primitives cannot be undone.
+
+Immutable uploads must finish before command publication. No referenced asset
+may be overwritten/freed before the ordered GPU fence. Lighting is copied in
+this command and is therefore owned by the draw. Existing sticky surface state
+must be bound before submitting; output remains ordered with legacy commands.
+
+The fetch port has ARVALID/ARREADY, 32-bit byte ARADDR, eight-bit ARLEN and
+RVALID/RDATA/RLAST; no RREADY. Every returned beat is consumed. Requests are
+aligned eight-word bursts into separate stream/old/current cache lines.
+mesh_reset_n is the physical CRAM fabric reset. Client/media soft/ring reset
+must not cancel accepted physical reads: hold an unacknowledged request until
+accepted, drain/discard its response, then resume new work.

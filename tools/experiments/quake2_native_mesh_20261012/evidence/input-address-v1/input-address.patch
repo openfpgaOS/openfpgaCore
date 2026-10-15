@@ -1,0 +1,36 @@
+--- a/src/fpga/common/gpu_geometry_worker.v
++++ b/src/fpga/common/gpu_geometry_worker.v
+@@ -199,12 +199,22 @@
+ wire input_empty = input_rdptr == input_wrptr;
+ wire [ADDR_BITS-1:0] used_words = write_ptr - output_rdptr;
+ wire [ADDR_BITS:0] free_words = (1 << QUEUE_BITS)-1 - {1'b0,used_words};
++// free_words == 0 iff (write_ptr - output_rdptr) mod 2^ADDR_BITS
++// equals capacity-1. Rearrange that full-width equality so the raster read
++// pointer no longer passes through a subtract carry chain before admission.
++// This equivalence holds for every pointer pair, including all wrap values.
++localparam [ADDR_BITS-1:0] OUTPUT_CAPACITY_MINUS_ONE = (1 << QUEUE_BITS)-1;
++wire [ADDR_BITS-1:0] output_full_read_ptr = write_ptr - OUTPUT_CAPACITY_MINUS_ONE;
++wire output_full = output_rdptr == output_full_read_ptr;
+ wire take_input = enable && !input_empty
+     && ((state == HEADER) || (state == LOAD)
+-        || (state == COPY && (mode != PASS || free_words != 0)));
++        || (state == COPY && (mode != PASS || !output_full)));
+ // Look ahead on consumption so the synchronous RAM delivers the next word
+ // on the following cycle. Empty cycles continue refreshing the current head.
+-assign input_addr = input_rdptr + {{(ADDR_BITS-1){1'b0}},take_input};
++// Compute the constant increment independently. The late admission signal
++// selects an address instead of propagating through the increment carry.
++(* keep *) wire [ADDR_BITS-1:0] next_input_rdptr = input_rdptr + 1'b1;
++assign input_addr = take_input ? next_input_rdptr : input_rdptr;
+ assign busy = !input_empty || state != HEADER
+     || (INCLUDE_NATIVE_MESH && native_tx_state != 0);
+ // Explicit finite decode: Quartus implements even an 8-bit "% 5" here as
+@@ -237,7 +247,7 @@
+     emit = 1'b0;
+     if (enable) case (state)
+         SPACE: emit = free_words >= needed && mode == PASS;
+-        COPY: emit = !input_empty && mode == PASS && free_words != 0;
++        COPY: emit = !input_empty && mode == PASS && !output_full;
+         EMIT, TRI_HEADER, TRI_WORD: emit = 1'b1;
+         default: ;
+     endcase

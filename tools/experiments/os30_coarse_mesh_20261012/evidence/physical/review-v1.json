@@ -1,0 +1,27 @@
+{
+  "status": "PREPARED_ONLY_NO_FIT",
+  "bindings": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/physical/prepared-v1/inputs.json": "8ddc7a3714f2dcfa17fc16d0c42f60a727c0735cbc35c50b69224a5397699bf6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/physical/prepare.py": "08ec14c58fc99bfd81dbb14391e62f4a31cf4c0250d5352f09b718c2bdae477c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/physical/assessment-v1.txt": "e292c9a0c6db61bd5adbbc7227baf41d26979d64d1560d0780854f60888f8f85",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/physical/review.py": "1bd0b0711370560b8960fdd9e98626e053498e51c22ba0bdc4acc604807b51f1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/native-v2/prepared.json": "88e3f0a3d76a6c90a7a677e153c2564015dbb810aaa9610a52b472a1499fd5a0",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/timing-qualification.json": "137f97f30f6810187ec93b48a116c2ea202bb2e8c32bd6a43f354f07d64f02dd",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/design/group-abi.md": "a118ce625a8c7cf4ad4dd642d2ea4884f3e24d5e2ce6ffc25282e036e02b51c3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/design/ports.vh": "3ec3f069f6311ec45b221a4a8b68cd1acbaf098c0f273f33a5ec8bad408c4b70"
+  },
+  "source_inventory_count": 367,
+  "native_inventory_count": 181,
+  "changed_inputs": 14,
+  "original_qsf_prefix_unchanged": true,
+  "clocks_constraints_firmware_unchanged": true,
+  "no_database_or_outputs": true,
+  "qualified_baseline_resources": {
+    "Logic utilization (in ALMs)": "18,169 / 18,480 ( 98 % )",
+    "M10K blocks": "304 / 308",
+    "Total DSP Blocks": "45 / 66 ( 68 % )",
+    "Total block memory bits": "2,325,421 / 3,153,920 ( 74 % )"
+  },
+  "qualified_baseline_fmax_mhz": 90.28,
+  "qualified_baseline_worst_setup_ns": 0.033
+}

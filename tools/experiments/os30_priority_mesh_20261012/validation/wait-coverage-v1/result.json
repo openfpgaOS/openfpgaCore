@@ -1,0 +1,107 @@
+{
+  "status": "PASS_SOURCE_BOUND_INDEPENDENT_WAIT_REVIEW",
+  "scope": "AJ02 priority lease software liveness; requires the separately tested RTL forward-progress and shared-context contract. No elapsed-cycle or hardware qualification claim.",
+  "covered_progress_waits": [
+    {
+      "function": "_gpu_wait_dma_idle_debug",
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app/src/sdk/include/of_gpu.h",
+      "line": 583,
+      "progress_hook": "OF_GPU_WAIT_HOOK -> gfx_gpu_wait_service"
+    },
+    {
+      "function": "_gpu_wait_dma_desc_slot_debug",
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app/src/sdk/include/of_gpu.h",
+      "line": 601,
+      "progress_hook": "OF_GPU_WAIT_HOOK -> gfx_gpu_wait_service"
+    },
+    {
+      "function": "_gpu_wait_transluc_idle",
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app/src/sdk/include/of_gpu.h",
+      "line": 622,
+      "progress_hook": "OF_GPU_WAIT_HOOK -> gfx_gpu_wait_service"
+    },
+    {
+      "function": "_gpu_ring_ensure",
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app/src/sdk/include/of_gpu.h",
+      "line": 810,
+      "progress_hook": "OF_GPU_WAIT_HOOK -> gfx_gpu_wait_service"
+    },
+    {
+      "function": "of_gpu_try_reserve_bytes",
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app/src/sdk/include/of_gpu.h",
+      "line": 887,
+      "progress_hook": "OF_GPU_WAIT_HOOK -> gfx_gpu_wait_service"
+    },
+    {
+      "function": "of_gpu_wait",
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app/src/sdk/include/of_gpu.h",
+      "line": 1180,
+      "progress_hook": "OF_GPU_WAIT_HOOK -> gfx_gpu_wait_service"
+    },
+    {
+      "function": "gfx_gpu_wait_service",
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app/src/sm64/sm64/src/pc/gfx/gfx_gpu.c",
+      "line": 386,
+      "progress_hook": "yield canonical rows/release if unfinished queued jobs exist, then service repair"
+    },
+    {
+      "function": "gpu_wait_flip_fence",
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app/src/sm64/sm64/src/pc/gfx/gfx_gpu.c",
+      "line": 2963,
+      "progress_hook": "yield canonical rows/release if unfinished queued jobs exist, then service repair"
+    },
+    {
+      "function": "gfx_gpu_async_drain",
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app/src/sm64/sm64/src/pc/gfx/gfx_gpu.c",
+      "line": 468,
+      "progress_hook": "yield before true completed-sequence source lifetime wait"
+    }
+  ],
+  "independent_progress_exceptions": [
+    {
+      "site": {
+        "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app/src/sdk/include/of_gpu.h",
+        "line": 1338
+      },
+      "reason": "PSRAM fast-upload status waits do not service the mesh hook. A complete upload batch is already buffered; adapter TRANSFER supplies data without CPU or mesh progress. Round-robin arbitration serves pending uploads. Renderer texture reuse first uses the hooked GPU finish. No queued-job or legacy-lease dependency occurs in this bus-only completion wait.",
+      "proof_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-core/frozen/src/fpga/common/psram32_axi_adapter.sv"
+    },
+    {
+      "site": {
+        "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app/src/sm64/sm64/src/pc/gfx/gfx_pc.c",
+        "line": 1452
+      },
+      "reason": "Accepted legacy raw LOAD polling remains repair-only; its reserved engine/PSRAM transaction progresses without an async job. Generic yield inside context-write/START/result-registration is forbidden by load_alias_transaction. Source upload and prior CPU submission happen before acquire."
+    },
+    {
+      "site": {
+        "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app/src/sm64/sm64/src/pc/gfx/gfx_gpu.c",
+        "line": 528
+      },
+      "reason": "Inherited MTF2, QGF1 and BIM2 blocking helpers are capability-inactive on AJ02; the priority legacy branch explicitly skips prior QGF/BIM waits."
+    }
+  ],
+  "ordering_findings": [
+    "Epoch-checked completed_sequence==submitted_sequence permits retaining an idle legacy lease: ordinary commands still forward and no unfinished async job can be blocked.",
+    "Otherwise a progress wait materializes canonical rows without emitting GPU commands, then releases the lease before repair/drain polling. The recursion guard prevents duplicate copy/release during service re-entry.",
+    "First ordinary canonical materialization releases immediately when all lazy slots are copied and unfinished jobs exist; survivor materialization preserves unrelated canonical/fog rows.",
+    "Source pool recycle waits the real completed sequence; an early priority grant is never treated as source completion.",
+    "One 42-word reservation/commit contains full CONTEXT28 then JOB11. No wait can split the context ownership bundle; legacy context is refreshed after fresh acquisition.",
+    "Reset retains only a matching granted ticket/raw bank, invalidates async sequence epoch, and traps on a contradictory legacy ownership record."
+  ],
+  "reviewed_actual_C_tests": {
+    "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app/evidence/priority-tests-v2/result.json",
+    "sha256": "80f7bf7a86b562b9ecf5ac9d57b8b443ba4c3a899d748aed157a4715295523d4",
+    "checks": 273230,
+    "inputs_and_extracted_bodies_independently_rehashed": true,
+    "note": "Existing frozen actual-C ASan/UBSan suite covers masks, partial overwrites, delayed completion, recursion, ownership/reset, priority grant before completion and atomic context packets; not rerun or represented as RTL timing."
+  },
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app/src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "70bd78b5fd138544163e7f990f9d3e29c1605b5b0cad0673f40f2c238398c2ba",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "ce45f09d42b4c148d517d8c7b2df180e2332147c073e558837382d854f355b62",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app/src/sdk/include/of_gpu.h": "7e4b105e444b7307b36010da87749eff445650b6983283eeab9223e6af3dc01d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-core/frozen/src/fpga/common/psram32_axi_adapter.sv": "66547c1b68a83d8912b32ef7a88f1b856ad924e0156305c35c21655c7be1cddc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app/evidence/priority-tests-v2/result.json": "80f7bf7a86b562b9ecf5ac9d57b8b443ba4c3a899d748aed157a4715295523d4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/wait-coverage-v1/review.py": "6e02ccba5cc01d8e559f165a8e48d4b27f3b9dcf1e407f3e239192216b03aa07"
+  }
+}

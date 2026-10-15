@@ -1,0 +1,415 @@
+--- a/src/quake2/openfpga/of_emit_q2.c
++++ b/src/quake2/openfpga/of_emit_q2.c
+@@ -1040,6 +1040,34 @@
+ 	_gpu_ring_commit(words);
+ 	ofq2_pending = true;
+ 	return 1;
++}
++
++int
++OFQ2_DrawGeometryPackets(const ofq2_geometry_packet_t *packets, unsigned count)
++{
++    if (!OFQ2_Supports(OFQ2_CAP_GEOMETRY | OFQ2_CAP_GEOMETRY_WORKER) ||
++        !ofq2_tristate_valid || ofq2_tristate_dirty || !ofq2_objstate_valid ||
++        !packets || !count || count > OFQ2_GEOMETRY_BATCH_PACKETS)
++        return 0;
++    unsigned words = 0;
++    for (unsigned i = 0; i < count; i++)
++    {
++        unsigned n = packets[i].count;
++        if (!packets[i].words || n < 3 || n > 32) return 0;
++        words += 7u * n - 3u;
++    }
++    if (words > OFQ2_GEOMETRY_BATCH_WORDS) return 0;
++    _gpu_stream_reserve_words(words);
++    uint32_t *w = _gpu_ring_claim();
++    for (unsigned i = 0; i < count; i++)
++    {
++        unsigned n = 7u * packets[i].count - 3u;
++        memcpy(w, packets[i].words, n * sizeof(*w));
++        w += n;
++    }
++    _gpu_ring_commit(words);
++    ofq2_pending = true;
++    return 1;
+ }
+ 
+ int
+--- a/src/quake2/openfpga/of_emit_q2.h
++++ b/src/quake2/openfpga/of_emit_q2.h
+@@ -162,6 +162,16 @@
+  * Large upload packets require the separately advertised worker capability;
+  * inline geometry cores retain their three-vertex packet limit. */
+ int OFQ2_DrawGeometryFan(const uint32_t *vertices, unsigned count, unsigned cull);
++/* Cached complete worker packets; contents remain caller-owned only until this
++ * synchronous staging copy returns. Bounded groups retain normal SDK flushing. */
++#define OFQ2_GEOMETRY_BATCH_WORDS 512u
++#define OFQ2_GEOMETRY_BATCH_PACKETS 32u
++typedef struct {
++    const uint32_t *words;
++    unsigned count;
++} ofq2_geometry_packet_t;
++int OFQ2_DrawGeometryPackets(const ofq2_geometry_packet_t *packets, unsigned count);
++
+ /* Eight words per changed slot: slot, clip X/Y/W, S/T, RGB565, depth.
+  * The packed index word includes the two hardware winding-rejection bits. */
+ int OFQ2_DrawClipIndexed(const uint32_t *vertices, unsigned count, uint32_t triangle);
+--- a/src/quake2/openfpga/of_gl1.c
++++ b/src/quake2/openfpga/of_gl1.c
+@@ -2130,6 +2130,10 @@
+ 	int count, raw_ok, tex_w, tex_h, lm_block;
+ 	uint32_t light_version;
+ 	uint16_t light_index[OFGL_WORLD_VERTS];
++    unsigned packet_cull;
++    /* Keep the upload header directly adjacent to the existing vertex words.
++     * The cached fan commands follow the vertices in the same hunk allocation. */
++    uint32_t upload_header;
+ 	uint32_t words[];
+ };
+ 
+@@ -2137,7 +2141,7 @@
+ OFGL_WorldPolyBytes(int count)
+ {
+ 	return count >= 3 && count <= OFGL_WORLD_VERTS ?
+-		sizeof(ofgl_world_poly_t) + count * 5 * sizeof(uint32_t) : 0;
++		sizeof(ofgl_world_poly_t) + (7 * count - 4) * sizeof(uint32_t) : 0;
+ }
+ 
+ ofgl_world_poly_t *
+@@ -2151,6 +2155,12 @@
+ 	p->count = count;
+ 	p->raw_ok = 1;
+ 	p->lm_block = -2;
++    p->upload_header = 0x59000000u | (5u * count);
++    for (int i = 1; i + 1 < count; i++)
++    {
++        p->words[5 * count + 2 * (i - 1)] = 0x5b000001u;
++        p->words[5 * count + 2 * (i - 1) + 1] = (i << 5) | ((i + 1) << 10);
++    }
+ 	float lo[3] = {verts[0], verts[1], verts[2]};
+ 	float hi[3] = {verts[0], verts[1], verts[2]};
+ 	for (int i = 0; i < count; i++)
+@@ -2512,6 +2522,43 @@
+ 	return span * span * max_z <= 262144.0f * min_z;
+ }
+ 
++/* Fallback keeps exactly the existing projected/clip convention and order. */
++static void
++ofgl_world_cpu(ofgl_world_poly_t *p, int inside, float tw, float th)
++{
++	ofgl_va_vertex.ptr = (const uint8_t *)p->verts;
++	ofgl_va_vertex.size = 3; ofgl_va_vertex.stride = 7 * sizeof(float);
++	ofgl_cvert_t verts[OFGL_WORLD_VERTS];
++	for (int i = 0; i < p->count; i++)
++	{
++		const float *v = ofgl_fetch_position(i, &verts[i]);
++		if (ofgl_batch_world) ofgl_world_project_original(v, &verts[i]);
++		/* The inflated surface bounds already prove every vertex lies
++		 * inside all clip planes. Reuse that result on CPU-only cores. */
++		if (inside) verts[i].clipcode = verts[i].viewcode = 0;
++		else ofgl_classify_cvert(&verts[i]);
++		verts[i].s = p->verts[i * 7 + 3] * tw;
++		verts[i].t = p->verts[i * 7 + 4] * th;
++		verts[i].rgb = p->words[i * 5 + 2] >> 16;
++		verts[i].a = (ofgl_lm_active ||
++		(ofgl_tex2d_enabled && ofgl_texenv_mode(0) == GL_REPLACE)) ? 255 :
++		(uint8_t)(ofgl_cur_color[3] * 255.0f + 0.5f);
++		verts[i].attrs_valid = 1;
++	}
++	for (int i = 1; i + 1 < p->count; i++)
++		ofgl_cached_tri(0, i, i + 1, &verts[0], &verts[i], &verts[i + 1], tw, th);
++}
++
++static void
++ofgl_world_packets(ofgl_world_poly_t *const *polys,
++    const ofq2_geometry_packet_t *packets, unsigned count, float tw, float th)
++{
++    if (!count || OFQ2_DrawGeometryPackets(packets, count)) return;
++    /* A refused batch emits no words. Its admitted bounds prove inside=1;
++     * replay each polygon through the unchanged CPU fallback in order. */
++    for (unsigned i = 0; i < count; i++) ofgl_world_cpu(polys[i], 1, tw, th);
++}
++
+ void
+ OFGL_DrawWorldPolys(ofgl_world_poly_t *const *polys, int count)
+ {
+@@ -2526,6 +2573,10 @@
+ 	unsigned cull = ofgl_cull_on ?
+ 		((ofgl_cull_face == GL_FRONT) == (ofgl_front_face == GL_CCW) ? 1u : 2u) : 0u;
+ 	ofgl_array_t saved = ofgl_va_vertex;
++    int worker = OFQ2_Supports(OFQ2_CAP_GEOMETRY_WORKER);
++    ofgl_world_poly_t *pending[OFQ2_GEOMETRY_BATCH_PACKETS];
++    ofq2_geometry_packet_t packets[OFQ2_GEOMETRY_BATCH_PACKETS];
++    unsigned queued = 0, queued_words = 0;
+ 	for (int n = 0; n < count; n++)
+ 	{
+ 		ofgl_world_poly_t *p = polys[n];
+@@ -2540,36 +2591,44 @@
+ 			min_z >= p->max_st / 32.0f &&
+ 			ofgl_world_precision(p->max_st, min_z, max_z) &&
+ 			(ofgl_geometry_state_ready || OFQ2_SetObjectState(&ofgl_world_object)) &&
+-			OFQ2_DrawGeometryFan(p->words, p->count, cull))
++			(worker || OFQ2_DrawGeometryFan(p->words, p->count, cull)))
+ 		{
+ 			/* Matrix state survives both fan and CPU triangle commands.
+ 			 * All surfaces in this batch share it; compare/arm only once. */
+ 			ofgl_geometry_state_ready = 1;
++            if (worker)
++            {
++                unsigned words = 7u * p->count - 3u;
++                if (queued == OFQ2_GEOMETRY_BATCH_PACKETS ||
++                    queued_words + words > OFQ2_GEOMETRY_BATCH_WORDS)
++                {
++                    ofgl_world_packets(pending, packets, queued, tw, th);
++                    queued = queued_words = 0;
++                }
++                if (p->packet_cull != cull)
++                {
++                    for (int i = 1; i + 1 < p->count; i++)
++                        p->words[5 * p->count + 2 * (i - 1) + 1] =
++                            (i << 5) | ((i + 1) << 10) | (cull << 15);
++                    p->packet_cull = cull;
++                }
++                pending[queued] = p;
++                packets[queued].words = &p->upload_header;
++                packets[queued].count = p->count;
++                queued++;
++                queued_words += words;
++                /* Material, cull and matrix state cannot change within this
++                 * draw. Duplicate polygon pointers therefore remain identical
++                 * until the synchronous staging copy; fallback flushes first. */
++            }
+ 			continue;
+ 		}
+ 
+-		ofgl_va_vertex.ptr = (const uint8_t *)p->verts;
+-		ofgl_va_vertex.size = 3; ofgl_va_vertex.stride = 7 * sizeof(float);
+-		ofgl_cvert_t verts[OFGL_WORLD_VERTS];
+-		for (int i = 0; i < p->count; i++)
+-		{
+-			const float *v = ofgl_fetch_position(i, &verts[i]);
+-			if (ofgl_batch_world) ofgl_world_project_original(v, &verts[i]);
+-			/* The inflated surface bounds already prove every vertex lies
+-			 * inside all clip planes. Reuse that result on CPU-only cores. */
+-			if (inside) verts[i].clipcode = verts[i].viewcode = 0;
+-			else ofgl_classify_cvert(&verts[i]);
+-			verts[i].s = p->verts[i * 7 + 3] * tw;
+-			verts[i].t = p->verts[i * 7 + 4] * th;
+-			verts[i].rgb = p->words[i * 5 + 2] >> 16;
+-			verts[i].a = (ofgl_lm_active ||
+-				(ofgl_tex2d_enabled && ofgl_texenv_mode(0) == GL_REPLACE)) ? 255 :
+-				(uint8_t)(ofgl_cur_color[3] * 255.0f + 0.5f);
+-			verts[i].attrs_valid = 1;
+-		}
+-		for (int i = 1; i + 1 < p->count; i++)
+-			ofgl_cached_tri(0, i, i + 1, &verts[0], &verts[i], &verts[i + 1], tw, th);
+-	}
++		ofgl_world_packets(pending, packets, queued, tw, th);
++        queued = queued_words = 0;
++        ofgl_world_cpu(p, inside, tw, th);
++	}
++    ofgl_world_packets(pending, packets, queued, tw, th);
+ 	ofgl_va_vertex = saved;
+ 	ofgl_end3d();
+ }
+--- a/tools/check_quake2_geometry.py
++++ b/tools/check_quake2_geometry.py
+@@ -12,7 +12,7 @@
+     work = Path(temp)
+     texture_names = ['ofq2_texture_route_sdram', 'OFQ2_Init', 'OFQ2_TexInit',
+                      'OFQ2_TexReset', 'OFQ2_TexCreate', 'OFQ2_TexBindDomain', 'OFQ2_Shutdown']
+-    geometry_names = ['OFQ2_Supports', 'OFQ2_DrawGeometryFan', 'OFQ2_DrawClipIndexed']
++    geometry_names = ['OFQ2_Supports', 'OFQ2_DrawGeometryFan', 'OFQ2_DrawGeometryPackets', 'OFQ2_DrawClipIndexed']
+     for name, functions in [('texture', texture_names), ('geometry', geometry_names)]:
+         (work / ('extracted_' + name + '_functions.inc')).write_text(
+             '\n'.join(function(source, name) for name in functions))
+--- a/tools/check_quake2_renderer.py
++++ b/tools/check_quake2_renderer.py
+@@ -21,6 +21,7 @@
+     for name, extra in (
+         ("renderer", []),
+         ("worldgeometry", []),
++        ("worldpackets", []),
+         ("aliascache", []),
+         ("aliasmesh", [str(GAME / "src/common/shared/shared.c")]),
+         ("light", []),
+--- a/tools/tests/quake2_geometry_test.c
++++ b/tools/tests/quake2_geometry_test.c
+@@ -97,6 +97,53 @@
+     assert(!reservations && !commits && !ofq2_pending);
+ }
+ 
++static void test_cached_packet_batches(void)
++{
++    uint32_t vertices[160], packet[221];
++    for (unsigned i = 0; i < 160; i++) vertices[i] = 0x91230000u + 37u * i;
++    ofq2_ready = ofq2_tristate_valid = ofq2_objstate_valid = true;
++    ofq2_tristate_dirty = false;
++    ofq2_caps = OFQ2_CAP_GEOMETRY | OFQ2_CAP_GEOMETRY_WORKER;
++    for (unsigned n = 3; n <= 32; n++)
++    for (unsigned cull = 0; cull <= 2; cull++) {
++        reset_ring(); assert(OFQ2_DrawGeometryFan(vertices, n, cull));
++        unsigned words = committed_words;
++        memcpy(packet, ring_words, words * sizeof(uint32_t));
++        ofq2_geometry_packet_t packets[32];
++        unsigned count = 512 / words;
++        for (unsigned i = 0; i < count; i++) packets[i] = (ofq2_geometry_packet_t){packet,n};
++        reset_ring(); assert(OFQ2_DrawGeometryPackets(packets,count));
++        assert(reservations == 1 && commits == 1 && ofq2_pending);
++        assert(committed_words == count * words);
++        for (unsigned i = 0; i < count; i++)
++            assert(!memcmp(ring_words + i*words,packet,words*sizeof(uint32_t)));
++        assert(ring_words[committed_words] == 0xa5a5a5a5);
++    }
++    uint32_t tri[18] = {0}, quad[25] = {0};
++    ofq2_geometry_packet_t packets[32];
++    for (unsigned i = 0; i < 23; i++) packets[i] = (ofq2_geometry_packet_t){i<14?quad:tri,i<14?4:3};
++    reset_ring(); assert(OFQ2_DrawGeometryPackets(packets,23));
++    assert(committed_words == 512 && reservations == 1 && commits == 1);
++    packets[23] = (ofq2_geometry_packet_t){tri,3};
++    reset_ring(); assert(!OFQ2_DrawGeometryPackets(packets,24));
++    assert(!OFQ2_DrawGeometryPackets(NULL,1));
++    assert(!OFQ2_DrawGeometryPackets(packets,0));
++    assert(!OFQ2_DrawGeometryPackets(packets,33));
++    packets[1].words = NULL; assert(!OFQ2_DrawGeometryPackets(packets,2));
++    packets[1].words = tri; packets[1].count = 2; assert(!OFQ2_DrawGeometryPackets(packets,2));
++    packets[1].count = 33; assert(!OFQ2_DrawGeometryPackets(packets,2));
++    packets[1].count = 3;
++    ofq2_caps = OFQ2_CAP_GEOMETRY; assert(!OFQ2_DrawGeometryPackets(packets,1));
++    ofq2_caps = OFQ2_CAP_GEOMETRY_WORKER; assert(!OFQ2_DrawGeometryPackets(packets,1));
++    ofq2_caps = OFQ2_CAP_GEOMETRY | OFQ2_CAP_GEOMETRY_WORKER;
++    ofq2_tristate_dirty = true; assert(!OFQ2_DrawGeometryPackets(packets,1));
++    ofq2_tristate_dirty = false; ofq2_objstate_valid = false; assert(!OFQ2_DrawGeometryPackets(packets,1));
++    ofq2_objstate_valid = true; ofq2_tristate_valid = false; assert(!OFQ2_DrawGeometryPackets(packets,1));
++    ofq2_tristate_valid = true; ofq2_ready = false; assert(!OFQ2_DrawGeometryPackets(packets,1));
++    ofq2_ready = true;
++    assert(!reservations && !commits && !ofq2_pending);
++}
++
+ static void test_clip_packets_unchanged(void)
+ {
+     uint32_t vertices[24];
+@@ -123,6 +170,7 @@
+     test_capabilities();
+     test_fan_packets();
+     test_clip_packets_unchanged();
++    test_cached_packet_batches();
+     puts("PASS: real geometry capability dependencies; worker 3..32-vertex packet batching; inline three-vertex limit; fan ordering/culling/payloads; invalid state; unchanged clip uploads");
+     return 0;
+ }
+--- a/tools/tests/quake2_renderer_test.c
++++ b/tools/tests/quake2_renderer_test.c
+@@ -84,8 +84,12 @@
+ }
+ int gladLoadGLES1Loader(GLADloadproc proc) { (void)proc; return 1; }
+ int OFQ2_Init(int stride) { (void)stride; return gpu_init_ok; }
++static int gpu_worker, packet_calls, packet_fail;
++static int record_order, render_order_count;
++static char render_order[1024];
+ int OFQ2_Supports(uint32_t cap)
+ {
++    if (cap == OFQ2_CAP_GEOMETRY_WORKER) return gpu_worker;
+ 	if (cap == OFQ2_CAP_GEOMETRY) return gpu_geometry;
+ 	return cap == OFQ2_CAP_VERT_TRI_RGB ? gpu_rgb : 1;
+ }
+@@ -129,7 +133,29 @@
+ 	for (unsigned i = 0; i < count; i++) assert(vertices[i * 5] == i);
+ 	memcpy(geometry_raw, vertices, count * 5 * sizeof(uint32_t));
+ 	geometry_draws++;
++    if (record_order) { assert(render_order_count < 1024); render_order[render_order_count++] = 'G'; }
+ 	return 1;
++}
++int OFQ2_DrawGeometryPackets(const ofq2_geometry_packet_t *packets, unsigned count)
++{
++    assert(gpu_worker && count && count <= OFQ2_GEOMETRY_BATCH_PACKETS);
++    packet_calls++;
++    if (packet_fail) return 0;
++    unsigned words = 0;
++    for (unsigned j = 0; j < count; j++) {
++        unsigned n = packets[j].count;
++        const uint32_t *p = packets[j].words;
++        assert(n >= 3 && n <= 32 && p[0] == (0x59000000u | (5*n)));
++        unsigned cull = p[5*n+2] >> 15;
++        for (unsigned i = 1; i+1 < n; i++) {
++            assert(p[5*n+1+2*(i-1)] == 0x5b000001u);
++            assert(p[5*n+2+2*(i-1)] == ((i<<5)|((i+1)<<10)|(cull<<15)));
++        }
++        assert(OFQ2_DrawGeometryFan(p+1,n,cull));
++        words += 7*n-3;
++    }
++    assert(words <= OFQ2_GEOMETRY_BATCH_WORDS);
++    return 1;
+ }
+ int OFQ2_DrawClipIndexed(const uint32_t *vertices, unsigned count, uint32_t triangle)
+ {
+@@ -154,6 +180,7 @@
+ 	const uint16_t rgb[3], const int32_t depth[3])
+ {
+ 	assert(draws < 32);
++    if (record_order) { assert(render_order_count < 1024); render_order[render_order_count++] = 'C'; }
+ 	memcpy(triangle_x[draws], x, sizeof(triangle_x[draws]));
+ 	memcpy(triangle_y[draws], y, sizeof(triangle_y[draws]));
+ 	memcpy(triangle_s[draws], s, sizeof(triangle_s[draws]));
+--- /dev/null
++++ b/tools/tests/quake2_worldpackets_test.c
+@@ -0,0 +1,60 @@
++/* Persistent packet refreshes, duplicates, capacity and CPU ordering. */
++#define main renderer_existing_main
++#include "quake2_renderer_test.c"
++#undef main
++
++int main(void)
++{
++    assert(RI_InitContext(NULL));
++    float raw[4][7] = {{-4,-4,-64,0,0,0,0},{4,-4,-64,1,0,0,0},
++        {4,4,-64,1,1,0,0},{-4,4,-64,0,1,0,0}};
++    float frac[4][7]; memcpy(frac,raw,sizeof(raw)); frac[0][0]=.125f;
++    void *storage[2] = {malloc(OFGL_WorldPolyBytes(4)),malloc(OFGL_WorldPolyBytes(4))};
++    setup_world_arrays(raw[0]);
++    ofgl_world_poly_t *a = OFGL_BuildWorldPoly(storage[0],raw[0],4);
++    ofgl_world_poly_t *b = OFGL_BuildWorldPoly(storage[1],frac[0],4);
++    assert(a->raw_ok && !b->raw_ok);
++    gpu_geometry = gpu_worker = 1;
++    ofgl_world_poly_t *list[128]; for (int i=0;i<128;i++) list[i]=a;
++    reset_geometry_recording(); packet_calls=0;
++    OFGL_DrawWorldPolys(list,128);
++    assert(geometry_draws==128 && draws==0 && packet_calls==7); /* 20*25 <=512 */
++    assert(a->upload_header==0x59000014u);
++    assert(a->words[20]==0x5b000001u && a->words[22]==0x5b000001u);
++    /* A CPU polygon breaks a queued GPU run without reordering either side. */
++    list[0]=a;list[1]=a;list[2]=b;list[3]=a;
++    reset_geometry_recording(); packet_calls=render_order_count=0;record_order=1;
++    OFGL_DrawWorldPolys(list,4);record_order=0;
++    assert(packet_calls==2 && geometry_draws==3 && draws==2);
++    assert(render_order_count==5 && !memcmp(render_order,"GGCCG",5));
++    /* Refused packet groups retain ordered CPU fallback. */
++    list[0]=a;list[1]=a;
++    reset_geometry_recording(); packet_calls=0;packet_fail=1;
++    OFGL_DrawWorldPolys(list,2);packet_fail=0;
++    assert(packet_calls==1 && geometry_draws==0 && draws==4);
++    /* Cull changes refresh just fan words, and repeated same-key calls reuse. */
++    for (unsigned mode=0;mode<3;mode++) {
++        setup_world_arrays(raw[0]);gpu_geometry=gpu_worker=1;
++        if (mode) { ofgl_Enable(GL_CULL_FACE);ofgl_CullFace(mode==1?GL_FRONT:GL_BACK); }
++        else ofgl_Disable(GL_CULL_FACE);
++        reset_geometry_recording(); OFGL_DrawWorldPolys(list,2);
++        unsigned expected=ofgl_cull_on?((ofgl_cull_face==GL_FRONT)==(ofgl_front_face==GL_CCW)?1:2):0;
++        assert(a->packet_cull==expected && (a->words[21]>>15)==expected);
++        uint32_t saved[24];memcpy(saved,a->words,sizeof(saved));
++        reset_geometry_recording();OFGL_DrawWorldPolys(list,2);
++        assert(!memcmp(saved,a->words,sizeof(saved)));
++    }
++    /* Material changes update the cached vertex payload before it is copied. */
++    setup_world_arrays(raw[0]);gpu_geometry=gpu_worker=1;ofgl_Disable(GL_CULL_FACE);
++    reset_geometry_recording();OFGL_DrawWorldPolys(list,2);
++    uint32_t u=a->words[8];ofgl_world_material(a,16,16);
++    assert(a->tex_w==16 && a->words[8]!=u);
++    /* Inline cores keep the established emitter; capability-off stays CPU. */
++    gpu_worker=0;reset_geometry_recording();packet_calls=0;
++    OFGL_DrawWorldPolys(list,2);assert(!packet_calls && geometry_draws==2);
++    gpu_geometry=0;reset_geometry_recording();OFGL_DrawWorldPolys(list,2);
++    assert(!packet_calls && geometry_draws==0 && draws==4);
++    free(storage[0]);free(storage[1]);RI_ShutdownContext();
++    puts("PASS: cached worker packets, 128 duplicate polygons/512-word bound, CPU barriers, refused batch fallback, cull/material refresh and inline/absent capability");
++    return 0;
++}

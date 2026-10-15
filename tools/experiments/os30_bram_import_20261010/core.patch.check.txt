@@ -1,0 +1,6 @@
+patching file src/fpga/common/os30/geometry_bram_import.v
+patching file src/fpga/common/os30/geometry_import_convert.v
+patching file src/fpga/common/os30/geometry_import_view.v
+patching file src/fpga/common/os30/gpu_core.v
+patching file src/fpga/common/os30/phase10_load_alias.v
+patching file src/fpga/targets/pocket/os30/core_top.v

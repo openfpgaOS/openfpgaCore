@@ -1,0 +1,184 @@
+{
+  "passed": true,
+  "source_sha256": {
+    "parent": "ab1f1aeeb135cd2f80e44adb39616c35f28f1e164ab639b2f5645fbb447000ae",
+    "candidate": "8f320a9ffba4e2ab608250ced03f869b96de97651fb10bd2d345c22a670d6e41",
+    "instrumented": "d99d223ff73baea5672c2e97b2fa5b7418b840bd16f51d578e932efa68a9a10c",
+    "upstream_test": "896d48b4f5ae3ed7176ac774a045135cbf29c18d577742319787259be9e329c2",
+    "observed_test": "ff3e11bbc74bfa45f0cdaeadd30585927c4063969c91dd4f686e2409ed871a00"
+  },
+  "configurations": [
+    {
+      "name": "os30",
+      "parameters": {
+        "SET_BITS": 8,
+        "WORD_BITS": 4,
+        "WAYS": 2,
+        "ADDR_W": 26,
+        "CACHE_ALL": 1,
+        "REGISTER_READ_LOOKUP": 1,
+        "REGISTER_FILL_HAZARD": 1,
+        "SPECULATE_WRITE_HOT0": 1
+      },
+      "collision_poison": true,
+      "tests": [
+        {
+          "seed": 1,
+          "passed": true,
+          "stats": {
+            "cycles": 1282908,
+            "memory_reads": 5485,
+            "memory_writes": 6105,
+            "clocks": 1282908,
+            "writes": 417983,
+            "idle_payload_changes": 815716
+          },
+          "write_states": 16843201
+        },
+        {
+          "seed": 2,
+          "passed": true,
+          "stats": {
+            "cycles": 1291303,
+            "memory_reads": 5429,
+            "memory_writes": 6281,
+            "clocks": 1291303,
+            "writes": 419693,
+            "idle_payload_changes": 820472
+          },
+          "write_states": 16843201
+        }
+      ]
+    },
+    {
+      "name": "legacy",
+      "parameters": {
+        "SET_BITS": 2,
+        "WORD_BITS": 2,
+        "WAYS": 4,
+        "ADDR_W": 32,
+        "CACHE_ALL": 0,
+        "REGISTER_READ_LOOKUP": 0,
+        "REGISTER_FILL_HAZARD": 0,
+        "SPECULATE_WRITE_HOT0": 0
+      },
+      "collision_poison": true,
+      "tests": [
+        {
+          "seed": 1,
+          "passed": true,
+          "stats": {
+            "cycles": 651112,
+            "memory_reads": 16070,
+            "memory_writes": 16649,
+            "clocks": 651112,
+            "writes": 93862,
+            "idle_payload_changes": 486109
+          },
+          "write_states": 16843137
+        },
+        {
+          "seed": 2,
+          "passed": true,
+          "stats": {
+            "cycles": 649559,
+            "memory_reads": 16858,
+            "memory_writes": 16423,
+            "clocks": 649559,
+            "writes": 93149,
+            "idle_payload_changes": 486849
+          },
+          "write_states": 16843137
+        }
+      ]
+    },
+    {
+      "name": "staged-bypass",
+      "parameters": {
+        "SET_BITS": 4,
+        "WORD_BITS": 3,
+        "WAYS": 2,
+        "ADDR_W": 26,
+        "CACHE_ALL": 0,
+        "REGISTER_READ_LOOKUP": 1,
+        "REGISTER_FILL_HAZARD": 1,
+        "SPECULATE_WRITE_HOT0": 1
+      },
+      "collision_poison": true,
+      "tests": [
+        {
+          "seed": 1,
+          "passed": true,
+          "stats": {
+            "cycles": 643364,
+            "memory_reads": 9016,
+            "memory_writes": 9803,
+            "clocks": 643364,
+            "writes": 89631,
+            "idle_payload_changes": 491811
+          },
+          "write_states": 16843201
+        },
+        {
+          "seed": 2,
+          "passed": true,
+          "stats": {
+            "cycles": 640226,
+            "memory_reads": 9110,
+            "memory_writes": 9744,
+            "clocks": 640226,
+            "writes": 88702,
+            "idle_payload_changes": 490201
+          },
+          "write_states": 16843201
+        }
+      ]
+    },
+    {
+      "name": "non-speculative",
+      "parameters": {
+        "SET_BITS": 8,
+        "WORD_BITS": 4,
+        "WAYS": 2,
+        "ADDR_W": 26,
+        "CACHE_ALL": 1,
+        "REGISTER_READ_LOOKUP": 1,
+        "REGISTER_FILL_HAZARD": 1,
+        "SPECULATE_WRITE_HOT0": 0
+      },
+      "collision_poison": true,
+      "tests": [
+        {
+          "seed": 1,
+          "passed": true,
+          "stats": {
+            "cycles": 1285831,
+            "memory_reads": 5432,
+            "memory_writes": 6099,
+            "clocks": 1285831,
+            "writes": 418321,
+            "idle_payload_changes": 818090
+          },
+          "write_states": 16843137
+        },
+        {
+          "seed": 2,
+          "passed": true,
+          "stats": {
+            "cycles": 1285626,
+            "memory_reads": 5499,
+            "memory_writes": 6105,
+            "clocks": 1285626,
+            "writes": 418798,
+            "idle_payload_changes": 817466
+          },
+          "write_states": 16843137
+        }
+      ]
+    }
+  ],
+  "assertions": "Every clock: data_we/data_wa/data_w/data_ra/meta_we/meta_wa equal exact original block; meta_w equal on every enabled write, including collision-poison consumer.",
+  "scope": "Actual cache scoreboard plus an exact original combinational-control shadow.",
+  "elapsed_seconds": 17.994690418243408,
+  "recipe_sha256": "cfaeaec50495cc7695cd6a099d1ab6e1ad4daef301557c6d33e7bf589eaa5926"
+}

@@ -1,0 +1,31 @@
+{
+  "status": "PASS_STRONGER_UNIQUE_CONTEXT_OWNERSHIP_WITH_PRESERVED_FAILURES",
+  "reason": "Newly admitted repeated immutable display lists expose four nonunique source/count/command identities. The AJ02 v3 matcher rejected them; AJ03 first-unclaimed matching selected at least one legacy invocation and then correctly failed async/legacy disjointness. Those failures and source versions remain unchanged.",
+  "strengthening": "Version4 requires exactly one baseline CPU call matching source/count/command/phase AND independently captured consumed raw transform context. This precedes the unchanged complete raw-context equality, coverage, disjointness, actual caller-stack, source lifetime, packet and draw-order checks. No LOAD omission, state normalization or replay change was introduced.",
+  "all_jobs_unique": true,
+  "ambiguous_source_jobs_per_candidate": 4,
+  "jobs_per_candidate": 229,
+  "negative_cases": 22,
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/f28-owner-diagnostic-v1/analyze.py": "b1e57855092bfc07a412ca48fda2444f7fef531e40e8eb8d8b1e922604824221",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/f28-owner-diagnostic-v1/result.json": "c013f03034c16d81044ae7fe12e0048a9164f273e94f530057985ff7d46fd3bb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/f28-owner-diagnostic-v1/finalize.py": "18e0d3b673818d7c70c98a107b6dccec3ed32b6c6009941a7298226e1e383f54",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/check_replays_v3.py": "76907dd72ede05e053009a6badb84466dd4500f511c39b460568980c814d2a1a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/independent_lifetime_v3.py": "a9410d9314b337442c20b491770de56ba71e63c4b19ac0b6d428bf227689b8ec",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/independent_single_v3.py": "61c975600ad67986abd62d7a19bb73f1a02bfb0539e1efcb04c874e38d4e429c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/independent_group_v2.py": "fd23f85548546c1c6013c442016c8df045c606e1b5fbe8f9441ade50d3fb4baa",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v4/check-independent-v3.log": "a22db8dbd21aa3128c19c185eecd1b6cbcb1371037932c0ef421863b1ea1996a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/single-v4/check-independent-v3.log": "f388960007c56c67ec1ee1a192e51ca41a5f7280b044d15128d2ba237b469462",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/check_replays_v4.py": "f6bc5be2922142374c8e9ef4d8af03ea46e577f227824424a6e7b02831798c9e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/independent_lifetime_v4.py": "816afb6ecfe524b5c8fe85efe9cafa91520f8cf39ac8e4b938076e0553ce838b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/independent_single_v4.py": "90c71ee5a19bafbeb53c7eea2c3109f0d5ae129229b11f8360fdc9ace0395b9b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/independent_group_v3.py": "12cb5075ebac3d9de17daa83b00ffbc4ba8d5b10171f6390e4304498a321e13d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/independent_dl_v1.py": "2f4ca9b6d6fbbd808b3c0841334cbffe2e029bd12d91c06d49162faf332648c1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/f28-dl-binding-v1.json": "e9732e24cecfab1b3f69a8c9fddb30908736c97d25fd01fbb507cc4697aae8aa",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/independent-negative-v5/run.py": "08385b9fe4e9f7326223df833c4633a2732fd0dccf17c137b625be1d0c93dad2",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/independent-negative-v5/result.json": "ad68bc9b5b60b1cef92bf2ce7ac9d137e46526f9f376965d0cd01c7a82efd3b1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v4/check-independent-v4.json": "c0dc733a5138a107fa7fff03d23d4377fbe509563bd83a6bfff4da92bd9b69b3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v4/check-independent-v4.json": "bed350ef8e75046d76c32fc36c3776e52084a294c1e17c81ef2cc003a14ac7a7",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/single-v4/check-independent-v4.json": "bbfda3bab27aaa42935fb85039c5bc6b1e83f9b7b569e70186b006ee751bfbea"
+  }
+}

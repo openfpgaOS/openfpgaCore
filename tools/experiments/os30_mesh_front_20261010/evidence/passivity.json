@@ -1,0 +1,191 @@
+{
+  "status": "PASS_EXACT_PASSIVITY",
+  "compared_count": 38,
+  "compared": [
+    "input.cfg",
+    "prepared-memory.json",
+    "prepared-front.json",
+    "commands.bin",
+    "mmio.tsv",
+    "result.json",
+    "pc.csv",
+    "boundaries.tsv",
+    "entry-regs.bin",
+    "entry-2.bin",
+    "frame-1.bin",
+    "frame-1-buffer0.bin",
+    "frame-1-buffer1.bin",
+    "frame-1-buffer2.bin",
+    "entry-3.bin",
+    "frame-2.bin",
+    "frame-2-buffer0.bin",
+    "frame-2-buffer1.bin",
+    "frame-2-buffer2.bin",
+    "surface-arena.bin",
+    "surface-arena.physical.bin",
+    "surface-arena.json",
+    "import-stats.bin",
+    "import-stats.physical.bin",
+    "import-stats.json",
+    "front-stats.bin",
+    "front-stats.physical.bin",
+    "front-stats.json",
+    "frame.bin",
+    "stalls.json",
+    "stalls-pcs.csv",
+    "stalls-pages.csv",
+    "first-word.json",
+    "gpu-profile.json",
+    "gpu-profile-timeline.csv",
+    "gpu-profile-events.csv",
+    "pc-phase-1.csv",
+    "pc-phase-2.csv"
+  ],
+  "differences": [],
+  "excluded": [
+    "process.json",
+    "run.log"
+  ],
+  "observer": {
+    "tasks": 708,
+    "calls": 4660,
+    "open_calls": 0,
+    "raw_completions": 652,
+    "read_failures": 0,
+    "protocol_errors": 0,
+    "host_clock_edges_added": 0,
+    "source_vertex_bytes": 24
+  },
+  "original_result": {
+    "status": 0,
+    "cycles": 8349063,
+    "entry_cycle": 1380,
+    "finished_cycle": 8349062,
+    "complete_cycle": 8349062,
+    "retired": 4118587,
+    "freeze_cycles": 615376,
+    "hazard_cycles": 2499126,
+    "gpu_busy_cycles": 4255457,
+    "upload_words": 46036,
+    "write_beats": 418652,
+    "write_errors": 0,
+    "scan_bursts": 2907,
+    "scan_errors": 0,
+    "cram_errors": 0,
+    "fence": 363,
+    "readers": {
+      "I": {
+        "bursts": 4650,
+        "beats": 74400,
+        "errors": 0,
+        "outstanding_cycles": 579960,
+        "ar_wait_cycles": 0,
+        "overlay_bursts": 0,
+        "pending": 0
+      },
+      "MEM": {
+        "bursts": 15858,
+        "beats": 253728,
+        "errors": 0,
+        "outstanding_cycles": 1224246,
+        "ar_wait_cycles": 0,
+        "overlay_bursts": 0,
+        "pending": 0
+      },
+      "PER": {
+        "bursts": 15741,
+        "beats": 15741,
+        "errors": 0,
+        "outstanding_cycles": 144798,
+        "ar_wait_cycles": 83,
+        "overlay_bursts": 0,
+        "pending": 0
+      },
+      "M1": {
+        "bursts": 22554,
+        "beats": 330144,
+        "errors": 0,
+        "outstanding_cycles": 997357,
+        "ar_wait_cycles": 628186,
+        "overlay_bursts": 0,
+        "pending": 0
+      },
+      "AUDIO": {
+        "bursts": 4514,
+        "beats": 72224,
+        "errors": 0,
+        "outstanding_cycles": 0,
+        "ar_wait_cycles": 0,
+        "overlay_bursts": 0,
+        "pending": 0
+      }
+    }
+  },
+  "new_result": {
+    "status": 0,
+    "cycles": 8349063,
+    "entry_cycle": 1380,
+    "finished_cycle": 8349062,
+    "complete_cycle": 8349062,
+    "retired": 4118587,
+    "freeze_cycles": 615376,
+    "hazard_cycles": 2499126,
+    "gpu_busy_cycles": 4255457,
+    "upload_words": 46036,
+    "write_beats": 418652,
+    "write_errors": 0,
+    "scan_bursts": 2907,
+    "scan_errors": 0,
+    "cram_errors": 0,
+    "fence": 363,
+    "readers": {
+      "I": {
+        "bursts": 4650,
+        "beats": 74400,
+        "errors": 0,
+        "outstanding_cycles": 579960,
+        "ar_wait_cycles": 0,
+        "overlay_bursts": 0,
+        "pending": 0
+      },
+      "MEM": {
+        "bursts": 15858,
+        "beats": 253728,
+        "errors": 0,
+        "outstanding_cycles": 1224246,
+        "ar_wait_cycles": 0,
+        "overlay_bursts": 0,
+        "pending": 0
+      },
+      "PER": {
+        "bursts": 15741,
+        "beats": 15741,
+        "errors": 0,
+        "outstanding_cycles": 144798,
+        "ar_wait_cycles": 83,
+        "overlay_bursts": 0,
+        "pending": 0
+      },
+      "M1": {
+        "bursts": 22554,
+        "beats": 330144,
+        "errors": 0,
+        "outstanding_cycles": 997357,
+        "ar_wait_cycles": 628186,
+        "overlay_bursts": 0,
+        "pending": 0
+      },
+      "AUDIO": {
+        "bursts": 4514,
+        "beats": 72224,
+        "errors": 0,
+        "outstanding_cycles": 0,
+        "ar_wait_cycles": 0,
+        "overlay_bursts": 0,
+        "pending": 0
+      }
+    }
+  },
+  "original_manifest_sha256": "871436e39de952f86d5c06a599f302af829ca2f68f891207c53510cc5d3e6cf9",
+  "new_manifest_sha256": "ba343c8533f42175e02d451b472144811e2aa80964b09b62d5f48c796734afcf"
+}

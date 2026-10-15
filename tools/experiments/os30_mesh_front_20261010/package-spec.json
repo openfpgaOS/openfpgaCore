@@ -1,0 +1,248 @@
+{
+  "tests": {
+    "packet": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/test-v2/report.json",
+    "fetch": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/fetch-v2/report.json",
+    "engine": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/engine-v4/manifest.json",
+    "chain": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/chain-v1/manifest.json",
+    "stream-control": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/stream-control-v3/manifest.json"
+  },
+  "test_wrappers": [
+    "geometry_mesh_chain.v"
+  ],
+  "copies": [
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/package_runner.py",
+      "destination": "run_tests.py",
+      "external_evidence": false
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/package_verify.py",
+      "destination": "verify.py",
+      "external_evidence": false
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/README.txt",
+      "destination": "README.txt",
+      "external_evidence": false
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/REPORT.txt",
+      "destination": "REPORT.txt",
+      "external_evidence": false
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native-task-v3/passivity.json",
+      "destination": "evidence/passivity.json",
+      "external_evidence": true
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native-task-v3/classification.json",
+      "destination": "evidence/classification.json",
+      "external_evidence": true
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native-task-v3/cost-ledger.json",
+      "destination": "evidence/cost-ledger.json",
+      "external_evidence": true
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/final-review-v2.json",
+      "destination": "evidence/review.json",
+      "external_evidence": true
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/controller-v3/manifest.json",
+      "destination": "evidence/controller.json",
+      "external_evidence": true
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/scene-chain-v1/manifest.json",
+      "destination": "evidence/scene-chain.json",
+      "external_evidence": true
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/scene-cull-oracle-v1/manifest.json",
+      "destination": "evidence/cpu-cull-oracle.json",
+      "external_evidence": true
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/architecture-v2.json",
+      "destination": "evidence/architecture.json",
+      "external_evidence": true
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/coverage-frame360.json",
+      "destination": "evidence/static-coverage.json",
+      "external_evidence": true
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/task-packet-proof.json",
+      "destination": "evidence/static-packets.json",
+      "external_evidence": true
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/source-traversal-proof.json",
+      "destination": "evidence/source-traversal.json",
+      "external_evidence": true
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/native-vectors-v3/manifest.json",
+      "destination": "evidence/native-vectors.json",
+      "external_evidence": true
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native_tasks_v3.py",
+      "destination": "analysis/native_tasks_v3.py",
+      "external_evidence": false
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/task_observer_v3.hpp",
+      "destination": "analysis/task_observer_v3.hpp",
+      "external_evidence": false
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/classify_tasks_v1.py",
+      "destination": "analysis/classify_tasks_v1.py",
+      "external_evidence": false
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/measure_snapshot.py",
+      "destination": "analysis/measure_snapshot.py",
+      "external_evidence": false
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/compile_tasks.py",
+      "destination": "analysis/compile_tasks.py",
+      "external_evidence": false
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/check_source_traversal.py",
+      "destination": "analysis/check_source_traversal.py",
+      "external_evidence": false
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/verify_layout.py",
+      "destination": "analysis/verify_layout.py",
+      "external_evidence": false
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/summarize_task_costs_v2.py",
+      "destination": "analysis/summarize_task_costs_v2.py"
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/join_native_vectors.py",
+      "destination": "analysis/join_native_vectors.py"
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/run_scene_chain.py",
+      "destination": "analysis/run_scene_chain.py"
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/run_scene_cull_oracle.py",
+      "destination": "analysis/run_scene_cull_oracle.py"
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/producer-v1/task_producer.hpp",
+      "destination": "producer/task_producer.hpp",
+      "external_evidence": false
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/producer-v1/test_producer.cpp",
+      "destination": "producer/test_producer.cpp",
+      "external_evidence": false
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/producer-v1/run.py",
+      "destination": "producer/run.py",
+      "external_evidence": false
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/producer-v1/result.json",
+      "destination": "evidence/producer.json",
+      "external_evidence": true
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/source-manifest.json",
+      "destination": "evidence/app-source-manifest.json",
+      "external_evidence": true
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/scene-outcomes-v1.json",
+      "destination": "evidence/scene-outcomes.json",
+      "external_evidence": true
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/exact-geometry-ledger.json",
+      "destination": "evidence/exact-geometry-ledger.json",
+      "external_evidence": true
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/exact_geometry_ledger.py",
+      "destination": "analysis/exact_geometry_ledger.py",
+      "external_evidence": false
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/scene-stream-v2/manifest.json",
+      "destination": "evidence/scene-stream.json",
+      "external_evidence": true
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native-task-v3/source-layout-proof.json",
+      "destination": "evidence/raw-source-layout.json",
+      "external_evidence": true
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native-task-v3/build.json",
+      "destination": "evidence/passive-build.json",
+      "external_evidence": true
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/results.json",
+      "destination": "results.json"
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/source-manifest.json",
+      "destination": "evidence/core-source-manifest.json",
+      "external_evidence": true
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/REPORT.txt",
+      "destination": "evidence/core-report.txt",
+      "external_evidence": true
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/run_scene_stream.py",
+      "destination": "analysis/run_scene_stream.py"
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/test_scene_stream.cpp",
+      "destination": "analysis/test_scene_stream.cpp"
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/test_scene_chain.cpp",
+      "destination": "analysis/test_scene_chain.cpp"
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/analyze_scene.py",
+      "destination": "analysis/analyze_scene.py"
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/task_outcomes.py",
+      "destination": "analysis/task_outcomes.py"
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/verify_layout_v2.py",
+      "destination": "analysis/verify_layout_v2.py"
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/producer-scene-audit-v1.json",
+      "destination": "evidence/independent-accounting-audit.json",
+      "external_evidence": true
+    },
+    {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/verify_producer_scene_v1.py",
+      "destination": "analysis/verify_producer_scene_v1.py",
+      "external_evidence": false
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "passed": true,
+  "incremental_elf_sha256": "10581bdb05e98c87dcd08abb2798549267793920f6c91e1c6be964b0dd9fb636",
+  "clean_elf_sha256": "10581bdb05e98c87dcd08abb2798549267793920f6c91e1c6be964b0dd9fb636",
+  "compiler": "riscv64-elf-gcc (Arch Linux Repositories) 15.2.0",
+  "source_date_epoch": "1791806400",
+  "audio_source_sha256": "4f52e1d5f94a451dd3d05935e3c89978d30d5ec83dda0c54c34196fda321f34c",
+  "clean_log_sha256": "c10b6461c6aedf96a875a9d18ea3ed1a718407673e40ab11909fab35e40cd6f3",
+  "change": "Opt into immutable SFX sample cache only when hardware magic at0x48000834 matches SCF1; stream bypass remains hardware enforced."
+}

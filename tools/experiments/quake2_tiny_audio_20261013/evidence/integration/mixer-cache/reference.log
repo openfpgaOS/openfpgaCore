@@ -1,0 +1,2 @@
+IRQ_READBACK cases=64 position_reads=2048 failures=0
+REFERENCE samples=18432 scenarios=96 errors=0 saturation_samples=169 stream_holds=12808 hash=46e30baca498b56b processing_cycles=19618042

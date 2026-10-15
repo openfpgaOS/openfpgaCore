@@ -1,0 +1,1 @@
+Application build and ELF symbol extraction passed. Receipt creation failed before build-result.json: script indexed the symbols dictionary by a tuple of two probe names, raising KeyError. Application source/ELF unchanged. Corrected receipt script validates and records the two probes separately.

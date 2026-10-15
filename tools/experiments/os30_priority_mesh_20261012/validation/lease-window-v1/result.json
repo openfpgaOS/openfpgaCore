@@ -1,0 +1,2490 @@
+{
+  "status": "PASS_EXACT_TRACE_LEASE_WINDOWS",
+  "description": "Existing AJ02 candidate trace only. No replay/source changes. These are overlapping intervals during which an earlier-release architecture might unblock CPU; they are not additive saved cycles or a net performance prediction.",
+  "milestones": {
+    "first_output": "After first accepted ordinary packet word. Classification/prevalidation has completed, but current implementation can still read/convert later vertices. A complete converted-vertex snapshot could release raw earlier; snapshot latency/cost is not measured here.",
+    "last_vertex_word": "After final payload word of the last0x56 vertex packet is accepted. Successful hardware jobs then emit only0x54 indices; this is a conservative observable bound after the final raw vertex read.",
+    "completion": "completed_serial transition, after all generated output words are stored; does not imply GPU raster completion."
+  },
+  "limitations": [
+    "Only successful hardware jobs qualify for the two windows; repair jobs excluded. Warm interval has no repair jobs.",
+    "Shared FMA usage, packet conversion and memory latency may overlap GPU work. Releasing raw early requires separate legacy/job context and output-controller correctness; no architecture is assumed implemented.",
+    "The trace gives remaining generated words and exact aggregate FIFO-full overlaps, but does not expose FIFO read pointer per request. Remaining words are not instantaneous FIFO occupancy.",
+    "The after-last-vertex window is a subset of after-first-output. Do not add them. Snapshot filling, tighter FIFO capacity, arbitration, BRAM ports and CPU overhead can consume the apparent headroom."
+  ],
+  "phases": {
+    "1": {
+      "interval_cycles": 4647402,
+      "lease_pending_cycles": 443208,
+      "exclusive_protocol_state_partition": {
+        "handoff_idle": 73,
+        "repair": 388951,
+        "async_other_including_conversion_output": 48732,
+        "cull_engine": 2442,
+        "raw_engine": 3010
+      },
+      "overlapping_cycle_flags": {
+        "lease_pending": 443208,
+        "cpu_retired": 212061,
+        "raw_engine": 3010,
+        "cull_engine": 2442,
+        "repair_pending": 388951,
+        "gpu_fragment": 328789,
+        "output_fifo_full": 42459
+      },
+      "conservative_raw_release_windows": {
+        "lease_pending": 443208,
+        "after_first_output_before_done": 44901,
+        "after_last_vertex_word_before_done": 2819
+      },
+      "requests": [
+        {
+          "ticket": 1,
+          "start": 291616,
+          "descriptor_at_request": 0,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 0,
+          "grant": 291617,
+          "completed_at_grant": 0,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 2,
+          "start": 434882,
+          "descriptor_at_request": 1,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 12,
+          "grant": 469927,
+          "completed_at_grant": 1,
+          "pending_cycles_in_phase": 35045,
+          "jobs": []
+        },
+        {
+          "ticket": 3,
+          "start": 494102,
+          "descriptor_at_request": 5,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 13,
+          "grant": 507777,
+          "completed_at_grant": 5,
+          "pending_cycles_in_phase": 13675,
+          "jobs": []
+        },
+        {
+          "ticket": 4,
+          "start": 519962,
+          "descriptor_at_request": 6,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 13,
+          "grant": 541086,
+          "completed_at_grant": 6,
+          "pending_cycles_in_phase": 21124,
+          "jobs": []
+        },
+        {
+          "ticket": 5,
+          "start": 587229,
+          "descriptor_at_request": 8,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 13,
+          "grant": 607823,
+          "completed_at_grant": 8,
+          "pending_cycles_in_phase": 20594,
+          "jobs": []
+        },
+        {
+          "ticket": 6,
+          "start": 623790,
+          "descriptor_at_request": 10,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 13,
+          "grant": 635246,
+          "completed_at_grant": 10,
+          "pending_cycles_in_phase": 11456,
+          "jobs": []
+        },
+        {
+          "ticket": 7,
+          "start": 662151,
+          "descriptor_at_request": 12,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 13,
+          "grant": 683134,
+          "completed_at_grant": 12,
+          "pending_cycles_in_phase": 20983,
+          "jobs": []
+        },
+        {
+          "ticket": 8,
+          "start": 694966,
+          "descriptor_at_request": 12,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 13,
+          "grant": 694967,
+          "completed_at_grant": 12,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 9,
+          "start": 711820,
+          "descriptor_at_request": 12,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 13,
+          "grant": 711821,
+          "completed_at_grant": 12,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 10,
+          "start": 723142,
+          "descriptor_at_request": 12,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 13,
+          "grant": 723143,
+          "completed_at_grant": 12,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 11,
+          "start": 744812,
+          "descriptor_at_request": 12,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 13,
+          "grant": 744813,
+          "completed_at_grant": 12,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 12,
+          "start": 768455,
+          "descriptor_at_request": 12,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 14,
+          "grant": 768456,
+          "completed_at_grant": 12,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 13,
+          "start": 780871,
+          "descriptor_at_request": 12,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 14,
+          "grant": 780872,
+          "completed_at_grant": 12,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 14,
+          "start": 790339,
+          "descriptor_at_request": 12,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 14,
+          "grant": 790340,
+          "completed_at_grant": 12,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 15,
+          "start": 794929,
+          "descriptor_at_request": 12,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 14,
+          "grant": 794930,
+          "completed_at_grant": 12,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 16,
+          "start": 841706,
+          "descriptor_at_request": 12,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 21,
+          "grant": 841707,
+          "completed_at_grant": 12,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 17,
+          "start": 867068,
+          "descriptor_at_request": 13,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 27,
+          "grant": 867069,
+          "completed_at_grant": 13,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 18,
+          "start": 877623,
+          "descriptor_at_request": 13,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 27,
+          "grant": 877624,
+          "completed_at_grant": 13,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 19,
+          "start": 886132,
+          "descriptor_at_request": 13,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 27,
+          "grant": 886133,
+          "completed_at_grant": 13,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 20,
+          "start": 909866,
+          "descriptor_at_request": 13,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 30,
+          "grant": 909867,
+          "completed_at_grant": 13,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 21,
+          "start": 942157,
+          "descriptor_at_request": 13,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 39,
+          "grant": 942158,
+          "completed_at_grant": 13,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 22,
+          "start": 950030,
+          "descriptor_at_request": 13,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 39,
+          "grant": 950031,
+          "completed_at_grant": 13,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 23,
+          "start": 957626,
+          "descriptor_at_request": 13,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 39,
+          "grant": 957627,
+          "completed_at_grant": 13,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 24,
+          "start": 973785,
+          "descriptor_at_request": 13,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 39,
+          "grant": 973786,
+          "completed_at_grant": 13,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 25,
+          "start": 987484,
+          "descriptor_at_request": 13,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 39,
+          "grant": 987485,
+          "completed_at_grant": 13,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 26,
+          "start": 997578,
+          "descriptor_at_request": 14,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 39,
+          "grant": 1003076,
+          "completed_at_grant": 14,
+          "pending_cycles_in_phase": 5498,
+          "jobs": [
+            {
+              "seq": 14,
+              "after_first_output": 5497,
+              "after_last_vertex_word": 70,
+              "remaining_output_words_at_request": 62,
+              "vertices": 10,
+              "draws": 4,
+              "output_words": 98,
+              "first_output": 997218,
+              "last_vertex_output": 1003004,
+              "done": 1003075
+            }
+          ]
+        },
+        {
+          "ticket": 27,
+          "start": 1011215,
+          "descriptor_at_request": 14,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 39,
+          "grant": 1011216,
+          "completed_at_grant": 14,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 28,
+          "start": 1026966,
+          "descriptor_at_request": 15,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 40,
+          "grant": 1040712,
+          "completed_at_grant": 15,
+          "pending_cycles_in_phase": 13746,
+          "jobs": []
+        },
+        {
+          "ticket": 29,
+          "start": 1053112,
+          "descriptor_at_request": 16,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 40,
+          "grant": 1065578,
+          "completed_at_grant": 16,
+          "pending_cycles_in_phase": 12466,
+          "jobs": [
+            {
+              "seq": 16,
+              "after_first_output": 12465,
+              "after_last_vertex_word": 2265,
+              "remaining_output_words_at_request": 16,
+              "vertices": 11,
+              "draws": 5,
+              "output_words": 109,
+              "first_output": 1047966,
+              "last_vertex_output": 1063311,
+              "done": 1065577
+            }
+          ]
+        },
+        {
+          "ticket": 30,
+          "start": 1075482,
+          "descriptor_at_request": 18,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 40,
+          "grant": 1092555,
+          "completed_at_grant": 18,
+          "pending_cycles_in_phase": 17073,
+          "jobs": [
+            {
+              "seq": 18,
+              "after_first_output": 17072,
+              "after_last_vertex_word": 37,
+              "remaining_output_words_at_request": 11,
+              "vertices": 3,
+              "draws": 1,
+              "output_words": 29,
+              "first_output": 1071654,
+              "last_vertex_output": 1092516,
+              "done": 1092554
+            }
+          ]
+        },
+        {
+          "ticket": 31,
+          "start": 1100553,
+          "descriptor_at_request": 19,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 40,
+          "grant": 1108349,
+          "completed_at_grant": 19,
+          "pending_cycles_in_phase": 7796,
+          "jobs": [
+            {
+              "seq": 19,
+              "after_first_output": 7795,
+              "after_last_vertex_word": 75,
+              "remaining_output_words_at_request": 56,
+              "vertices": 11,
+              "draws": 5,
+              "output_words": 109,
+              "first_output": 1095735,
+              "last_vertex_output": 1108272,
+              "done": 1108348
+            }
+          ]
+        },
+        {
+          "ticket": 32,
+          "start": 1113987,
+          "descriptor_at_request": 21,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 40,
+          "grant": 1114710,
+          "completed_at_grant": 21,
+          "pending_cycles_in_phase": 723,
+          "jobs": [
+            {
+              "seq": 21,
+              "after_first_output": 228,
+              "after_last_vertex_word": 38,
+              "remaining_output_words_at_request": 80,
+              "vertices": 8,
+              "draws": 4,
+              "output_words": 80,
+              "first_output": 1114480,
+              "last_vertex_output": 1114670,
+              "done": 1114709
+            }
+          ]
+        },
+        {
+          "ticket": 33,
+          "start": 1119709,
+          "descriptor_at_request": 23,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 40,
+          "grant": 1136892,
+          "completed_at_grant": 23,
+          "pending_cycles_in_phase": 17183,
+          "jobs": []
+        },
+        {
+          "ticket": 34,
+          "start": 1143731,
+          "descriptor_at_request": 25,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 40,
+          "grant": 1155889,
+          "completed_at_grant": 25,
+          "pending_cycles_in_phase": 12158,
+          "jobs": []
+        },
+        {
+          "ticket": 35,
+          "start": 1170523,
+          "descriptor_at_request": 33,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 40,
+          "grant": 1171088,
+          "completed_at_grant": 33,
+          "pending_cycles_in_phase": 565,
+          "jobs": [
+            {
+              "seq": 33,
+              "after_first_output": 173,
+              "after_last_vertex_word": 32,
+              "remaining_output_words_at_request": 58,
+              "vertices": 6,
+              "draws": 2,
+              "output_words": 58,
+              "first_output": 1170913,
+              "last_vertex_output": 1171054,
+              "done": 1171087
+            }
+          ]
+        },
+        {
+          "ticket": 36,
+          "start": 1180704,
+          "descriptor_at_request": 38,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 40,
+          "grant": 1180705,
+          "completed_at_grant": 38,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 37,
+          "start": 1189337,
+          "descriptor_at_request": 39,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 40,
+          "grant": 1189338,
+          "completed_at_grant": 39,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 38,
+          "start": 1194759,
+          "descriptor_at_request": 40,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 40,
+          "grant": 1195645,
+          "completed_at_grant": 40,
+          "pending_cycles_in_phase": 886,
+          "jobs": [
+            {
+              "seq": 40,
+              "after_first_output": 85,
+              "after_last_vertex_word": 25,
+              "remaining_output_words_at_request": 29,
+              "vertices": 3,
+              "draws": 1,
+              "output_words": 29,
+              "first_output": 1195558,
+              "last_vertex_output": 1195618,
+              "done": 1195644
+            }
+          ]
+        },
+        {
+          "ticket": 39,
+          "start": 1310856,
+          "descriptor_at_request": 46,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 49,
+          "grant": 1311158,
+          "completed_at_grant": 46,
+          "pending_cycles_in_phase": 302,
+          "jobs": [
+            {
+              "seq": 46,
+              "after_first_output": 122,
+              "after_last_vertex_word": 36,
+              "remaining_output_words_at_request": 40,
+              "vertices": 4,
+              "draws": 2,
+              "output_words": 40,
+              "first_output": 1311034,
+              "last_vertex_output": 1311120,
+              "done": 1311157
+            }
+          ]
+        },
+        {
+          "ticket": 40,
+          "start": 1319155,
+          "descriptor_at_request": 49,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 49,
+          "grant": 1319156,
+          "completed_at_grant": 49,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 41,
+          "start": 1402523,
+          "descriptor_at_request": 50,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 69,
+          "grant": 1431149,
+          "completed_at_grant": 50,
+          "pending_cycles_in_phase": 28626,
+          "jobs": []
+        },
+        {
+          "ticket": 42,
+          "start": 1446817,
+          "descriptor_at_request": 51,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 69,
+          "grant": 1467655,
+          "completed_at_grant": 51,
+          "pending_cycles_in_phase": 20838,
+          "jobs": []
+        },
+        {
+          "ticket": 43,
+          "start": 1476047,
+          "descriptor_at_request": 52,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 69,
+          "grant": 1501416,
+          "completed_at_grant": 52,
+          "pending_cycles_in_phase": 25369,
+          "jobs": []
+        },
+        {
+          "ticket": 44,
+          "start": 1514964,
+          "descriptor_at_request": 57,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 69,
+          "grant": 1529722,
+          "completed_at_grant": 57,
+          "pending_cycles_in_phase": 14758,
+          "jobs": []
+        },
+        {
+          "ticket": 45,
+          "start": 1587445,
+          "descriptor_at_request": 61,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 69,
+          "grant": 1588523,
+          "completed_at_grant": 61,
+          "pending_cycles_in_phase": 1078,
+          "jobs": [
+            {
+              "seq": 61,
+              "after_first_output": 86,
+              "after_last_vertex_word": 26,
+              "remaining_output_words_at_request": 29,
+              "vertices": 3,
+              "draws": 1,
+              "output_words": 29,
+              "first_output": 1588435,
+              "last_vertex_output": 1588495,
+              "done": 1588522
+            }
+          ]
+        },
+        {
+          "ticket": 46,
+          "start": 1599966,
+          "descriptor_at_request": 63,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 69,
+          "grant": 1617493,
+          "completed_at_grant": 63,
+          "pending_cycles_in_phase": 17527,
+          "jobs": []
+        },
+        {
+          "ticket": 47,
+          "start": 1625482,
+          "descriptor_at_request": 64,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 69,
+          "grant": 1638222,
+          "completed_at_grant": 64,
+          "pending_cycles_in_phase": 12740,
+          "jobs": []
+        },
+        {
+          "ticket": 48,
+          "start": 1644165,
+          "descriptor_at_request": 65,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 69,
+          "grant": 1659084,
+          "completed_at_grant": 65,
+          "pending_cycles_in_phase": 14919,
+          "jobs": []
+        },
+        {
+          "ticket": 49,
+          "start": 1664112,
+          "descriptor_at_request": 67,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 69,
+          "grant": 1664301,
+          "completed_at_grant": 67,
+          "pending_cycles_in_phase": 189,
+          "jobs": [
+            {
+              "seq": 67,
+              "after_first_output": 170,
+              "after_last_vertex_word": 28,
+              "remaining_output_words_at_request": 58,
+              "vertices": 6,
+              "draws": 2,
+              "output_words": 58,
+              "first_output": 1664129,
+              "last_vertex_output": 1664271,
+              "done": 1664300
+            }
+          ]
+        },
+        {
+          "ticket": 50,
+          "start": 1698731,
+          "descriptor_at_request": 68,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 77,
+          "grant": 1723169,
+          "completed_at_grant": 68,
+          "pending_cycles_in_phase": 24438,
+          "jobs": []
+        },
+        {
+          "ticket": 51,
+          "start": 1734014,
+          "descriptor_at_request": 69,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 77,
+          "grant": 1770750,
+          "completed_at_grant": 69,
+          "pending_cycles_in_phase": 36736,
+          "jobs": []
+        },
+        {
+          "ticket": 52,
+          "start": 1775261,
+          "descriptor_at_request": 71,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 77,
+          "grant": 1787910,
+          "completed_at_grant": 71,
+          "pending_cycles_in_phase": 12649,
+          "jobs": []
+        },
+        {
+          "ticket": 53,
+          "start": 1804471,
+          "descriptor_at_request": 77,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 77,
+          "grant": 1804472,
+          "completed_at_grant": 77,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 54,
+          "start": 1901184,
+          "descriptor_at_request": 79,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 84,
+          "grant": 1902728,
+          "completed_at_grant": 79,
+          "pending_cycles_in_phase": 1544,
+          "jobs": [
+            {
+              "seq": 79,
+              "after_first_output": 230,
+              "after_last_vertex_word": 40,
+              "remaining_output_words_at_request": 78,
+              "vertices": 8,
+              "draws": 3,
+              "output_words": 78,
+              "first_output": 1902496,
+              "last_vertex_output": 1902686,
+              "done": 1902727
+            }
+          ]
+        },
+        {
+          "ticket": 55,
+          "start": 1910850,
+          "descriptor_at_request": 83,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 84,
+          "grant": 1911847,
+          "completed_at_grant": 83,
+          "pending_cycles_in_phase": 997,
+          "jobs": [
+            {
+              "seq": 83,
+              "after_first_output": 172,
+              "after_last_vertex_word": 34,
+              "remaining_output_words_at_request": 60,
+              "vertices": 6,
+              "draws": 3,
+              "output_words": 60,
+              "first_output": 1911673,
+              "last_vertex_output": 1911811,
+              "done": 1911846
+            }
+          ]
+        },
+        {
+          "ticket": 56,
+          "start": 1923080,
+          "descriptor_at_request": 84,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 84,
+          "grant": 1923081,
+          "completed_at_grant": 84,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 57,
+          "start": 1965258,
+          "descriptor_at_request": 84,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 86,
+          "grant": 1965259,
+          "completed_at_grant": 84,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 58,
+          "start": 1971858,
+          "descriptor_at_request": 86,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 86,
+          "grant": 1971859,
+          "completed_at_grant": 86,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 59,
+          "start": 2073555,
+          "descriptor_at_request": 89,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 90,
+          "grant": 2075961,
+          "completed_at_grant": 89,
+          "pending_cycles_in_phase": 2406,
+          "jobs": [
+            {
+              "seq": 89,
+              "after_first_output": 385,
+              "after_last_vertex_word": 64,
+              "remaining_output_words_at_request": 139,
+              "vertices": 13,
+              "draws": 11,
+              "output_words": 139,
+              "first_output": 2075574,
+              "last_vertex_output": 2075895,
+              "done": 2075960
+            }
+          ]
+        },
+        {
+          "ticket": 60,
+          "start": 2082148,
+          "descriptor_at_request": 90,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 90,
+          "grant": 2082149,
+          "completed_at_grant": 90,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 61,
+          "start": 2106594,
+          "descriptor_at_request": 90,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 91,
+          "grant": 2106595,
+          "completed_at_grant": 90,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 62,
+          "start": 2116069,
+          "descriptor_at_request": 91,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 91,
+          "grant": 2116070,
+          "completed_at_grant": 91,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 63,
+          "start": 2196864,
+          "descriptor_at_request": 91,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 92,
+          "grant": 2196865,
+          "completed_at_grant": 91,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 64,
+          "start": 2205369,
+          "descriptor_at_request": 92,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 92,
+          "grant": 2205370,
+          "completed_at_grant": 92,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 65,
+          "start": 2229239,
+          "descriptor_at_request": 92,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 93,
+          "grant": 2229240,
+          "completed_at_grant": 92,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 66,
+          "start": 2236249,
+          "descriptor_at_request": 93,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 93,
+          "grant": 2236250,
+          "completed_at_grant": 93,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 67,
+          "start": 2271494,
+          "descriptor_at_request": 93,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 94,
+          "grant": 2271495,
+          "completed_at_grant": 93,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 68,
+          "start": 2283738,
+          "descriptor_at_request": 94,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 94,
+          "grant": 2283739,
+          "completed_at_grant": 94,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 69,
+          "start": 2361422,
+          "descriptor_at_request": 94,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 95,
+          "grant": 2361423,
+          "completed_at_grant": 94,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 70,
+          "start": 2371411,
+          "descriptor_at_request": 95,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 95,
+          "grant": 2371412,
+          "completed_at_grant": 95,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 71,
+          "start": 2431067,
+          "descriptor_at_request": 95,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 96,
+          "grant": 2431068,
+          "completed_at_grant": 95,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 72,
+          "start": 2446580,
+          "descriptor_at_request": 96,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 96,
+          "grant": 2461772,
+          "completed_at_grant": 96,
+          "pending_cycles_in_phase": 15192,
+          "jobs": []
+        },
+        {
+          "ticket": 73,
+          "start": 2760323,
+          "descriptor_at_request": 98,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 98,
+          "grant": 2762213,
+          "completed_at_grant": 98,
+          "pending_cycles_in_phase": 1890,
+          "jobs": [
+            {
+              "seq": 98,
+              "after_first_output": 421,
+              "after_last_vertex_word": 49,
+              "remaining_output_words_at_request": 149,
+              "vertices": 15,
+              "draws": 7,
+              "output_words": 149,
+              "first_output": 2761790,
+              "last_vertex_output": 2762162,
+              "done": 2762212
+            }
+          ]
+        }
+      ]
+    },
+    "2": {
+      "interval_cycles": 4794375,
+      "lease_pending_cycles": 204231,
+      "exclusive_protocol_state_partition": {
+        "handoff_idle": 89,
+        "cull_engine": 1889,
+        "async_other_including_conversion_output": 197674,
+        "raw_engine": 4536,
+        "context_bundle": 43
+      },
+      "overlapping_cycle_flags": {
+        "lease_pending": 204231,
+        "cpu_retired": 72797,
+        "raw_engine": 4536,
+        "cull_engine": 1889,
+        "gpu_fragment": 189537,
+        "output_fifo_full": 190189
+      },
+      "conservative_raw_release_windows": {
+        "lease_pending": 204231,
+        "after_first_output_before_done": 193778,
+        "after_last_vertex_word_before_done": 13171
+      },
+      "requests": [
+        {
+          "ticket": 74,
+          "start": 4919147,
+          "descriptor_at_request": 98,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 98,
+          "grant": 4919148,
+          "completed_at_grant": 98,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 75,
+          "start": 5032302,
+          "descriptor_at_request": 98,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 101,
+          "grant": 5032303,
+          "completed_at_grant": 98,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 76,
+          "start": 5043895,
+          "descriptor_at_request": 100,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 101,
+          "grant": 5084854,
+          "completed_at_grant": 100,
+          "pending_cycles_in_phase": 40959,
+          "jobs": [
+            {
+              "seq": 100,
+              "after_first_output": 40351,
+              "after_last_vertex_word": 6268,
+              "remaining_output_words_at_request": 159,
+              "vertices": 15,
+              "draws": 12,
+              "output_words": 159,
+              "first_output": 5044501,
+              "last_vertex_output": 5078584,
+              "done": 5084853
+            }
+          ]
+        },
+        {
+          "ticket": 77,
+          "start": 5101717,
+          "descriptor_at_request": 101,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 101,
+          "grant": 5101718,
+          "completed_at_grant": 101,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 78,
+          "start": 5152401,
+          "descriptor_at_request": 101,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 102,
+          "grant": 5152402,
+          "completed_at_grant": 101,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 79,
+          "start": 5167138,
+          "descriptor_at_request": 103,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 103,
+          "grant": 5168509,
+          "completed_at_grant": 103,
+          "pending_cycles_in_phase": 1371,
+          "jobs": []
+        },
+        {
+          "ticket": 80,
+          "start": 5202408,
+          "descriptor_at_request": 103,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 104,
+          "grant": 5202409,
+          "completed_at_grant": 103,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 81,
+          "start": 5209871,
+          "descriptor_at_request": 103,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 104,
+          "grant": 5209872,
+          "completed_at_grant": 103,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 82,
+          "start": 5216738,
+          "descriptor_at_request": 103,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 104,
+          "grant": 5216739,
+          "completed_at_grant": 103,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 83,
+          "start": 5228705,
+          "descriptor_at_request": 104,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 104,
+          "grant": 5229479,
+          "completed_at_grant": 104,
+          "pending_cycles_in_phase": 774,
+          "jobs": []
+        },
+        {
+          "ticket": 84,
+          "start": 5324749,
+          "descriptor_at_request": 104,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 105,
+          "grant": 5324750,
+          "completed_at_grant": 104,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 85,
+          "start": 5335341,
+          "descriptor_at_request": 104,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 105,
+          "grant": 5335342,
+          "completed_at_grant": 104,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 86,
+          "start": 5344232,
+          "descriptor_at_request": 104,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 105,
+          "grant": 5344233,
+          "completed_at_grant": 104,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 87,
+          "start": 5348355,
+          "descriptor_at_request": 104,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 105,
+          "grant": 5348356,
+          "completed_at_grant": 104,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 88,
+          "start": 5360388,
+          "descriptor_at_request": 104,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 105,
+          "grant": 5360389,
+          "completed_at_grant": 104,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 89,
+          "start": 5398296,
+          "descriptor_at_request": 104,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 111,
+          "grant": 5398297,
+          "completed_at_grant": 104,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 90,
+          "start": 5409397,
+          "descriptor_at_request": 104,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 112,
+          "grant": 5409398,
+          "completed_at_grant": 104,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 91,
+          "start": 5428347,
+          "descriptor_at_request": 104,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 113,
+          "grant": 5428348,
+          "completed_at_grant": 104,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 92,
+          "start": 5451073,
+          "descriptor_at_request": 104,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 115,
+          "grant": 5451074,
+          "completed_at_grant": 104,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 93,
+          "start": 5460431,
+          "descriptor_at_request": 104,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 115,
+          "grant": 5460432,
+          "completed_at_grant": 104,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 94,
+          "start": 5467014,
+          "descriptor_at_request": 104,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 115,
+          "grant": 5467015,
+          "completed_at_grant": 104,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 95,
+          "start": 5487652,
+          "descriptor_at_request": 104,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 118,
+          "grant": 5487653,
+          "completed_at_grant": 104,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 96,
+          "start": 5515676,
+          "descriptor_at_request": 104,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 127,
+          "grant": 5515677,
+          "completed_at_grant": 104,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 97,
+          "start": 5522455,
+          "descriptor_at_request": 104,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 127,
+          "grant": 5522456,
+          "completed_at_grant": 104,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 98,
+          "start": 5528093,
+          "descriptor_at_request": 104,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 127,
+          "grant": 5528094,
+          "completed_at_grant": 104,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 99,
+          "start": 5545119,
+          "descriptor_at_request": 104,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 127,
+          "grant": 5545120,
+          "completed_at_grant": 104,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 100,
+          "start": 5556704,
+          "descriptor_at_request": 104,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 127,
+          "grant": 5556705,
+          "completed_at_grant": 104,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 101,
+          "start": 5566144,
+          "descriptor_at_request": 104,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 127,
+          "grant": 5566145,
+          "completed_at_grant": 104,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 102,
+          "start": 5573785,
+          "descriptor_at_request": 104,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 127,
+          "grant": 5573786,
+          "completed_at_grant": 104,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 103,
+          "start": 5592982,
+          "descriptor_at_request": 104,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 128,
+          "grant": 5592983,
+          "completed_at_grant": 104,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 104,
+          "start": 5602071,
+          "descriptor_at_request": 104,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 128,
+          "grant": 5602072,
+          "completed_at_grant": 104,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 105,
+          "start": 5614620,
+          "descriptor_at_request": 104,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 128,
+          "grant": 5614621,
+          "completed_at_grant": 104,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 106,
+          "start": 5621126,
+          "descriptor_at_request": 104,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 128,
+          "grant": 5621127,
+          "completed_at_grant": 104,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 107,
+          "start": 5626070,
+          "descriptor_at_request": 105,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 128,
+          "grant": 5631004,
+          "completed_at_grant": 105,
+          "pending_cycles_in_phase": 4934,
+          "jobs": [
+            {
+              "seq": 105,
+              "after_first_output": 4933,
+              "after_last_vertex_word": 70,
+              "remaining_output_words_at_request": 53,
+              "vertices": 10,
+              "draws": 4,
+              "output_words": 98,
+              "first_output": 5625442,
+              "last_vertex_output": 5630932,
+              "done": 5631003
+            }
+          ]
+        },
+        {
+          "ticket": 108,
+          "start": 5635861,
+          "descriptor_at_request": 105,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 128,
+          "grant": 5635862,
+          "completed_at_grant": 105,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 109,
+          "start": 5640197,
+          "descriptor_at_request": 105,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 128,
+          "grant": 5640198,
+          "completed_at_grant": 105,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 110,
+          "start": 5653800,
+          "descriptor_at_request": 105,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 128,
+          "grant": 5653801,
+          "completed_at_grant": 105,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 111,
+          "start": 5663386,
+          "descriptor_at_request": 106,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 128,
+          "grant": 5693639,
+          "completed_at_grant": 106,
+          "pending_cycles_in_phase": 30253,
+          "jobs": [
+            {
+              "seq": 106,
+              "after_first_output": 30252,
+              "after_last_vertex_word": 2150,
+              "remaining_output_words_at_request": 67,
+              "vertices": 11,
+              "draws": 5,
+              "output_words": 109,
+              "first_output": 5659232,
+              "last_vertex_output": 5691487,
+              "done": 5693638
+            }
+          ]
+        },
+        {
+          "ticket": 112,
+          "start": 5702794,
+          "descriptor_at_request": 108,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 128,
+          "grant": 5720958,
+          "completed_at_grant": 108,
+          "pending_cycles_in_phase": 18164,
+          "jobs": [
+            {
+              "seq": 108,
+              "after_first_output": 18163,
+              "after_last_vertex_word": 37,
+              "remaining_output_words_at_request": 11,
+              "vertices": 3,
+              "draws": 1,
+              "output_words": 29,
+              "first_output": 5699304,
+              "last_vertex_output": 5720919,
+              "done": 5720957
+            }
+          ]
+        },
+        {
+          "ticket": 113,
+          "start": 5726059,
+          "descriptor_at_request": 109,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 128,
+          "grant": 5736612,
+          "completed_at_grant": 109,
+          "pending_cycles_in_phase": 10553,
+          "jobs": [
+            {
+              "seq": 109,
+              "after_first_output": 10552,
+              "after_last_vertex_word": 75,
+              "remaining_output_words_at_request": 56,
+              "vertices": 11,
+              "draws": 5,
+              "output_words": 109,
+              "first_output": 5724855,
+              "last_vertex_output": 5736535,
+              "done": 5736611
+            }
+          ]
+        },
+        {
+          "ticket": 114,
+          "start": 5740871,
+          "descriptor_at_request": 111,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 128,
+          "grant": 5741384,
+          "completed_at_grant": 111,
+          "pending_cycles_in_phase": 513,
+          "jobs": [
+            {
+              "seq": 111,
+              "after_first_output": 228,
+              "after_last_vertex_word": 38,
+              "remaining_output_words_at_request": 80,
+              "vertices": 8,
+              "draws": 4,
+              "output_words": 80,
+              "first_output": 5741154,
+              "last_vertex_output": 5741344,
+              "done": 5741383
+            }
+          ]
+        },
+        {
+          "ticket": 115,
+          "start": 5745567,
+          "descriptor_at_request": 113,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 128,
+          "grant": 5746508,
+          "completed_at_grant": 113,
+          "pending_cycles_in_phase": 941,
+          "jobs": [
+            {
+              "seq": 113,
+              "after_first_output": 173,
+              "after_last_vertex_word": 32,
+              "remaining_output_words_at_request": 58,
+              "vertices": 6,
+              "draws": 2,
+              "output_words": 58,
+              "first_output": 5746333,
+              "last_vertex_output": 5746474,
+              "done": 5746507
+            }
+          ]
+        },
+        {
+          "ticket": 116,
+          "start": 5751179,
+          "descriptor_at_request": 114,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 128,
+          "grant": 5751277,
+          "completed_at_grant": 114,
+          "pending_cycles_in_phase": 98,
+          "jobs": [
+            {
+              "seq": 114,
+              "after_first_output": 97,
+              "after_last_vertex_word": 33,
+              "remaining_output_words_at_request": 31,
+              "vertices": 4,
+              "draws": 2,
+              "output_words": 40,
+              "first_output": 5751156,
+              "last_vertex_output": 5751242,
+              "done": 5751276
+            }
+          ]
+        },
+        {
+          "ticket": 117,
+          "start": 5755902,
+          "descriptor_at_request": 115,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 128,
+          "grant": 5755903,
+          "completed_at_grant": 115,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 118,
+          "start": 5760752,
+          "descriptor_at_request": 115,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 128,
+          "grant": 5760753,
+          "completed_at_grant": 115,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 119,
+          "start": 5766577,
+          "descriptor_at_request": 115,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 128,
+          "grant": 5766578,
+          "completed_at_grant": 115,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 120,
+          "start": 5784752,
+          "descriptor_at_request": 116,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 128,
+          "grant": 5784834,
+          "completed_at_grant": 116,
+          "pending_cycles_in_phase": 82,
+          "jobs": [
+            {
+              "seq": 116,
+              "after_first_output": 81,
+              "after_last_vertex_word": 29,
+              "remaining_output_words_at_request": 22,
+              "vertices": 6,
+              "draws": 2,
+              "output_words": 58,
+              "first_output": 5784662,
+              "last_vertex_output": 5784803,
+              "done": 5784833
+            }
+          ]
+        },
+        {
+          "ticket": 121,
+          "start": 5793302,
+          "descriptor_at_request": 121,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 128,
+          "grant": 5793679,
+          "completed_at_grant": 121,
+          "pending_cycles_in_phase": 377,
+          "jobs": [
+            {
+              "seq": 121,
+              "after_first_output": 173,
+              "after_last_vertex_word": 32,
+              "remaining_output_words_at_request": 58,
+              "vertices": 6,
+              "draws": 2,
+              "output_words": 58,
+              "first_output": 5793504,
+              "last_vertex_output": 5793645,
+              "done": 5793678
+            }
+          ]
+        },
+        {
+          "ticket": 122,
+          "start": 5797754,
+          "descriptor_at_request": 122,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 128,
+          "grant": 5797773,
+          "completed_at_grant": 122,
+          "pending_cycles_in_phase": 19,
+          "jobs": [
+            {
+              "seq": 122,
+              "after_first_output": 18,
+              "after_last_vertex_word": 18,
+              "remaining_output_words_at_request": 2,
+              "vertices": 3,
+              "draws": 1,
+              "output_words": 29,
+              "first_output": 5797680,
+              "last_vertex_output": 5797740,
+              "done": 5797772
+            }
+          ]
+        },
+        {
+          "ticket": 123,
+          "start": 5802796,
+          "descriptor_at_request": 125,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 128,
+          "grant": 5803099,
+          "completed_at_grant": 125,
+          "pending_cycles_in_phase": 303,
+          "jobs": []
+        },
+        {
+          "ticket": 124,
+          "start": 5806909,
+          "descriptor_at_request": 126,
+          "active_at_request": 0,
+          "context_open_at_request": 1,
+          "requested_prefix": 128,
+          "grant": 5808419,
+          "completed_at_grant": 127,
+          "pending_cycles_in_phase": 1510,
+          "jobs": [
+            {
+              "seq": 127,
+              "after_first_output": 170,
+              "after_last_vertex_word": 29,
+              "remaining_output_words_at_request": 58,
+              "vertices": 6,
+              "draws": 2,
+              "output_words": 58,
+              "first_output": 5808247,
+              "last_vertex_output": 5808388,
+              "done": 5808418
+            }
+          ]
+        },
+        {
+          "ticket": 125,
+          "start": 5812718,
+          "descriptor_at_request": 127,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 128,
+          "grant": 5812719,
+          "completed_at_grant": 127,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 126,
+          "start": 5817812,
+          "descriptor_at_request": 127,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 128,
+          "grant": 5817813,
+          "completed_at_grant": 127,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 127,
+          "start": 5851817,
+          "descriptor_at_request": 128,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 137,
+          "grant": 5851818,
+          "completed_at_grant": 128,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 128,
+          "start": 5861696,
+          "descriptor_at_request": 128,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 137,
+          "grant": 5861697,
+          "completed_at_grant": 128,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 129,
+          "start": 5876865,
+          "descriptor_at_request": 128,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 137,
+          "grant": 5876866,
+          "completed_at_grant": 128,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 130,
+          "start": 5891232,
+          "descriptor_at_request": 131,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 137,
+          "grant": 5892507,
+          "completed_at_grant": 131,
+          "pending_cycles_in_phase": 1275,
+          "jobs": [
+            {
+              "seq": 131,
+              "after_first_output": 170,
+              "after_last_vertex_word": 32,
+              "remaining_output_words_at_request": 58,
+              "vertices": 6,
+              "draws": 2,
+              "output_words": 58,
+              "first_output": 5892335,
+              "last_vertex_output": 5892473,
+              "done": 5892506
+            }
+          ]
+        },
+        {
+          "ticket": 131,
+          "start": 5915070,
+          "descriptor_at_request": 137,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 137,
+          "grant": 5915071,
+          "completed_at_grant": 137,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 132,
+          "start": 5960236,
+          "descriptor_at_request": 138,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 141,
+          "grant": 6035241,
+          "completed_at_grant": 138,
+          "pending_cycles_in_phase": 75005,
+          "jobs": [
+            {
+              "seq": 138,
+              "after_first_output": 75004,
+              "after_last_vertex_word": 1746,
+              "remaining_output_words_at_request": 59,
+              "vertices": 10,
+              "draws": 4,
+              "output_words": 98,
+              "first_output": 5955228,
+              "last_vertex_output": 6033493,
+              "done": 6035240
+            }
+          ]
+        },
+        {
+          "ticket": 133,
+          "start": 6046995,
+          "descriptor_at_request": 139,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 141,
+          "grant": 6052194,
+          "completed_at_grant": 139,
+          "pending_cycles_in_phase": 5199,
+          "jobs": [
+            {
+              "seq": 139,
+              "after_first_output": 5198,
+              "after_last_vertex_word": 2277,
+              "remaining_output_words_at_request": 22,
+              "vertices": 12,
+              "draws": 6,
+              "output_words": 120,
+              "first_output": 6039432,
+              "last_vertex_output": 6049915,
+              "done": 6052193
+            }
+          ]
+        },
+        {
+          "ticket": 134,
+          "start": 6097363,
+          "descriptor_at_request": 141,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 145,
+          "grant": 6097364,
+          "completed_at_grant": 141,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 135,
+          "start": 6112812,
+          "descriptor_at_request": 144,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 145,
+          "grant": 6119757,
+          "completed_at_grant": 144,
+          "pending_cycles_in_phase": 6945,
+          "jobs": [
+            {
+              "seq": 144,
+              "after_first_output": 6944,
+              "after_last_vertex_word": 62,
+              "remaining_output_words_at_request": 26,
+              "vertices": 3,
+              "draws": 1,
+              "output_words": 29,
+              "first_output": 6105088,
+              "last_vertex_output": 6119693,
+              "done": 6119756
+            }
+          ]
+        },
+        {
+          "ticket": 136,
+          "start": 6129927,
+          "descriptor_at_request": 145,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 145,
+          "grant": 6129928,
+          "completed_at_grant": 145,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 137,
+          "start": 6146542,
+          "descriptor_at_request": 145,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 147,
+          "grant": 6146543,
+          "completed_at_grant": 145,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 138,
+          "start": 6162292,
+          "descriptor_at_request": 147,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 147,
+          "grant": 6162293,
+          "completed_at_grant": 147,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 139,
+          "start": 6263580,
+          "descriptor_at_request": 147,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 148,
+          "grant": 6263581,
+          "completed_at_grant": 147,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 140,
+          "start": 6287178,
+          "descriptor_at_request": 148,
+          "active_at_request": 0,
+          "context_open_at_request": 1,
+          "requested_prefix": 154,
+          "grant": 6288579,
+          "completed_at_grant": 149,
+          "pending_cycles_in_phase": 1401,
+          "jobs": [
+            {
+              "seq": 149,
+              "after_first_output": 94,
+              "after_last_vertex_word": 34,
+              "remaining_output_words_at_request": 29,
+              "vertices": 3,
+              "draws": 1,
+              "output_words": 29,
+              "first_output": 6288483,
+              "last_vertex_output": 6288543,
+              "done": 6288578
+            }
+          ]
+        },
+        {
+          "ticket": 141,
+          "start": 6297147,
+          "descriptor_at_request": 153,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 154,
+          "grant": 6297499,
+          "completed_at_grant": 153,
+          "pending_cycles_in_phase": 352,
+          "jobs": [
+            {
+              "seq": 153,
+              "after_first_output": 97,
+              "after_last_vertex_word": 37,
+              "remaining_output_words_at_request": 29,
+              "vertices": 3,
+              "draws": 1,
+              "output_words": 29,
+              "first_output": 6297400,
+              "last_vertex_output": 6297460,
+              "done": 6297498
+            }
+          ]
+        },
+        {
+          "ticket": 142,
+          "start": 6300812,
+          "descriptor_at_request": 154,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 154,
+          "grant": 6300813,
+          "completed_at_grant": 154,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 143,
+          "start": 6395918,
+          "descriptor_at_request": 156,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 161,
+          "grant": 6397462,
+          "completed_at_grant": 156,
+          "pending_cycles_in_phase": 1544,
+          "jobs": [
+            {
+              "seq": 156,
+              "after_first_output": 230,
+              "after_last_vertex_word": 40,
+              "remaining_output_words_at_request": 78,
+              "vertices": 8,
+              "draws": 3,
+              "output_words": 78,
+              "first_output": 6397230,
+              "last_vertex_output": 6397420,
+              "done": 6397461
+            }
+          ]
+        },
+        {
+          "ticket": 144,
+          "start": 6404704,
+          "descriptor_at_request": 159,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 161,
+          "grant": 6404893,
+          "completed_at_grant": 159,
+          "pending_cycles_in_phase": 189,
+          "jobs": [
+            {
+              "seq": 159,
+              "after_first_output": 188,
+              "after_last_vertex_word": 33,
+              "remaining_output_words_at_request": 60,
+              "vertices": 9,
+              "draws": 3,
+              "output_words": 87,
+              "first_output": 6404639,
+              "last_vertex_output": 6404858,
+              "done": 6404892
+            }
+          ]
+        },
+        {
+          "ticket": 145,
+          "start": 6415482,
+          "descriptor_at_request": 161,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 161,
+          "grant": 6415483,
+          "completed_at_grant": 161,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 146,
+          "start": 6453984,
+          "descriptor_at_request": 161,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 163,
+          "grant": 6453985,
+          "completed_at_grant": 161,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 147,
+          "start": 6459519,
+          "descriptor_at_request": 163,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 163,
+          "grant": 6460297,
+          "completed_at_grant": 163,
+          "pending_cycles_in_phase": 778,
+          "jobs": [
+            {
+              "seq": 163,
+              "after_first_output": 262,
+              "after_last_vertex_word": 46,
+              "remaining_output_words_at_request": 93,
+              "vertices": 9,
+              "draws": 6,
+              "output_words": 93,
+              "first_output": 6460033,
+              "last_vertex_output": 6460249,
+              "done": 6460296
+            }
+          ]
+        },
+        {
+          "ticket": 148,
+          "start": 6813791,
+          "descriptor_at_request": 163,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 167,
+          "grant": 6813792,
+          "completed_at_grant": 163,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 149,
+          "start": 6820149,
+          "descriptor_at_request": 165,
+          "active_at_request": 1,
+          "context_open_at_request": 0,
+          "requested_prefix": 167,
+          "grant": 6820777,
+          "completed_at_grant": 165,
+          "pending_cycles_in_phase": 628,
+          "jobs": [
+            {
+              "seq": 165,
+              "after_first_output": 400,
+              "after_last_vertex_word": 53,
+              "remaining_output_words_at_request": 142,
+              "vertices": 14,
+              "draws": 8,
+              "output_words": 142,
+              "first_output": 6820375,
+              "last_vertex_output": 6820722,
+              "done": 6820776
+            }
+          ]
+        },
+        {
+          "ticket": 150,
+          "start": 6828086,
+          "descriptor_at_request": 167,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 167,
+          "grant": 6828087,
+          "completed_at_grant": 167,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 151,
+          "start": 6843648,
+          "descriptor_at_request": 167,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 168,
+          "grant": 6843649,
+          "completed_at_grant": 167,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 152,
+          "start": 6852420,
+          "descriptor_at_request": 168,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 168,
+          "grant": 6852421,
+          "completed_at_grant": 168,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 153,
+          "start": 6928060,
+          "descriptor_at_request": 168,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 169,
+          "grant": 6928061,
+          "completed_at_grant": 168,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 154,
+          "start": 6936437,
+          "descriptor_at_request": 169,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 169,
+          "grant": 6936438,
+          "completed_at_grant": 169,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 155,
+          "start": 6957839,
+          "descriptor_at_request": 169,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 170,
+          "grant": 6957840,
+          "completed_at_grant": 169,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 156,
+          "start": 6965434,
+          "descriptor_at_request": 170,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 170,
+          "grant": 6965435,
+          "completed_at_grant": 170,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 157,
+          "start": 6998530,
+          "descriptor_at_request": 170,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 171,
+          "grant": 6998531,
+          "completed_at_grant": 170,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 158,
+          "start": 7008978,
+          "descriptor_at_request": 171,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 171,
+          "grant": 7008979,
+          "completed_at_grant": 171,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 159,
+          "start": 7082764,
+          "descriptor_at_request": 171,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 172,
+          "grant": 7082765,
+          "completed_at_grant": 171,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 160,
+          "start": 7091210,
+          "descriptor_at_request": 172,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 172,
+          "grant": 7091211,
+          "completed_at_grant": 172,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 161,
+          "start": 7435315,
+          "descriptor_at_request": 172,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 174,
+          "grant": 7435316,
+          "completed_at_grant": 172,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        },
+        {
+          "ticket": 162,
+          "start": 7444704,
+          "descriptor_at_request": 174,
+          "active_at_request": 0,
+          "context_open_at_request": 0,
+          "requested_prefix": 174,
+          "grant": 7444705,
+          "completed_at_grant": 174,
+          "pending_cycles_in_phase": 1,
+          "jobs": []
+        }
+      ]
+    }
+  },
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v1/run/async-events.tsv": "9016b145234958d339f0e1996da4b0d0c05a586496a13016dff10ffe46b64298",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v1/run/worker-words.tsv": "1e5d5978abb003f8a2ec3d3669b431ec1bd550412e83db4701a5b50a2f2037e5",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v1/run/async-overlap.tsv": "deca46e741e9798afbade0d437efcb2c50d2d602ec0ad7c451e6515aaab7cd93",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v1/run/boundaries.tsv": "7b3541b062388e9e8c4e92816bf52cc2fa71ecd9b1c31ce472f513f21371d16c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v1/check-independent-v1.json": "7ee241f926476d7ae81d47a5f5521a05f1e801e084c5da58e5d410fde95ad618",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/lease-window-v1/analyze.py": "a7899e772b9f2f67855890f9e89a131fd86d6ebc8b1f62847e1b569d1f37c75e"
+  }
+}

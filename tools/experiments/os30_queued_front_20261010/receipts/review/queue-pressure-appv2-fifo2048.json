@@ -1,0 +1,87 @@
+{
+  "status": "PASS_EXACT_EVENT_INTERVAL_ATTRIBUTION",
+  "run": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-large-v1/run",
+  "model": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/native-large-fifo-v1",
+  "output_queue_words": 2048,
+  "pointer_modulus": 4096,
+  "warm_begin": 3988060,
+  "warm_end": 8355106,
+  "warm_cycles": 4367046,
+  "worker_state_cycles": {
+    "header": 3496179,
+    "passthrough_payload": 510881,
+    "context": 490,
+    "wait_jobs": 98,
+    "view_request": 98,
+    "view_prime": 98,
+    "job_prime": 699,
+    "job_capture": 699,
+    "math_request": 2964,
+    "cull_start": 690,
+    "cull_wait": 39330,
+    "next_job": 699,
+    "vertex_select": 3234,
+    "vertex_prime": 4944,
+    "vertex_capture": 4944,
+    "vertex_emit": 279132,
+    "draw_select": 699,
+    "draw_prime": 356,
+    "draw_capture": 356,
+    "draw_header": 8276,
+    "draw_word": 11891,
+    "run_finish": 98,
+    "header_prime": 98,
+    "release_token": 93
+  },
+  "output_occupancy_cycles": {
+    "zero": 2593908,
+    "below_quarter": 464159,
+    "quarter_to_half": 283963,
+    "half_to_full": 162412,
+    "full": 862604
+  },
+  "derived_cycles": {
+    "output_word_cycle_sum": 2330243109,
+    "front_empty_idle": 3420515,
+    "math_request": 2964,
+    "all_math_states": 42984,
+    "math_owned": 41400,
+    "fifo_full": 862604,
+    "blocked_geometry_output": 293025,
+    "blocked_passthrough_output": 569353,
+    "math_request_with_raw_job": 1584
+  },
+  "bank_valid_mask_cycles": {
+    "0": 3142055,
+    "1": 455567,
+    "3": 718835,
+    "2": 50589
+  },
+  "weighted_bank_hold_cycles": {
+    "copy": 23994,
+    "ready_not_reading": 1582301,
+    "reading": 337531
+  },
+  "exact_overlap_cycles": {
+    "both_banks_and_output_full": 708800,
+    "both_banks_and_math_states": 3366,
+    "both_banks_and_front_empty": 2
+  },
+  "limitations": [
+    "Durations overlap CPU and GPU work and are not causal speedup estimates.",
+    "Weighted bank holds count each bank separately, not a frame partition.",
+    "Ready-not-reading includes queued work and generation lifetime between runs.",
+    "Queue-event pointers are used; legacy ring_word_sum is not used.",
+    "Event streams are treated as piecewise constant at recorded event cycles; common pre/post-edge sampling convention is inherited."
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-large-v1/run/queue-events.tsv": "8a967118cc7d7a97b615966d305031009b6a546794e96bc9f6c91e3a719c61da",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-large-v1/run/bank-events.tsv": "cd8673ec19433144fa59a80e1929169a8a8c599170976f2fead7a95c3d4cee2d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-large-v1/run/boundaries.tsv": "f4733647c94a80cd40c155e9dddeedeb874dd8d60466668c472f5a1d273eeb13",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-large-v1/run/prepared-queue.json": "51ce9e164ef5a72c455515202d17deea078705ed71507ee0fa865651998828da",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/native-large-fifo-v1/prepared.json": "45c81f580a75621b6ebaae08d816565947475fecc4747a1deb7c55235e8fc2d5",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/native-large-fifo-v1/frozen/src/fpga/common/gpu_core.v": "df17bf29f1f1ec239cdcca8921c8c913298e7b4f636f97a01c2f08fb999205da",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/native-large-fifo-v1/frozen/src/fpga/common/gpu_queued_front.v": "ac978376a246b6860a4891fd23c9f4405ccb2e37362d0aa88091a29187b09dc6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/review/analyze-queue-pressure-v2.py": "61af870616c9cca9f85f7908dd146d9bef117d9b97a5c5b5701e8da5e7483daa"
+  }
+}

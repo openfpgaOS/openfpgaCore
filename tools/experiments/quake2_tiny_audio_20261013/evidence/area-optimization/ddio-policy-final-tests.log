@@ -1,0 +1,30 @@
+test_map_once_private_database_failed_attempt_and_resume (__main__.Integration.test_map_once_private_database_failed_attempt_and_resume) ... ok
+test_100_closed (__main__.Parsing.test_100_closed) ... ok
+test_100_closed_preferred_and_high_fmax_bad_hold_rejected (__main__.Parsing.test_100_closed_preferred_and_high_fmax_bad_hold_rejected) ... ok
+test_absent_crossing_paths_explicitly_recorded (__main__.Parsing.test_absent_crossing_paths_explicitly_recorded) ... ok
+test_cross_clock_into_main_negative_rejects (__main__.Parsing.test_cross_clock_into_main_negative_rejects) ... ok
+test_crossing_completeness_and_nonfinite_rejected (__main__.Parsing.test_crossing_completeness_and_nonfinite_rejected) ... ok
+test_ddio_missing_or_changed_connectivity_rejects (__main__.Parsing.test_ddio_missing_or_changed_connectivity_rejects) ... ok
+test_estimate_does_not_claim_100_closure (__main__.Parsing.test_estimate_does_not_claim_100_closure) ... ok
+test_fmax_missing_fast_corner_rejected (__main__.Parsing.test_fmax_missing_fast_corner_rejected) ... ok
+test_input_into_main_negative_rejects (__main__.Parsing.test_input_into_main_negative_rejects) ... ok
+test_missing_corner_and_duplicate_are_rejected (__main__.Parsing.test_missing_corner_and_duplicate_are_rejected) ... ok
+test_missing_physical_lab_rejected (__main__.Parsing.test_missing_physical_lab_rejected) ... ok
+test_nan_inf_and_required_no_paths_rejected (__main__.Parsing.test_nan_inf_and_required_no_paths_rejected) ... ok
+test_negative_nonsetup_rejects_each_type (__main__.Parsing.test_negative_nonsetup_rejects_each_type) ... ok
+test_no_dropped_populated_crossing (__main__.Parsing.test_no_dropped_populated_crossing) ... ok
+test_no_other_crossing_or_input_waiver (__main__.Parsing.test_no_other_crossing_or_input_waiver) ... ok
+test_no_selection_before_all_seeds (__main__.Parsing.test_no_selection_before_all_seeds) ... ok
+test_nonmain_setup_negative_rejects (__main__.Parsing.test_nonmain_setup_negative_rejects) ... ok
+test_only_proved_unused_ddio_input_can_be_classified (__main__.Parsing.test_only_proved_unused_ddio_input_can_be_classified) ... ok
+test_optional_reset_no_paths (__main__.Parsing.test_optional_reset_no_paths) ... ok
+test_strictly_greater_than_90 (__main__.Parsing.test_strictly_greater_than_90) ... ok
+test_used_ddio_input_negative_still_rejects (__main__.Parsing.test_used_ddio_input_negative_still_rejects) ... ok
+test_area_is_allowed_and_last_assignment_is_recorded (__main__.SynthesisPolicy.test_area_is_allowed_and_last_assignment_is_recorded) ... ok
+test_cpu_override_and_clock_constraints_stay_protected (__main__.SynthesisPolicy.test_cpu_override_and_clock_constraints_stay_protected) ... ok
+test_invalid_technique_and_tcl_suffix_are_rejected (__main__.SynthesisPolicy.test_invalid_technique_and_tcl_suffix_are_rejected) ... ok
+
+----------------------------------------------------------------------
+Ran 25 tests in 8.520s
+
+OK

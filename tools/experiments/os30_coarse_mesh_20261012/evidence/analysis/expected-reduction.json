@@ -1,0 +1,33 @@
+{
+  "status": "PREDICTION_FROM_F24_TRACE_NOT_F25_MEASUREMENT",
+  "phases": [
+    {
+      "phase": 1,
+      "old_submissions": 98,
+      "expected_submissions": 21,
+      "expected_group_commands": 12,
+      "expected_single_commands": 9,
+      "old_context_and_job_words": 4116,
+      "expected_context_and_job_words": 834,
+      "skipped_CPU_vertex_handlers": 77,
+      "expected_real_CPU_vertex_calls": 277
+    },
+    {
+      "phase": 2,
+      "old_submissions": 76,
+      "expected_submissions": 27,
+      "expected_group_commands": 14,
+      "expected_single_commands": 13,
+      "old_context_and_job_words": 3192,
+      "expected_context_and_job_words": 1078,
+      "skipped_CPU_vertex_handlers": 49,
+      "expected_real_CPU_vertex_calls": 305
+    }
+  ],
+  "source_sha256": "df5e6bedfb854f3cfc82cf6731ba9733ee5d20279a7a08e6102ba7cec781a7ce",
+  "limitations": [
+    "Counts are architectural expectations; actual new trace and total interval cycles decide the result.",
+    "Immutable group descriptors cost initial CPU preparation and six PSRAM words per member fetched on use.",
+    "Whole-frame CPU uploads also include non-group geometry and all state commands."
+  ]
+}

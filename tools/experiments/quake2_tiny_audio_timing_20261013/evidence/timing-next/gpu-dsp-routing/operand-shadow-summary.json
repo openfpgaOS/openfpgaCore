@@ -1,0 +1,121 @@
+{
+  "passed": true,
+  "runs": 16,
+  "cycles_checked": 74153842,
+  "nonzero_b_operand_checks": 3773736,
+  "changed_zero_b_idle_operands": 7836,
+  "rows": [
+    {
+      "log": "operand-shadow-gpu-v1/replays/particles-v5-live-v2/frame_00081.paced.log",
+      "cycles": 12679311,
+      "live": 215749,
+      "changed_idle": 423,
+      "sha256": "f049d13ea68df0c8687f6733d43b93b0322b2e3c4ce6b169df088b570402342d"
+    },
+    {
+      "log": "operand-shadow-gpu-v1/replays/particles-v5-live-v2/frame_00081.unpaced.log",
+      "cycles": 5435707,
+      "live": 216054,
+      "changed_idle": 460,
+      "sha256": "80bf023f91067501165e09b81ce2d269484c5d3ef3d75d33787ff7a20652b23f"
+    },
+    {
+      "log": "operand-shadow-gpu-v1/replays/particles-v5-main-v2/frame_00020.paced.log",
+      "cycles": 3794506,
+      "live": 225352,
+      "changed_idle": 463,
+      "sha256": "0daa8ccec92c64aa082453613795e7f079d650ce7d619970484ed21c05f9d771"
+    },
+    {
+      "log": "operand-shadow-gpu-v1/replays/particles-v5-main-v2/frame_00020.unpaced.log",
+      "cycles": 2825961,
+      "live": 225347,
+      "changed_idle": 463,
+      "sha256": "5f6fc437473464667f47c03706e004c9b716f4b84e1de321358d8b92414e143e"
+    },
+    {
+      "log": "operand-shadow-gpu-v1/replays/particles-v5-main-v2/frame_00080.paced.log",
+      "cycles": 4571093,
+      "live": 249847,
+      "changed_idle": 339,
+      "sha256": "61ad92a06038890f62dbb05c65a7c142864ab3365101110d721e500e36bc7e15"
+    },
+    {
+      "log": "operand-shadow-gpu-v1/replays/particles-v5-main-v2/frame_00080.unpaced.log",
+      "cycles": 3416305,
+      "live": 249846,
+      "changed_idle": 340,
+      "sha256": "734a05a19b145329e099b1772e29a079990ca65d48ca5cd1e1f6f984b696aca2"
+    },
+    {
+      "log": "operand-shadow-gpu-v1/replays/particles-v5-main-v2/frame_00092.paced.log",
+      "cycles": 6503582,
+      "live": 267930,
+      "changed_idle": 477,
+      "sha256": "26445b48c17b35e9089bf1185d4a866135e0e049b6261d938cbb37ba1e2033de"
+    },
+    {
+      "log": "operand-shadow-gpu-v1/replays/particles-v5-main-v2/frame_00092.unpaced.log",
+      "cycles": 3715974,
+      "live": 268221,
+      "changed_idle": 498,
+      "sha256": "903836bf77a3259c5aa90921e0f472d39b85512e72de2244f6e6e15140006479"
+    },
+    {
+      "log": "operand-shadow-gpu-v1/replays/particles-v5-main-v2/frame_00094.paced.log",
+      "cycles": 5254572,
+      "live": 275414,
+      "changed_idle": 502,
+      "sha256": "58e48b0d48d21ea940d5d6637b1250907aa10a6dff2ed9ffc58fe99c37e8e84d"
+    },
+    {
+      "log": "operand-shadow-gpu-v1/replays/particles-v5-main-v2/frame_00094.unpaced.log",
+      "cycles": 3682964,
+      "live": 275421,
+      "changed_idle": 504,
+      "sha256": "fb5edb55c93c35c08a9570f95abbaf9c3e99c0adea9bb74270665bc5f94940e5"
+    },
+    {
+      "log": "operand-shadow-gpu-v1/replays/particles-v5-main-v2/frame_00148.paced.log",
+      "cycles": 5506821,
+      "live": 234376,
+      "changed_idle": 597,
+      "sha256": "3a592a83c3fe471a9a9d347b9664d4e657dd7ed486c4f31de14e27a3351b20a5"
+    },
+    {
+      "log": "operand-shadow-gpu-v1/replays/particles-v5-main-v2/frame_00148.unpaced.log",
+      "cycles": 2864986,
+      "live": 234419,
+      "changed_idle": 595,
+      "sha256": "c292db48f7796f33b7528f3d6cf56cd7fa03420a21d4dece110fd7a575a884e4"
+    },
+    {
+      "log": "operand-shadow-gpu-v1/replays/particles-v5-main-v2/frame_00180.paced.log",
+      "cycles": 5031030,
+      "live": 227223,
+      "changed_idle": 579,
+      "sha256": "816ec3665cafede9681bd7de699de52427464b9c67ff08c5a59c630bda68ae07"
+    },
+    {
+      "log": "operand-shadow-gpu-v1/replays/particles-v5-main-v2/frame_00180.unpaced.log",
+      "cycles": 3178000,
+      "live": 227275,
+      "changed_idle": 573,
+      "sha256": "470592cf3cf780dab2fb2d39b7ca6d8f7f4b5a6d39cafd27585ce332ad1c2065"
+    },
+    {
+      "log": "operand-shadow-gpu-v1/replays/particles-v5-main-v2/frame_00300.paced.log",
+      "cycles": 3282163,
+      "live": 190634,
+      "changed_idle": 512,
+      "sha256": "72d1df01730ffc47a7acd1d59a5981a481123abb78cc1cfa0bf923b5de21dc6f"
+    },
+    {
+      "log": "operand-shadow-gpu-v1/replays/particles-v5-main-v2/frame_00300.unpaced.log",
+      "cycles": 2410867,
+      "live": 190628,
+      "changed_idle": 511,
+      "sha256": "41d512aa3669682d2e2711a3c05faf6805de807ca5cc8b01f832fb0ae5edee17"
+    }
+  ]
+}

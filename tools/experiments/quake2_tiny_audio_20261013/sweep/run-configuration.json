@@ -1,0 +1,8 @@
+{
+  "quartus_version": "Quartus Prime Shell\nVersion 25.1std.0 Build 1129 10/21/2025 SC Lite Edition\nCopyright (C) 2025  Altera Corporation. All rights reserved.\n",
+  "processors": 4,
+  "minimum_available_memory_gib": 20,
+  "maximum_global_fit_processes": 4,
+  "maximum_processors_per_process": 4,
+  "source_sha256": "f63613efe348448c45af303972d6804a41d15724ac3a716f17eff4b40e6eb2d3"
+}

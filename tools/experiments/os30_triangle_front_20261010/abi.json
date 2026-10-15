@@ -1,0 +1,26 @@
+{
+  "name": "TFP1",
+  "capability": "0x54465031",
+  "word_offsets": {
+    "capability": "0x011",
+    "generation": "0x012",
+    "configuration": "0x013",
+    "control_status": "0x014",
+    "keep_low": "0x015",
+    "keep_high": "0x016",
+    "fallback_low": "0x017",
+    "fallback_high": "0x018",
+    "jobs": "0x200..0x23f",
+    "clip_reject_count": "0x019"
+  },
+  "configuration": "bits[6:0] count 1..64; bits[9:8] cull mode 0=none 1=front 2=back 3=both",
+  "control_write": "bit0 START, bit1 clear done/errors; full word writes only; accept START only idle and current successful raw generation",
+  "status_read": "bit0 busy, bit1 done, bit2 any fallback, bit3 protocol error",
+  "job": "bits[4:0]=raw local vertex0, [9:5]=vertex1, [14:10]=vertex2; other bits zero",
+  "results": "one keep/fallback bit per triangle, retained until next START/reset; fallback whole batch in initial software; no GPU draw side effects from preflight",
+  "ownership": "reserve raw read port and shared FMA/scratch for preflight; wait accepted CPU alias bursts and BIM2 copy to drain; inhibit raw START and BIM2 CLAIM while preflight active; GPU snapshot reads remain independent",
+  "reset": "fabric reset cancels all; GPU import_reset must not abandon accepted raw DMA; preflight software is synchronous; preserve stable result through consumer-only reset or cancel safely after drain",
+  "arithmetic": "exact current CPU reduced-FMA nine-op sequence; clip/W/equal-W and every unsupported intermediate checked before draw",
+  "job_lifetime": "Job slots retain contents and initialized state until rewritten or fabric reset; software rewrites all selected jobs before START. Uninitialized/reserved/out-of-range jobs return protocol error and fallback.",
+  "gpu_reset": "Consumer-only GPU reset leaves preflight execution/results intact; only fabric reset resets shared FMA or accepted raw DMA."
+}

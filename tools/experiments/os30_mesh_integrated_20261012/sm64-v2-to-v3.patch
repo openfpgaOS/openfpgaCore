@@ -1,0 +1,38 @@
+--- a/src/sm64/pocket/perf_pocket.c
++++ b/src/sm64/pocket/perf_pocket.c
+@@ -381,7 +381,7 @@
+ #if SM64_PERF_DETAILS
+     print_text(12,210,"PERF P3 VERT");
+ #else
+-    print_text(12,210,"PERF F17 MESH2");
++    print_text(12,210,"PERF F18 MESH3");
+ #endif
+     if(!s->valid) {
+         print_text(12,178,"WAIT 5 SECONDS IN LEVEL");
+--- a/src/sm64/sm64/src/pc/gfx/gfx_gpu.c
++++ b/src/sm64/sm64/src/pc/gfx/gfx_gpu.c
+@@ -326,6 +326,11 @@
+ void gfx_gpu_mesh_wait_source(void) {
+ #ifndef OF_PC
+     if(sm64_mesh_front_capability!=1u)return;
++    /* A validated owner can be waiting for packet credit held by older staged
++     * markers. Publish once before waiting; after copy starts, its complete
++     * reservation makes progress independent of GPU consumption. */
++    const uint32_t status=BRAM_GEO_REGS[0x21];
++    if((status&0xa1u)==0x21u)of_gpu_kick_now();
+     while(BRAM_GEO_REGS[0x21]&1u)++gfx_mesh_stats[13];
+ #endif
+ }
+@@ -2083,9 +2088,9 @@
+     *packet++=(uint32_t)context->u_offset;
+     *packet++=(uint32_t)context->v_offset;
+     _gpu_ring_commit(5);g_vc_words+=5;
+-    /* The next raw LOAD can wait on this ownership. Its marker must be
+-     * published even when the ordinary staging threshold is not reached. */
+-    of_gpu_kick_now();
++    /* Keep small mesh packets in the normal command batch. Source ownership
++     * waits publish older staged markers if packet credit blocks progress. */
++    of_gpu_kick();
+ #else
+     (void)serial;(void)context;
+ #endif

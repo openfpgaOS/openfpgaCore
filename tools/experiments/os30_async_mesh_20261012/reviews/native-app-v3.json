@@ -1,0 +1,5679 @@
+{
+  "candidate": {
+    "cycles": [
+      4876661,
+      5105025
+    ],
+    "total_cycles": 9981686,
+    "retired": 4600221,
+    "uploaded_words": 38121,
+    "function_retire_and_preceding_gap_cycles": {
+      "<before_first_ELF_symbol>": [
+        381393,
+        583065
+      ],
+      "bhv_cmd_break": [
+        4,
+        187
+      ],
+      "bhv_cmd_end_loop": [
+        2992,
+        6656
+      ],
+      "bhv_cmd_call_native": [
+        4650,
+        12021
+      ],
+      "bhv_cmd_set_int": [
+        1088,
+        1892
+      ],
+      "bhv_cmd_add_int": [
+        408,
+        2350
+      ],
+      "random_float": [
+        69,
+        557
+      ],
+      "cur_obj_update": [
+        28192,
+        184890
+      ],
+      "geo_obj_init_animation": [
+        28,
+        662
+      ],
+      "geo_obj_init_animation_accel": [
+        72,
+        693
+      ],
+      "retrieve_animation_index": [
+        3088,
+        8566
+      ],
+      "geo_update_animation_frame": [
+        200,
+        1716
+      ],
+      "level_cmd_call_loop": [
+        36,
+        211
+      ],
+      "level_script_execute": [
+        70,
+        931
+      ],
+      "vec3f_copy": [
+        666,
+        2344
+      ],
+      "vec3f_set": [
+        550,
+        1080
+      ],
+      "vec3f_add": [
+        30,
+        224
+      ],
+      "vec3s_copy": [
+        990,
+        1458
+      ],
+      "vec3s_set": [
+        50,
+        544
+      ],
+      "vec3f_to_vec3s": [
+        180,
+        1028
+      ],
+      "mtxf_lookat": [
+        208,
+        1007
+      ],
+      "mtxf_align_terrain_normal": [
+        632,
+        3358
+      ],
+      "mtxf_rotate_xy": [
+        80,
+        246
+      ],
+      "vec3f_set_dist_and_angle": [
+        140,
+        1388
+      ],
+      "atan2s": [
+        2714,
+        13476
+      ],
+      "vec3f_get_dist_and_angle": [
+        582,
+        3087
+      ],
+      "find_wall_collisions_from_list": [
+        2932,
+        25720
+      ],
+      "find_floor_from_list": [
+        36810,
+        123748
+      ],
+      "find_ceil_from_list.constprop.0": [
+        48,
+        442
+      ],
+      "f32_find_wall_collision": [
+        340,
+        1463
+      ],
+      "find_wall_collisions": [
+        2016,
+        5282
+      ],
+      "find_ceil": [
+        696,
+        1520
+      ],
+      "find_floor_height_and_data": [
+        6032,
+        9281
+      ],
+      "find_floor": [
+        7104,
+        16106
+      ],
+      "find_water_level": [
+        144,
+        785
+      ],
+      "find_poison_gas_level": [
+        12,
+        562
+      ],
+      "clear_dynamic_surfaces": [
+        2596,
+        18199
+      ],
+      "load_object_collision_model": [
+        3122,
+        9320
+      ],
+      "area_update_objects": [
+        10,
+        234
+      ],
+      "render_game": [
+        158,
+        1390
+      ],
+      "exclamation_box_act_1": [
+        144,
+        832
+      ],
+      "exclamation_box_act_2": [
+        34,
+        338
+      ],
+      "king_bobomb_act_0": [
+        58,
+        328
+      ],
+      "bhv_bobomb_anchor_mario_loop": [
+        42,
+        271
+      ],
+      "bhv_king_bobomb_loop": [
+        76,
+        911
+      ],
+      "bhv_fading_warp_loop": [
+        48,
+        306
+      ],
+      "bhv_yellow_coin_loop": [
+        180,
+        1662
+      ],
+      "bhv_coin_formation_loop": [
+        378,
+        1937
+      ],
+      "bhv_purple_switch_loop": [
+        56,
+        799
+      ],
+      "bhv_breakable_box_loop": [
+        114,
+        629
+      ],
+      "geo_move_mario_part_from_parent": [
+        32,
+        339
+      ],
+      "bhv_checkerboard_platform_loop": [
+        388,
+        2816
+      ],
+      "bhv_rotating_exclamation_box_loop": [
+        42,
+        887
+      ],
+      "bhv_exclamation_box_loop": [
+        80,
+        250
+      ],
+      "bhv_openable_cage_door_loop": [
+        32,
+        813
+      ],
+      "bhv_openable_grill_loop": [
+        38,
+        1142
+      ],
+      "bhv_pole_base_loop": [
+        440,
+        1212
+      ],
+      "calc_y_to_curr_floor": [
+        120,
+        667
+      ],
+      "set_camera_height": [
+        148,
+        1335
+      ],
+      "look_down_slopes": [
+        86,
+        650
+      ],
+      "pan_ahead_of_player": [
+        268,
+        2586
+      ],
+      "find_in_bounds_yaw_wdw_bob_thi": [
+        58,
+        1172
+      ],
+      "update_radial_camera": [
+        186,
+        579
+      ],
+      "lakitu_zoom": [
+        60,
+        605
+      ],
+      "zoom_out_if_paused_and_outside": [
+        54,
+        465
+      ],
+      "geo_camera_main": [
+        50,
+        212
+      ],
+      "shake_camera_handheld": [
+        154,
+        622
+      ],
+      "find_c_buttons_pressed": [
+        58,
+        812
+      ],
+      "camera_approach_s16_symmetric_bool": [
+        68,
+        641
+      ],
+      "reduce_by_dist_from_camera": [
+        92,
+        476
+      ],
+      "set_camera_shake_from_point": [
+        148,
+        825
+      ],
+      "radial_camera_input": [
+        54,
+        390
+      ],
+      "get_cutscene_from_mario_status": [
+        80,
+        682
+      ],
+      "next_lakitu_state": [
+        126,
+        487
+      ],
+      "update_lakitu": [
+        478,
+        2365
+      ],
+      "set_camera_mode_radial": [
+        20,
+        184
+      ],
+      "check_blocking_area_processing": [
+        46,
+        244
+      ],
+      "surface_type_modes": [
+        22,
+        142
+      ],
+      "camera_course_processing": [
+        156,
+        1328
+      ],
+      "rotate_camera_around_walls": [
+        678,
+        2925
+      ],
+      "radial_camera_move": [
+        268,
+        1676
+      ],
+      "mode_radial_camera": [
+        108,
+        513
+      ],
+      "find_mario_floor_and_ceil": [
+        154,
+        687
+      ],
+      "update_camera": [
+        342,
+        4325
+      ],
+      "fov_default": [
+        70,
+        769
+      ],
+      "geo_camera_fov": [
+        68,
+        928
+      ],
+      "get_current_clock": [
+        6,
+        92
+      ],
+      "get_clock_difference": [
+        42,
+        416
+      ],
+      "reset_debug_objectinfo": [
+        90,
+        1205
+      ],
+      "stub_debug_5": [
+        2,
+        150
+      ],
+      "try_print_debug_mario_object_info": [
+        60,
+        982
+      ],
+      "try_print_debug_mario_level_info": [
+        24,
+        320
+      ],
+      "try_do_mario_debug_object_spawn": [
+        8,
+        103
+      ],
+      "envfx_init_snow": [
+        30,
+        428
+      ],
+      "envfx_update_particles": [
+        60,
+        204
+      ],
+      "my_rdp_init": [
+        242,
+        1406
+      ],
+      "my_rsp_init": [
+        124,
+        565
+      ],
+      "clear_z_buffer": [
+        98,
+        664
+      ],
+      "init_render_image": [
+        88,
+        484
+      ],
+      "end_master_display_list": [
+        198,
+        1562
+      ],
+      "display_and_vsync": [
+        136,
+        1216
+      ],
+      "adjust_analog_stick": [
+        50,
+        859
+      ],
+      "run_demo_inputs": [
+        18,
+        232
+      ],
+      "read_controller_inputs": [
+        152,
+        1418
+      ],
+      "game_loop_one_iteration": [
+        98,
+        2369
+      ],
+      "make_vertex": [
+        3390,
+        11880
+      ],
+      "round_float": [
+        4640,
+        13645
+      ],
+      "render_hud_power_meter": [
+        66,
+        895
+      ],
+      "render_hud_mario_lives": [
+        88,
+        400
+      ],
+      "render_hud_stars": [
+        134,
+        1097
+      ],
+      "set_hud_camera_status": [
+        4,
+        130
+      ],
+      "render_hud_camera_status": [
+        252,
+        1733
+      ],
+      "render_hud": [
+        110,
+        1245
+      ],
+      "create_dl_ortho_matrix": [
+        260,
+        1793
+      ],
+      "get_dialog_id": [
+        8,
+        556
+      ],
+      "do_cutscene_handler": [
+        20,
+        358
+      ],
+      "render_menus_and_dialogs": [
+        24,
+        268
+      ],
+      "mario_drop_held_object": [
+        6,
+        266
+      ],
+      "mario_process_interactions": [
+        86,
+        965
+      ],
+      "mario_handle_special_floors": [
+        48,
+        297
+      ],
+      "geo_envfx_main": [
+        100,
+        598
+      ],
+      "geo_skybox_main": [
+        40,
+        346
+      ],
+      "update_hud_values.part.0": [
+        96,
+        996
+      ],
+      "check_instant_warp": [
+        36,
+        577
+      ],
+      "initiate_painting_warp": [
+        20,
+        243
+      ],
+      "initiate_delayed_warp": [
+        20,
+        116
+      ],
+      "play_mode_normal": [
+        114,
+        1868
+      ],
+      "lvl_init_or_update": [
+        54,
+        733
+      ],
+      "is_anim_at_end": [
+        16,
+        262
+      ],
+      "set_mario_animation": [
+        46,
+        409
+      ],
+      "mario_set_forward_vel": [
+        38,
+        576
+      ],
+      "mario_get_floor_class": [
+        52,
+        499
+      ],
+      "squish_mario_model": [
+        22,
+        228
+      ],
+      "update_mario_button_inputs": [
+        56,
+        746
+      ],
+      "update_mario_joystick_inputs": [
+        76,
+        848
+      ],
+      "update_mario_geometry_inputs": [
+        308,
+        2377
+      ],
+      "update_mario_inputs": [
+        88,
+        1033
+      ],
+      "set_submerged_cam_preset_and_spawn_bubbles": [
+        10,
+        98
+      ],
+      "update_mario_health": [
+        44,
+        240
+      ],
+      "mario_update_hitbox_and_cap_model": [
+        84,
+        771
+      ],
+      "execute_mario_action": [
+        210,
+        1505
+      ],
+      "print_displaying_credits_entry": [
+        18,
+        273
+      ],
+      "check_common_idle_cancels": [
+        70,
+        494
+      ],
+      "act_idle": [
+        98,
+        863
+      ],
+      "mario_execute_stationary_action": [
+        126,
+        1232
+      ],
+      "geo_mirror_mario_set_alpha": [
+        62,
+        515
+      ],
+      "geo_switch_mario_stand_run": [
+        32,
+        124
+      ],
+      "geo_switch_mario_eyes": [
+        52,
+        682
+      ],
+      "geo_mario_tilt_torso": [
+        100,
+        858
+      ],
+      "geo_mario_head_rotation": [
+        76,
+        856
+      ],
+      "geo_switch_mario_hand": [
+        48,
+        222
+      ],
+      "geo_mario_hand_foot_scaler": [
+        120,
+        706
+      ],
+      "geo_switch_mario_cap_effect": [
+        26,
+        329
+      ],
+      "geo_switch_mario_cap_on_off": [
+        84,
+        749
+      ],
+      "geo_switch_mario_hand_grab_pos": [
+        36,
+        253
+      ],
+      "geo_mirror_mario_backface_culling": [
+        32,
+        132
+      ],
+      "stub_mario_step_1": [
+        2,
+        114
+      ],
+      "mario_update_quicksand": [
+        62,
+        852
+      ],
+      "stationary_ground_step": [
+        74,
+        927
+      ],
+      "set_segment_base_addr": [
+        16,
+        334
+      ],
+      "segmented_to_virtual": [
+        70,
+        437
+      ],
+      "move_segment_table_to_dmem": [
+        2,
+        182
+      ],
+      "main_pool_free": [
+        42,
+        492
+      ],
+      "main_pool_available": [
+        8,
+        347
+      ],
+      "alloc_only_pool_init": [
+        56,
+        687
+      ],
+      "alloc_only_pool_alloc": [
+        2604,
+        3279
+      ],
+      "mem_pool_alloc": [
+        414,
+        1388
+      ],
+      "mem_pool_free": [
+        430,
+        1161
+      ],
+      "alloc_display_list": [
+        5500,
+        7042
+      ],
+      "load_patchable_table": [
+        42,
+        404
+      ],
+      "obj_find_wall": [
+        360,
+        652
+      ],
+      "turn_obj_away_from_steep_floor": [
+        96,
+        286
+      ],
+      "calc_new_obj_vel_and_pos_y": [
+        1300,
+        4311
+      ],
+      "object_step": [
+        1428,
+        6301
+      ],
+      "bhv_bobomb_loop": [
+        744,
+        1458
+      ],
+      "bobomb_buddy_act_idle": [
+        158,
+        1044
+      ],
+      "bhv_bobomb_buddy_loop": [
+        218,
+        1398
+      ],
+      "bhv_cannon_closed_loop": [
+        250,
+        713
+      ],
+      "bhv_generic_bowling_ball_spawner_loop": [
+        140,
+        1326
+      ],
+      "bhv_bob_pit_bowling_ball_loop": [
+        232,
+        908
+      ],
+      "bhv_collect_star_loop": [
+        34,
+        137
+      ],
+      "bhv_hidden_red_coin_star_loop": [
+        36,
+        536
+      ],
+      "bhv_red_coin_loop": [
+        192,
+        906
+      ],
+      "bhv_hidden_star_loop": [
+        32,
+        476
+      ],
+      "bhv_hidden_star_trigger_loop": [
+        140,
+        300
+      ],
+      "bhv_1up_loop": [
+        76,
+        285
+      ],
+      "bhv_1up_hidden_loop": [
+        42,
+        685
+      ],
+      "bhv_1up_hidden_trigger_loop": [
+        112,
+        300
+      ],
+      "bhv_1up_hidden_in_pole_spawner_loop": [
+        54,
+        476
+      ],
+      "small_breakable_box_act_move": [
+        156,
+        547
+      ],
+      "breakable_box_small_idle_loop": [
+        80,
+        224
+      ],
+      "bhv_breakable_box_small_loop": [
+        68,
+        725
+      ],
+      "treat_far_home_as_mario": [
+        168,
+        815
+      ],
+      "obj_resolve_object_collisions": [
+        48,
+        298
+      ],
+      "obj_handle_attacks": [
+        136,
+        529
+      ],
+      "bhv_goomba_triplet_spawner_update": [
+        108,
+        406
+      ],
+      "bhv_goomba_update": [
+        472,
+        3264
+      ],
+      "bhv_chain_chomp_update": [
+        40,
+        136
+      ],
+      "bhv_wooden_post_update": [
+        350,
+        1627
+      ],
+      "bhv_chain_chomp_gate_update": [
+        24,
+        716
+      ],
+      "bhv_seesaw_platform_update": [
+        66,
+        513
+      ],
+      "bhv_water_bomb_spawner_update": [
+        174,
+        1419
+      ],
+      "bhv_recovery_heart_loop": [
+        58,
+        979
+      ],
+      "bhv_bubble_cannon_barrel_loop": [
+        74,
+        933
+      ],
+      "water_bomb_cannon_act_1": [
+        32,
+        443
+      ],
+      "bhv_water_bomb_cannon_loop": [
+        92,
+        606
+      ],
+      "detect_object_hurtbox_overlap": [
+        532,
+        2297
+      ],
+      "check_collision_in_list.part.0": [
+        5298,
+        43461
+      ],
+      "check_player_object_collision": [
+        132,
+        1478
+      ],
+      "check_destructive_object_collision": [
+        210,
+        3711
+      ],
+      "detect_object_collisions": [
+        1856,
+        37066
+      ],
+      "cur_obj_update_floor": [
+        174,
+        450
+      ],
+      "geo_switch_anim_state": [
+        357,
+        3498
+      ],
+      "lateral_dist_between_objects": [
+        60,
+        412
+      ],
+      "dist_between_objects": [
+        2156,
+        14724
+      ],
+      "approach_s16_symmetric": [
+        40,
+        552
+      ],
+      "cur_obj_rotate_yaw_toward": [
+        48,
+        219
+      ],
+      "obj_angle_to_object": [
+        364,
+        612
+      ],
+      "obj_copy_pos": [
+        14,
+        433
+      ],
+      "cur_obj_scale": [
+        84,
+        574
+      ],
+      "cur_obj_init_animation_with_sound": [
+        38,
+        653
+      ],
+      "cur_obj_init_animation_with_accel_and_sound": [
+        92,
+        406
+      ],
+      "cur_obj_disable_rendering": [
+        12,
+        104
+      ],
+      "cur_obj_set_model": [
+        64,
+        477
+      ],
+      "cur_obj_become_intangible": [
+        40,
+        385
+      ],
+      "cur_obj_apply_drag_xz": [
+        210,
+        1106
+      ],
+      "cur_obj_move_y": [
+        280,
+        1327
+      ],
+      "obj_check_if_collided_with_object": [
+        88,
+        864
+      ],
+      "cur_obj_set_pos_to_home": [
+        18,
+        110
+      ],
+      "cur_obj_resolve_wall_collisions": [
+        160,
+        633
+      ],
+      "cur_obj_update_floor_and_walls": [
+        244,
+        2032
+      ],
+      "cur_obj_move_standard": [
+        520,
+        2844
+      ],
+      "cur_obj_move_using_fvel_and_gravity": [
+        192,
+        1629
+      ],
+      "obj_set_hitbox": [
+        468,
+        3982
+      ],
+      "signum_positive": [
+        24,
+        320
+      ],
+      "absf": [
+        8,
+        166
+      ],
+      "absi": [
+        48,
+        455
+      ],
+      "cur_obj_is_mario_ground_pounding_platform": [
+        80,
+        160
+      ],
+      "cur_obj_push_mario_away": [
+        32,
+        676
+      ],
+      "cur_obj_push_mario_away_from_cylinder": [
+        78,
+        327
+      ],
+      "cur_obj_call_action_function": [
+        70,
+        536
+      ],
+      "cur_obj_can_mario_activate_textbox_2": [
+        30,
+        422
+      ],
+      "obj_attack_collided_from_other_object": [
+        16,
+        132
+      ],
+      "cur_obj_was_attacked_or_ground_pounded": [
+        104,
+        715
+      ],
+      "copy_mario_state_to_object": [
+        78,
+        371
+      ],
+      "bhv_mario_update": [
+        228,
+        1571
+      ],
+      "set_object_respawn_info_bits": [
+        198,
+        3809
+      ],
+      "unload_deactivated_objects": [
+        2194,
+        22317
+      ],
+      "update_objects": [
+        2664,
+        33713
+      ],
+      "update_mario_platform": [
+        62,
+        405
+      ],
+      "apply_mario_platform_displacement": [
+        32,
+        528
+      ],
+      "format_integer": [
+        134,
+        1118
+      ],
+      "parse_width_field": [
+        48,
+        358
+      ],
+      "print_text_fmt_int": [
+        612,
+        2514
+      ],
+      "print_text": [
+        636,
+        1974
+      ],
+      "render_text_labels": [
+        1694,
+        5038
+      ],
+      "profiler_log_thread5_time": [
+        284,
+        924
+      ],
+      "geo_append_display_list": [
+        8400,
+        15807
+      ],
+      "geo_set_animation_globals": [
+        554,
+        1517
+      ],
+      "geo_process_node_and_siblings": [
+        78092,
+        280906
+      ],
+      "geo_process_held_object": [
+        102,
+        458
+      ],
+      "geo_process_root": [
+        222,
+        2149
+      ],
+      "save_file_get_flags": [
+        96,
+        394
+      ],
+      "save_file_is_cannon_unlocked": [
+        150,
+        686
+      ],
+      "geo_cannon_circle_base": [
+        20,
+        206
+      ],
+      "init_shadow": [
+        2904,
+        7725
+      ],
+      "make_shadow_vertex_at_xyz": [
+        11134,
+        14491
+      ],
+      "correct_shadow_solidity_for_animations": [
+        26,
+        453
+      ],
+      "create_shadow_player": [
+        1936,
+        4658
+      ],
+      "create_shadow_circle_4_verts": [
+        13088,
+        26360
+      ],
+      "create_shadow_rectangle": [
+        354,
+        1758
+      ],
+      "create_shadow_below_xyz": [
+        2122,
+        4091
+      ],
+      "make_skybox_rect": [
+        1800,
+        2931
+      ],
+      "draw_skybox_tile_grid": [
+        1076,
+        3436
+      ],
+      "create_skybox_ortho_matrix": [
+        88,
+        450
+      ],
+      "create_skybox_facing_camera": [
+        242,
+        2374
+      ],
+      "play_infinite_stairs_music": [
+        14,
+        458
+      ],
+      "audio_game_loop_tick": [
+        2,
+        88
+      ],
+      "exec_anim_sound_state": [
+        34,
+        280
+      ],
+      "cur_obj_play_sound_1": [
+        28,
+        282
+      ],
+      "cur_obj_play_sound_2": [
+        14,
+        140
+      ],
+      "sequence_player_process_sound": [
+        7886,
+        20104
+      ],
+      "note_vibrato_update": [
+        1068,
+        4815
+      ],
+      "note_vibrato_init": [
+        99,
+        297
+      ],
+      "adsr_init": [
+        30,
+        685
+      ],
+      "adsr_update": [
+        3823,
+        10430
+      ],
+      "play_sound": [
+        60,
+        167
+      ],
+      "get_sound_dynamics": [
+        174,
+        1107
+      ],
+      "audio_signal_game_loop_tick": [
+        6,
+        161
+      ],
+      "process_sound_request": [
+        514,
+        2622
+      ],
+      "func_8031E16C": [
+        3801,
+        16512
+      ],
+      "update_game_sound.part.0": [
+        1027,
+        9166
+      ],
+      "func_80320ED8": [
+        28,
+        293
+      ],
+      "process_level_music_dynamics": [
+        486,
+        3911
+      ],
+      "create_next_audio_buffer": [
+        248,
+        2189
+      ],
+      "get_bank_or_seq": [
+        35,
+        294
+      ],
+      "decrease_sample_dma_ttls": [
+        1772,
+        6074
+      ],
+      "seq_channel_layer_note_decay": [
+        237,
+        2071
+      ],
+      "process_notes": [
+        6856,
+        16260
+      ],
+      "alloc_note_from_disabled": [
+        578,
+        1863
+      ],
+      "alloc_note": [
+        205,
+        647
+      ],
+      "reclaim_notes": [
+        2056,
+        6607
+      ],
+      "seq_channel_set_layer": [
+        756,
+        1324
+      ],
+      "sequence_channel_enable": [
+        637,
+        1601
+      ],
+      "audio_list_push_back": [
+        28,
+        358
+      ],
+      "audio_list_pop_back": [
+        100,
+        974
+      ],
+      "seq_channel_layer_process_script": [
+        3229,
+        14642
+      ],
+      "set_instrument": [
+        43,
+        510
+      ],
+      "sequence_channel_process_script": [
+        11852,
+        29143
+      ],
+      "sequence_player_process_sequence": [
+        2580,
+        7442
+      ],
+      "process_sequences": [
+        360,
+        1750
+      ],
+      "synthesis_execute": [
+        296,
+        1137
+      ],
+      "note_init_volume": [
+        45,
+        144
+      ],
+      "note_set_vel_pan_reverb": [
+        6533,
+        11884
+      ],
+      "note_set_frequency": [
+        232,
+        372
+      ],
+      "note_enable": [
+        35,
+        78
+      ],
+      "note_disable": [
+        49,
+        402
+      ],
+      "produce_one_frame": [
+        190,
+        1275
+      ],
+      "send_display_list": [
+        8,
+        624
+      ],
+      "main_func": [
+        10,
+        829
+      ],
+      "osRecvMesg": [
+        16,
+        277
+      ],
+      "osViSwapBuffer": [
+        2,
+        397
+      ],
+      "osGetTime": [
+        30,
+        109
+      ],
+      "audio_predecode_get": [
+        253,
+        1337
+      ],
+      "of_voice_sync": [
+        4096,
+        14069
+      ],
+      "osContStartReadData": [
+        4,
+        158
+      ],
+      "osContGetReadData": [
+        10,
+        116
+      ],
+      "import_texture_rgba16": [
+        37,
+        298
+      ],
+      "load_alias_copy": [
+        144912,
+        285146
+      ],
+      "gfx_mesh_lookup": [
+        110139,
+        204710
+      ],
+      "load_alias_materialize": [
+        9912,
+        16032
+      ],
+      "gfx_cpu_submit_pending": [
+        3010,
+        6890
+      ],
+      "gfx_async_try_load": [
+        55217,
+        111645
+      ],
+      "load_alias_vertex_legacy": [
+        176935,
+        449285
+      ],
+      "import_texture": [
+        14124,
+        45932
+      ],
+      "load_alias_materialize_all": [
+        21956,
+        31169
+      ],
+      "gfx_cpu_materialize_fog": [
+        15233,
+        28763
+      ],
+      "gfx_pick_combiner": [
+        21177,
+        53561
+      ],
+      "gfx_sp_vertex": [
+        147710,
+        332359
+      ],
+      "gfx_push_triangle.constprop.0.isra.0": [
+        212437,
+        424201
+      ],
+      "gfx_clip_triangle.constprop.0": [
+        119605,
+        245701
+      ],
+      "gfx_sp_tri1": [
+        12155,
+        19552
+      ],
+      "gfx_draw_rectangle": [
+        2640,
+        5908
+      ],
+      "gfx_queued_front_run": [
+        8596,
+        16703
+      ],
+      "gfx_cpu_indexed_run": [
+        583622,
+        841683
+      ],
+      "gfx_triangle_front_run": [
+        12894,
+        15860
+      ],
+      "gfx_run_dl": [
+        213896,
+        514589
+      ],
+      "gfx_async_note_repair": [
+        915,
+        4993
+      ],
+      "gfx_start_frame": [
+        90,
+        464
+      ],
+      "gfx_run": [
+        150,
+        1928
+      ],
+      "gfx_end_frame": [
+        24,
+        140
+      ],
+      "gpu_load_shader": [
+        160,
+        476
+      ],
+      "gpu_unload_shader": [
+        160,
+        1184
+      ],
+      "gpu_new_texture": [
+        6,
+        51
+      ],
+      "gpu_select_texture": [
+        2805,
+        4354
+      ],
+      "gpu_set_sampler_parameters": [
+        30,
+        435
+      ],
+      "gpu_set_depth_test": [
+        20,
+        1872
+      ],
+      "gpu_set_depth_mask": [
+        20,
+        546
+      ],
+      "gpu_set_zmode_decal": [
+        20,
+        349
+      ],
+      "gpu_set_alpha_cvg_sel": [
+        20,
+        90
+      ],
+      "gpu_set_use_alpha": [
+        16,
+        98
+      ],
+      "gpu_set_fog_color": [
+        10,
+        166
+      ],
+      "gpu_async_repair_word": [
+        42918,
+        92727
+      ],
+      "gpu_project_clip": [
+        133905,
+        214134
+      ],
+      "gpu_finish_render": [
+        2,
+        116
+      ],
+      "gfx_gpu_async_supported": [
+        26026,
+        47371
+      ],
+      "gfx_gpu_async_service": [
+        53391,
+        105135
+      ],
+      "_gpu_flush_cmd_stream": [
+        92133,
+        249670
+      ],
+      "gpu_end_frame": [
+        16,
+        128
+      ],
+      "gpu_fast_tex_upload": [
+        5268,
+        38274
+      ],
+      "gpu_tex_slot_finish": [
+        41,
+        192
+      ],
+      "emit_tri_state": [
+        96758,
+        258184
+      ],
+      "gfx_gpu_vtx_cache_batch_impl": [
+        173423,
+        272096
+      ],
+      "gpu_tex_slot_begin": [
+        185,
+        3246
+      ],
+      "gpu_upload_texture_rgba16": [
+        26021,
+        40087
+      ],
+      "gpu_start_frame": [
+        288,
+        2918
+      ],
+      "gfx_gpu_async_raw_acquire": [
+        376937,
+        1050051
+      ],
+      "gfx_gpu_async_raw_release": [
+        1882,
+        6880
+      ],
+      "gfx_gpu_mesh_wait_source": [
+        2390,
+        4134
+      ],
+      "gfx_gpu_queued_front_supported": [
+        4791,
+        8507
+      ],
+      "gfx_gpu_queued_front_service": [
+        14070,
+        29267
+      ],
+      "gfx_gpu_queued_front_release": [
+        6390,
+        8403
+      ],
+      "gfx_gpu_queued_front_wait_source": [
+        5258,
+        7329
+      ],
+      "gfx_gpu_bram_import_supported": [
+        8137,
+        17768
+      ],
+      "gfx_gpu_bram_import_wait": [
+        2390,
+        8333
+      ],
+      "gfx_gpu_cram_vertex_source": [
+        42904,
+        110980
+      ],
+      "gfx_gpu_mesh_sources": [
+        30952,
+        72094
+      ],
+      "gfx_gpu_present": [
+        182,
+        674
+      ],
+      "gpu_present_prof_get": [
+        14,
+        212
+      ],
+      "gpu_ring_prof_get": [
+        20,
+        100
+      ],
+      "gpu_upload_prof_read": [
+        36,
+        342
+      ],
+      "gpu_submit_prof_read": [
+        36,
+        215
+      ],
+      "gpu_wait_prof_read": [
+        36,
+        416
+      ],
+      "gfx_gpu_vtx_cache_begin": [
+        12098,
+        40762
+      ],
+      "gfx_gpu_vtx_cache_tri": [
+        8074,
+        21282
+      ],
+      "gfx_gpu_async_job": [
+        95521,
+        154649
+      ],
+      "gfx_gpu_vtx_cache_batch": [
+        502,
+        2555
+      ],
+      "gfx_gpu_draw_direct_records": [
+        120859,
+        238057
+      ],
+      "gpu_draw_triangles": [
+        151750,
+        353612
+      ],
+      "intersect": [
+        8432,
+        22676
+      ],
+      "direct": [
+        57494,
+        116022
+      ],
+      "am_repair": [
+        95361,
+        169297
+      ],
+      "guLookAtReflect": [
+        1032,
+        4269
+      ],
+      "guMtxF2L": [
+        100,
+        332
+      ],
+      "guMtxIdentF": [
+        360,
+        1483
+      ],
+      "guMtxIdent": [
+        80,
+        832
+      ],
+      "guOrtho": [
+        930,
+        3072
+      ],
+      "guPerspectiveF": [
+        208,
+        1793
+      ],
+      "guPerspective": [
+        26,
+        254
+      ],
+      "gfx_of_main_loop": [
+        94,
+        510
+      ],
+      "gfx_of_get_dimensions": [
+        10,
+        91
+      ],
+      "gfx_of_handle_events": [
+        2,
+        88
+      ],
+      "gfx_of_start_frame": [
+        6,
+        320
+      ],
+      "gfx_of_swap_buffers_begin": [
+        2,
+        186
+      ],
+      "gfx_of_swap_buffers_end": [
+        2,
+        86
+      ],
+      "controller_of_read": [
+        214,
+        1002
+      ],
+      "audio_of_buffered": [
+        324,
+        886
+      ],
+      "audio_of_get_desired_buffered": [
+        4,
+        90
+      ],
+      "audio_of_play": [
+        20,
+        195
+      ],
+      "mtx4_identity": [
+        36,
+        524
+      ],
+      "mtx4_mul": [
+        71980,
+        86944
+      ],
+      "mtx4_rotate_zxy_and_translate": [
+        12470,
+        19235
+      ],
+      "mtx4_rotate_xyz_and_translate": [
+        14734,
+        34257
+      ],
+      "mtx4_billboard": [
+        8184,
+        9684
+      ],
+      "mtx4_scale_vec3f": [
+        18900,
+        27994
+      ],
+      "mtx4_translate": [
+        864,
+        1374
+      ],
+      "mtx4_to_mtx": [
+        18492,
+        73082
+      ],
+      "mtx4_to_mat4": [
+        14606,
+        54656
+      ],
+      "mat4_to_mtx4": [
+        2948,
+        9222
+      ],
+      "sm64_perf_render_begin": [
+        79,
+        810
+      ],
+      "sm64_perf_step_begin": [
+        52,
+        302
+      ],
+      "sm64_perf_render_end": [
+        295,
+        1546
+      ],
+      "sm64_perf_step_end": [
+        83,
+        625
+      ],
+      "sm64_perf_input": [
+        16,
+        172
+      ],
+      "sm64_perf_draw": [
+        6,
+        574
+      ],
+      "free": [
+        2,
+        56
+      ],
+      "__libc_free": [
+        4,
+        129
+      ],
+      "__malloc_alloc_meta": [
+        31,
+        322
+      ],
+      "alloc_slot": [
+        344,
+        2546
+      ],
+      "__libc_malloc_impl": [
+        312,
+        2324
+      ],
+      "posix_memalign": [
+        34,
+        129
+      ],
+      "ceilf": [
+        144,
+        454
+      ],
+      "cosf": [
+        38,
+        434
+      ],
+      "floorf": [
+        150,
+        602
+      ],
+      "sinf": [
+        38,
+        349
+      ],
+      "__mmap": [
+        29,
+        140
+      ],
+      "memcmp": [
+        29885,
+        35668
+      ],
+      "memcpy": [
+        32388,
+        89278
+      ],
+      "memset": [
+        19866,
+        24319
+      ],
+      "__unlock": [
+        8,
+        229
+      ],
+      "__syscall_ret": [
+        10,
+        73
+      ],
+      "aligned_alloc": [
+        247,
+        1065
+      ],
+      "__cosdf": [
+        164,
+        698
+      ],
+      "__sindf": [
+        172,
+        1082
+      ],
+      "__clzsi2": [
+        6724,
+        14569
+      ],
+      "__ctzsi2": [
+        7170,
+        9353
+      ],
+      "__udivdi3": [
+        318,
+        1290
+      ],
+      "__umoddi3": [
+        294,
+        1786
+      ],
+      "__adddf3": [
+        1136,
+        4880
+      ],
+      "__divdf3": [
+        432,
+        2774
+      ],
+      "__muldf3": [
+        8106,
+        13668
+      ],
+      "__subdf3": [
+        678,
+        3694
+      ],
+      "__fixunsdfsi": [
+        66,
+        392
+      ],
+      "__extendsfdf2": [
+        476,
+        1275
+      ],
+      "__truncdfsf2": [
+        448,
+        1396
+      ],
+      "gfx_gpu_mesh_supported": [
+        0,
+        0
+      ]
+    }
+  },
+  "control": {
+    "cycles": [
+      4267043,
+      4633123
+    ],
+    "total_cycles": 8900166,
+    "retired": 4193523,
+    "uploaded_words": 46036,
+    "function_retire_and_preceding_gap_cycles": {
+      "<before_first_ELF_symbol>": [
+        381404,
+        582730
+      ],
+      "bhv_cmd_break": [
+        4,
+        227
+      ],
+      "bhv_cmd_end_loop": [
+        2992,
+        6642
+      ],
+      "bhv_cmd_call_native": [
+        4650,
+        12081
+      ],
+      "bhv_cmd_set_int": [
+        1088,
+        1939
+      ],
+      "bhv_cmd_add_int": [
+        408,
+        2376
+      ],
+      "random_float": [
+        69,
+        809
+      ],
+      "cur_obj_update": [
+        28192,
+        180505
+      ],
+      "geo_obj_init_animation": [
+        28,
+        716
+      ],
+      "geo_obj_init_animation_accel": [
+        72,
+        706
+      ],
+      "retrieve_animation_index": [
+        3088,
+        10105
+      ],
+      "geo_update_animation_frame": [
+        200,
+        1502
+      ],
+      "level_cmd_call_loop": [
+        36,
+        207
+      ],
+      "level_script_execute": [
+        70,
+        1047
+      ],
+      "vec3f_copy": [
+        666,
+        2083
+      ],
+      "vec3f_set": [
+        550,
+        1067
+      ],
+      "vec3f_add": [
+        30,
+        536
+      ],
+      "vec3s_copy": [
+        990,
+        1772
+      ],
+      "vec3s_set": [
+        50,
+        526
+      ],
+      "vec3f_to_vec3s": [
+        180,
+        995
+      ],
+      "mtxf_lookat": [
+        208,
+        1024
+      ],
+      "mtxf_align_terrain_normal": [
+        632,
+        2877
+      ],
+      "mtxf_rotate_xy": [
+        80,
+        249
+      ],
+      "vec3f_set_dist_and_angle": [
+        140,
+        1308
+      ],
+      "atan2s": [
+        2714,
+        13868
+      ],
+      "vec3f_get_dist_and_angle": [
+        582,
+        3066
+      ],
+      "find_wall_collisions_from_list": [
+        2932,
+        25719
+      ],
+      "find_floor_from_list": [
+        36810,
+        124268
+      ],
+      "find_ceil_from_list.constprop.0": [
+        48,
+        403
+      ],
+      "f32_find_wall_collision": [
+        340,
+        1480
+      ],
+      "find_wall_collisions": [
+        2016,
+        5033
+      ],
+      "find_ceil": [
+        696,
+        1713
+      ],
+      "find_floor_height_and_data": [
+        6032,
+        9017
+      ],
+      "find_floor": [
+        7104,
+        15492
+      ],
+      "find_water_level": [
+        144,
+        755
+      ],
+      "find_poison_gas_level": [
+        12,
+        252
+      ],
+      "clear_dynamic_surfaces": [
+        2596,
+        16795
+      ],
+      "load_object_collision_model": [
+        3122,
+        10923
+      ],
+      "area_update_objects": [
+        10,
+        232
+      ],
+      "render_game": [
+        158,
+        1441
+      ],
+      "exclamation_box_act_1": [
+        144,
+        818
+      ],
+      "exclamation_box_act_2": [
+        34,
+        237
+      ],
+      "king_bobomb_act_0": [
+        58,
+        373
+      ],
+      "bhv_bobomb_anchor_mario_loop": [
+        42,
+        275
+      ],
+      "bhv_king_bobomb_loop": [
+        76,
+        1509
+      ],
+      "bhv_fading_warp_loop": [
+        48,
+        213
+      ],
+      "bhv_yellow_coin_loop": [
+        180,
+        1712
+      ],
+      "bhv_coin_formation_loop": [
+        378,
+        2430
+      ],
+      "bhv_purple_switch_loop": [
+        56,
+        1151
+      ],
+      "bhv_breakable_box_loop": [
+        114,
+        582
+      ],
+      "geo_move_mario_part_from_parent": [
+        32,
+        286
+      ],
+      "bhv_checkerboard_platform_loop": [
+        388,
+        3247
+      ],
+      "bhv_rotating_exclamation_box_loop": [
+        42,
+        622
+      ],
+      "bhv_exclamation_box_loop": [
+        80,
+        222
+      ],
+      "bhv_openable_cage_door_loop": [
+        32,
+        450
+      ],
+      "bhv_openable_grill_loop": [
+        38,
+        1129
+      ],
+      "bhv_pole_base_loop": [
+        440,
+        1230
+      ],
+      "calc_y_to_curr_floor": [
+        120,
+        700
+      ],
+      "set_camera_height": [
+        148,
+        1529
+      ],
+      "look_down_slopes": [
+        86,
+        861
+      ],
+      "pan_ahead_of_player": [
+        268,
+        2206
+      ],
+      "find_in_bounds_yaw_wdw_bob_thi": [
+        58,
+        857
+      ],
+      "update_radial_camera": [
+        186,
+        586
+      ],
+      "lakitu_zoom": [
+        60,
+        564
+      ],
+      "zoom_out_if_paused_and_outside": [
+        54,
+        196
+      ],
+      "geo_camera_main": [
+        50,
+        212
+      ],
+      "shake_camera_handheld": [
+        154,
+        1001
+      ],
+      "find_c_buttons_pressed": [
+        58,
+        690
+      ],
+      "camera_approach_s16_symmetric_bool": [
+        68,
+        355
+      ],
+      "reduce_by_dist_from_camera": [
+        92,
+        479
+      ],
+      "set_camera_shake_from_point": [
+        148,
+        854
+      ],
+      "radial_camera_input": [
+        54,
+        668
+      ],
+      "get_cutscene_from_mario_status": [
+        80,
+        721
+      ],
+      "next_lakitu_state": [
+        126,
+        482
+      ],
+      "update_lakitu": [
+        478,
+        2495
+      ],
+      "set_camera_mode_radial": [
+        20,
+        164
+      ],
+      "check_blocking_area_processing": [
+        46,
+        247
+      ],
+      "surface_type_modes": [
+        22,
+        142
+      ],
+      "camera_course_processing": [
+        156,
+        1286
+      ],
+      "rotate_camera_around_walls": [
+        678,
+        2729
+      ],
+      "radial_camera_move": [
+        268,
+        1663
+      ],
+      "mode_radial_camera": [
+        108,
+        513
+      ],
+      "find_mario_floor_and_ceil": [
+        154,
+        699
+      ],
+      "update_camera": [
+        342,
+        4133
+      ],
+      "fov_default": [
+        70,
+        814
+      ],
+      "geo_camera_fov": [
+        68,
+        681
+      ],
+      "get_current_clock": [
+        6,
+        92
+      ],
+      "get_clock_difference": [
+        42,
+        418
+      ],
+      "reset_debug_objectinfo": [
+        90,
+        1375
+      ],
+      "stub_debug_5": [
+        2,
+        158
+      ],
+      "try_print_debug_mario_object_info": [
+        60,
+        990
+      ],
+      "try_print_debug_mario_level_info": [
+        24,
+        268
+      ],
+      "try_do_mario_debug_object_spawn": [
+        8,
+        403
+      ],
+      "envfx_init_snow": [
+        30,
+        438
+      ],
+      "envfx_update_particles": [
+        60,
+        204
+      ],
+      "my_rdp_init": [
+        242,
+        1092
+      ],
+      "my_rsp_init": [
+        124,
+        508
+      ],
+      "clear_z_buffer": [
+        98,
+        671
+      ],
+      "init_render_image": [
+        88,
+        523
+      ],
+      "end_master_display_list": [
+        198,
+        1495
+      ],
+      "display_and_vsync": [
+        136,
+        1587
+      ],
+      "adjust_analog_stick": [
+        50,
+        468
+      ],
+      "run_demo_inputs": [
+        18,
+        232
+      ],
+      "read_controller_inputs": [
+        152,
+        1081
+      ],
+      "game_loop_one_iteration": [
+        98,
+        2171
+      ],
+      "make_vertex": [
+        3390,
+        10614
+      ],
+      "round_float": [
+        4640,
+        13909
+      ],
+      "render_hud_power_meter": [
+        66,
+        814
+      ],
+      "render_hud_mario_lives": [
+        88,
+        399
+      ],
+      "render_hud_stars": [
+        134,
+        1046
+      ],
+      "set_hud_camera_status": [
+        4,
+        134
+      ],
+      "render_hud_camera_status": [
+        252,
+        1727
+      ],
+      "render_hud": [
+        110,
+        1096
+      ],
+      "create_dl_ortho_matrix": [
+        260,
+        1818
+      ],
+      "get_dialog_id": [
+        8,
+        230
+      ],
+      "do_cutscene_handler": [
+        20,
+        664
+      ],
+      "render_menus_and_dialogs": [
+        24,
+        248
+      ],
+      "mario_drop_held_object": [
+        6,
+        268
+      ],
+      "mario_process_interactions": [
+        86,
+        641
+      ],
+      "mario_handle_special_floors": [
+        48,
+        288
+      ],
+      "geo_envfx_main": [
+        100,
+        602
+      ],
+      "geo_skybox_main": [
+        40,
+        346
+      ],
+      "update_hud_values.part.0": [
+        96,
+        1260
+      ],
+      "check_instant_warp": [
+        36,
+        633
+      ],
+      "initiate_painting_warp": [
+        20,
+        246
+      ],
+      "initiate_delayed_warp": [
+        20,
+        144
+      ],
+      "play_mode_normal": [
+        114,
+        1860
+      ],
+      "lvl_init_or_update": [
+        54,
+        1082
+      ],
+      "is_anim_at_end": [
+        16,
+        265
+      ],
+      "set_mario_animation": [
+        46,
+        406
+      ],
+      "mario_set_forward_vel": [
+        38,
+        553
+      ],
+      "mario_get_floor_class": [
+        52,
+        522
+      ],
+      "squish_mario_model": [
+        22,
+        226
+      ],
+      "update_mario_button_inputs": [
+        56,
+        489
+      ],
+      "update_mario_joystick_inputs": [
+        76,
+        1196
+      ],
+      "update_mario_geometry_inputs": [
+        308,
+        2669
+      ],
+      "update_mario_inputs": [
+        88,
+        986
+      ],
+      "set_submerged_cam_preset_and_spawn_bubbles": [
+        10,
+        98
+      ],
+      "update_mario_health": [
+        44,
+        240
+      ],
+      "mario_update_hitbox_and_cap_model": [
+        84,
+        772
+      ],
+      "execute_mario_action": [
+        210,
+        1907
+      ],
+      "print_displaying_credits_entry": [
+        18,
+        270
+      ],
+      "check_common_idle_cancels": [
+        70,
+        470
+      ],
+      "act_idle": [
+        98,
+        1182
+      ],
+      "mario_execute_stationary_action": [
+        126,
+        888
+      ],
+      "geo_mirror_mario_set_alpha": [
+        62,
+        532
+      ],
+      "geo_switch_mario_stand_run": [
+        32,
+        118
+      ],
+      "geo_switch_mario_eyes": [
+        52,
+        376
+      ],
+      "geo_mario_tilt_torso": [
+        100,
+        575
+      ],
+      "geo_mario_head_rotation": [
+        76,
+        530
+      ],
+      "geo_switch_mario_hand": [
+        48,
+        215
+      ],
+      "geo_mario_hand_foot_scaler": [
+        120,
+        682
+      ],
+      "geo_switch_mario_cap_effect": [
+        26,
+        116
+      ],
+      "geo_switch_mario_cap_on_off": [
+        84,
+        751
+      ],
+      "geo_switch_mario_hand_grab_pos": [
+        36,
+        263
+      ],
+      "geo_mirror_mario_backface_culling": [
+        32,
+        134
+      ],
+      "stub_mario_step_1": [
+        2,
+        118
+      ],
+      "mario_update_quicksand": [
+        62,
+        547
+      ],
+      "stationary_ground_step": [
+        74,
+        879
+      ],
+      "set_segment_base_addr": [
+        16,
+        430
+      ],
+      "segmented_to_virtual": [
+        70,
+        742
+      ],
+      "move_segment_table_to_dmem": [
+        2,
+        116
+      ],
+      "main_pool_free": [
+        42,
+        497
+      ],
+      "main_pool_available": [
+        8,
+        402
+      ],
+      "alloc_only_pool_init": [
+        56,
+        1353
+      ],
+      "alloc_only_pool_alloc": [
+        2604,
+        3300
+      ],
+      "mem_pool_alloc": [
+        414,
+        1380
+      ],
+      "mem_pool_free": [
+        430,
+        1178
+      ],
+      "alloc_display_list": [
+        5500,
+        7311
+      ],
+      "load_patchable_table": [
+        42,
+        434
+      ],
+      "obj_find_wall": [
+        360,
+        652
+      ],
+      "turn_obj_away_from_steep_floor": [
+        96,
+        278
+      ],
+      "calc_new_obj_vel_and_pos_y": [
+        1300,
+        4252
+      ],
+      "object_step": [
+        1428,
+        5365
+      ],
+      "bhv_bobomb_loop": [
+        744,
+        1456
+      ],
+      "bobomb_buddy_act_idle": [
+        158,
+        757
+      ],
+      "bhv_bobomb_buddy_loop": [
+        218,
+        1375
+      ],
+      "bhv_cannon_closed_loop": [
+        250,
+        664
+      ],
+      "bhv_generic_bowling_ball_spawner_loop": [
+        140,
+        1010
+      ],
+      "bhv_bob_pit_bowling_ball_loop": [
+        232,
+        1219
+      ],
+      "bhv_collect_star_loop": [
+        34,
+        153
+      ],
+      "bhv_hidden_red_coin_star_loop": [
+        36,
+        538
+      ],
+      "bhv_red_coin_loop": [
+        192,
+        976
+      ],
+      "bhv_hidden_star_loop": [
+        32,
+        484
+      ],
+      "bhv_hidden_star_trigger_loop": [
+        140,
+        298
+      ],
+      "bhv_1up_loop": [
+        76,
+        282
+      ],
+      "bhv_1up_hidden_loop": [
+        42,
+        721
+      ],
+      "bhv_1up_hidden_trigger_loop": [
+        112,
+        308
+      ],
+      "bhv_1up_hidden_in_pole_spawner_loop": [
+        54,
+        479
+      ],
+      "small_breakable_box_act_move": [
+        156,
+        886
+      ],
+      "breakable_box_small_idle_loop": [
+        80,
+        224
+      ],
+      "bhv_breakable_box_small_loop": [
+        68,
+        710
+      ],
+      "treat_far_home_as_mario": [
+        168,
+        815
+      ],
+      "obj_resolve_object_collisions": [
+        48,
+        298
+      ],
+      "obj_handle_attacks": [
+        136,
+        517
+      ],
+      "bhv_goomba_triplet_spawner_update": [
+        108,
+        1052
+      ],
+      "bhv_goomba_update": [
+        472,
+        3139
+      ],
+      "bhv_chain_chomp_update": [
+        40,
+        136
+      ],
+      "bhv_wooden_post_update": [
+        350,
+        1977
+      ],
+      "bhv_chain_chomp_gate_update": [
+        24,
+        424
+      ],
+      "bhv_seesaw_platform_update": [
+        66,
+        464
+      ],
+      "bhv_water_bomb_spawner_update": [
+        174,
+        1141
+      ],
+      "bhv_recovery_heart_loop": [
+        58,
+        632
+      ],
+      "bhv_bubble_cannon_barrel_loop": [
+        74,
+        932
+      ],
+      "water_bomb_cannon_act_1": [
+        32,
+        212
+      ],
+      "bhv_water_bomb_cannon_loop": [
+        92,
+        627
+      ],
+      "detect_object_hurtbox_overlap": [
+        532,
+        2560
+      ],
+      "check_collision_in_list.part.0": [
+        5298,
+        43367
+      ],
+      "check_player_object_collision": [
+        132,
+        870
+      ],
+      "check_destructive_object_collision": [
+        210,
+        3578
+      ],
+      "detect_object_collisions": [
+        1856,
+        35337
+      ],
+      "cur_obj_update_floor": [
+        174,
+        519
+      ],
+      "geo_switch_anim_state": [
+        357,
+        3377
+      ],
+      "lateral_dist_between_objects": [
+        60,
+        414
+      ],
+      "dist_between_objects": [
+        2156,
+        14497
+      ],
+      "approach_s16_symmetric": [
+        40,
+        188
+      ],
+      "cur_obj_rotate_yaw_toward": [
+        48,
+        246
+      ],
+      "obj_angle_to_object": [
+        364,
+        588
+      ],
+      "obj_copy_pos": [
+        14,
+        435
+      ],
+      "cur_obj_scale": [
+        84,
+        528
+      ],
+      "cur_obj_init_animation_with_sound": [
+        38,
+        328
+      ],
+      "cur_obj_init_animation_with_accel_and_sound": [
+        92,
+        408
+      ],
+      "cur_obj_disable_rendering": [
+        12,
+        106
+      ],
+      "cur_obj_set_model": [
+        64,
+        472
+      ],
+      "cur_obj_become_intangible": [
+        40,
+        427
+      ],
+      "cur_obj_apply_drag_xz": [
+        210,
+        1138
+      ],
+      "cur_obj_move_y": [
+        280,
+        1334
+      ],
+      "obj_check_if_collided_with_object": [
+        88,
+        1187
+      ],
+      "cur_obj_set_pos_to_home": [
+        18,
+        110
+      ],
+      "cur_obj_resolve_wall_collisions": [
+        160,
+        565
+      ],
+      "cur_obj_update_floor_and_walls": [
+        244,
+        1843
+      ],
+      "cur_obj_move_standard": [
+        520,
+        2539
+      ],
+      "cur_obj_move_using_fvel_and_gravity": [
+        192,
+        1372
+      ],
+      "obj_set_hitbox": [
+        468,
+        4275
+      ],
+      "signum_positive": [
+        24,
+        329
+      ],
+      "absf": [
+        8,
+        166
+      ],
+      "absi": [
+        48,
+        791
+      ],
+      "cur_obj_is_mario_ground_pounding_platform": [
+        80,
+        161
+      ],
+      "cur_obj_push_mario_away": [
+        32,
+        750
+      ],
+      "cur_obj_push_mario_away_from_cylinder": [
+        78,
+        327
+      ],
+      "cur_obj_call_action_function": [
+        70,
+        553
+      ],
+      "cur_obj_can_mario_activate_textbox_2": [
+        30,
+        428
+      ],
+      "obj_attack_collided_from_other_object": [
+        16,
+        140
+      ],
+      "cur_obj_was_attacked_or_ground_pounded": [
+        104,
+        712
+      ],
+      "copy_mario_state_to_object": [
+        78,
+        372
+      ],
+      "bhv_mario_update": [
+        228,
+        1337
+      ],
+      "set_object_respawn_info_bits": [
+        198,
+        3681
+      ],
+      "unload_deactivated_objects": [
+        2194,
+        22235
+      ],
+      "update_objects": [
+        2664,
+        34945
+      ],
+      "update_mario_platform": [
+        62,
+        390
+      ],
+      "apply_mario_platform_displacement": [
+        32,
+        834
+      ],
+      "format_integer": [
+        134,
+        1110
+      ],
+      "parse_width_field": [
+        48,
+        379
+      ],
+      "print_text_fmt_int": [
+        612,
+        2598
+      ],
+      "print_text": [
+        636,
+        1993
+      ],
+      "render_text_labels": [
+        1694,
+        5098
+      ],
+      "profiler_log_thread5_time": [
+        284,
+        1257
+      ],
+      "geo_append_display_list": [
+        8400,
+        16617
+      ],
+      "geo_set_animation_globals": [
+        554,
+        1872
+      ],
+      "geo_process_node_and_siblings": [
+        78092,
+        281768
+      ],
+      "geo_process_held_object": [
+        102,
+        453
+      ],
+      "geo_process_root": [
+        222,
+        1420
+      ],
+      "save_file_get_flags": [
+        96,
+        408
+      ],
+      "save_file_is_cannon_unlocked": [
+        150,
+        670
+      ],
+      "geo_cannon_circle_base": [
+        20,
+        204
+      ],
+      "init_shadow": [
+        2904,
+        7774
+      ],
+      "make_shadow_vertex_at_xyz": [
+        11134,
+        14509
+      ],
+      "correct_shadow_solidity_for_animations": [
+        26,
+        414
+      ],
+      "create_shadow_player": [
+        1936,
+        4583
+      ],
+      "create_shadow_circle_4_verts": [
+        13088,
+        26924
+      ],
+      "create_shadow_rectangle": [
+        354,
+        1759
+      ],
+      "create_shadow_below_xyz": [
+        2122,
+        4724
+      ],
+      "make_skybox_rect": [
+        1800,
+        3253
+      ],
+      "draw_skybox_tile_grid": [
+        1076,
+        3526
+      ],
+      "create_skybox_ortho_matrix": [
+        88,
+        817
+      ],
+      "create_skybox_facing_camera": [
+        242,
+        1761
+      ],
+      "play_infinite_stairs_music": [
+        14,
+        460
+      ],
+      "audio_game_loop_tick": [
+        2,
+        88
+      ],
+      "exec_anim_sound_state": [
+        34,
+        554
+      ],
+      "cur_obj_play_sound_1": [
+        28,
+        304
+      ],
+      "cur_obj_play_sound_2": [
+        14,
+        405
+      ],
+      "sequence_player_process_sound": [
+        7886,
+        19986
+      ],
+      "note_vibrato_update": [
+        1068,
+        4765
+      ],
+      "note_vibrato_init": [
+        99,
+        305
+      ],
+      "adsr_init": [
+        30,
+        402
+      ],
+      "adsr_update": [
+        3823,
+        9960
+      ],
+      "play_sound": [
+        60,
+        167
+      ],
+      "get_sound_dynamics": [
+        174,
+        1032
+      ],
+      "audio_signal_game_loop_tick": [
+        6,
+        445
+      ],
+      "process_sound_request": [
+        514,
+        2894
+      ],
+      "func_8031E16C": [
+        3801,
+        17573
+      ],
+      "update_game_sound.part.0": [
+        1027,
+        8151
+      ],
+      "func_80320ED8": [
+        28,
+        250
+      ],
+      "process_level_music_dynamics": [
+        486,
+        3948
+      ],
+      "create_next_audio_buffer": [
+        248,
+        1934
+      ],
+      "get_bank_or_seq": [
+        35,
+        300
+      ],
+      "decrease_sample_dma_ttls": [
+        1772,
+        5646
+      ],
+      "seq_channel_layer_note_decay": [
+        237,
+        2028
+      ],
+      "process_notes": [
+        6856,
+        15794
+      ],
+      "alloc_note_from_disabled": [
+        578,
+        1503
+      ],
+      "alloc_note": [
+        205,
+        642
+      ],
+      "reclaim_notes": [
+        2056,
+        6591
+      ],
+      "seq_channel_set_layer": [
+        756,
+        1283
+      ],
+      "sequence_channel_enable": [
+        637,
+        1618
+      ],
+      "audio_list_push_back": [
+        28,
+        466
+      ],
+      "audio_list_pop_back": [
+        100,
+        920
+      ],
+      "seq_channel_layer_process_script": [
+        3229,
+        14094
+      ],
+      "set_instrument": [
+        43,
+        510
+      ],
+      "sequence_channel_process_script": [
+        11852,
+        28777
+      ],
+      "sequence_player_process_sequence": [
+        2580,
+        8060
+      ],
+      "process_sequences": [
+        360,
+        1434
+      ],
+      "synthesis_execute": [
+        296,
+        1106
+      ],
+      "note_init_volume": [
+        45,
+        456
+      ],
+      "note_set_vel_pan_reverb": [
+        6533,
+        12461
+      ],
+      "note_set_frequency": [
+        232,
+        327
+      ],
+      "note_enable": [
+        35,
+        78
+      ],
+      "note_disable": [
+        49,
+        347
+      ],
+      "produce_one_frame": [
+        190,
+        1374
+      ],
+      "send_display_list": [
+        8,
+        310
+      ],
+      "main_func": [
+        10,
+        438
+      ],
+      "osRecvMesg": [
+        16,
+        267
+      ],
+      "osViSwapBuffer": [
+        2,
+        123
+      ],
+      "osGetTime": [
+        30,
+        164
+      ],
+      "audio_predecode_get": [
+        253,
+        1393
+      ],
+      "of_voice_sync": [
+        4096,
+        12977
+      ],
+      "osContStartReadData": [
+        4,
+        120
+      ],
+      "osContGetReadData": [
+        10,
+        116
+      ],
+      "import_texture_rgba16": [
+        37,
+        308
+      ],
+      "load_alias_copy": [
+        213832,
+        406778
+      ],
+      "gfx_mesh_lookup": [
+        9912,
+        20560
+      ],
+      "load_alias_materialize": [
+        9912,
+        16128
+      ],
+      "gfx_cpu_submit_pending": [
+        5073,
+        9645
+      ],
+      "load_alias_vertex_legacy": [
+        224889,
+        568738
+      ],
+      "import_texture": [
+        14124,
+        48218
+      ],
+      "load_alias_materialize_all": [
+        1188,
+        3844
+      ],
+      "gfx_cpu_materialize_fog": [
+        18602,
+        33885
+      ],
+      "gfx_pick_combiner": [
+        21177,
+        52368
+      ],
+      "gfx_sp_vertex": [
+        141868,
+        364462
+      ],
+      "gfx_push_triangle.constprop.0.isra.0": [
+        236146,
+        472941
+      ],
+      "gfx_clip_triangle.constprop.0": [
+        147455,
+        298368
+      ],
+      "gfx_sp_tri1": [
+        12135,
+        18754
+      ],
+      "gfx_draw_rectangle": [
+        2640,
+        5517
+      ],
+      "gfx_queued_front_run": [
+        11438,
+        21630
+      ],
+      "gfx_cpu_indexed_run": [
+        819241,
+        1176546
+      ],
+      "gfx_triangle_front_run": [
+        17157,
+        21826
+      ],
+      "gfx_run_dl": [
+        217108,
+        538417
+      ],
+      "gfx_start_frame": [
+        90,
+        780
+      ],
+      "gfx_run": [
+        144,
+        1808
+      ],
+      "gfx_end_frame": [
+        24,
+        411
+      ],
+      "gpu_load_shader": [
+        160,
+        479
+      ],
+      "gpu_unload_shader": [
+        160,
+        1515
+      ],
+      "gpu_new_texture": [
+        6,
+        49
+      ],
+      "gpu_select_texture": [
+        2805,
+        4298
+      ],
+      "gpu_set_sampler_parameters": [
+        30,
+        141
+      ],
+      "gpu_set_depth_test": [
+        20,
+        1411
+      ],
+      "gpu_set_depth_mask": [
+        20,
+        762
+      ],
+      "gpu_set_zmode_decal": [
+        20,
+        102
+      ],
+      "gpu_set_alpha_cvg_sel": [
+        20,
+        169
+      ],
+      "gpu_set_use_alpha": [
+        16,
+        506
+      ],
+      "gpu_set_fog_color": [
+        10,
+        264
+      ],
+      "gpu_project_clip": [
+        153102,
+        243555
+      ],
+      "gpu_finish_render": [
+        2,
+        116
+      ],
+      "gfx_gpu_async_supported": [
+        27771,
+        56711
+      ],
+      "gfx_gpu_async_service": [
+        7920,
+        12217
+      ],
+      "_gpu_flush_cmd_stream": [
+        107721,
+        295640
+      ],
+      "gpu_end_frame": [
+        16,
+        272
+      ],
+      "gpu_fast_tex_upload": [
+        5265,
+        39155
+      ],
+      "gpu_tex_slot_finish": [
+        41,
+        164
+      ],
+      "emit_tri_state": [
+        96683,
+        269931
+      ],
+      "gfx_gpu_vtx_cache_batch_impl": [
+        250650,
+        400350
+      ],
+      "gpu_tex_slot_begin": [
+        185,
+        3855
+      ],
+      "gpu_upload_texture_rgba16": [
+        26021,
+        40294
+      ],
+      "gpu_start_frame": [
+        288,
+        3398
+      ],
+      "gfx_gpu_mesh_supported": [
+        7091,
+        15663
+      ],
+      "gfx_gpu_mesh_wait_source": [
+        3260,
+        5219
+      ],
+      "gfx_gpu_queued_front_supported": [
+        6531,
+        10703
+      ],
+      "gfx_gpu_queued_front_service": [
+        15820,
+        34181
+      ],
+      "gfx_gpu_queued_front_release": [
+        6390,
+        9274
+      ],
+      "gfx_gpu_queued_front_wait_source": [
+        7172,
+        9050
+      ],
+      "gfx_gpu_bram_import_supported": [
+        11095,
+        24658
+      ],
+      "gfx_gpu_bram_import_wait": [
+        3260,
+        11459
+      ],
+      "gfx_gpu_cram_vertex_source": [
+        42904,
+        115142
+      ],
+      "gfx_gpu_present": [
+        182,
+        1051
+      ],
+      "gpu_present_prof_get": [
+        14,
+        240
+      ],
+      "gpu_ring_prof_get": [
+        20,
+        103
+      ],
+      "gpu_upload_prof_read": [
+        36,
+        376
+      ],
+      "gpu_submit_prof_read": [
+        36,
+        214
+      ],
+      "gpu_wait_prof_read": [
+        36,
+        416
+      ],
+      "gfx_gpu_vtx_cache_begin": [
+        12098,
+        42082
+      ],
+      "gfx_gpu_vtx_cache_tri": [
+        10738,
+        29776
+      ],
+      "gfx_gpu_vtx_cache_batch": [
+        786,
+        1771
+      ],
+      "gfx_gpu_draw_direct_records": [
+        147856,
+        305487
+      ],
+      "gpu_draw_triangles": [
+        151966,
+        359846
+      ],
+      "guLookAtReflect": [
+        1032,
+        3967
+      ],
+      "guMtxF2L": [
+        100,
+        335
+      ],
+      "guMtxIdentF": [
+        360,
+        1425
+      ],
+      "guMtxIdent": [
+        80,
+        587
+      ],
+      "guOrtho": [
+        930,
+        3333
+      ],
+      "guPerspectiveF": [
+        208,
+        1176
+      ],
+      "guPerspective": [
+        26,
+        220
+      ],
+      "gfx_of_main_loop": [
+        94,
+        511
+      ],
+      "gfx_of_get_dimensions": [
+        10,
+        88
+      ],
+      "gfx_of_handle_events": [
+        2,
+        183
+      ],
+      "gfx_of_start_frame": [
+        6,
+        235
+      ],
+      "gfx_of_swap_buffers_begin": [
+        2,
+        139
+      ],
+      "gfx_of_swap_buffers_end": [
+        2,
+        86
+      ],
+      "controller_of_read": [
+        214,
+        1015
+      ],
+      "audio_of_buffered": [
+        324,
+        918
+      ],
+      "audio_of_get_desired_buffered": [
+        4,
+        134
+      ],
+      "audio_of_play": [
+        20,
+        151
+      ],
+      "mtx4_identity": [
+        36,
+        534
+      ],
+      "mtx4_mul": [
+        71980,
+        86773
+      ],
+      "mtx4_rotate_zxy_and_translate": [
+        12470,
+        20069
+      ],
+      "mtx4_rotate_xyz_and_translate": [
+        14734,
+        34101
+      ],
+      "mtx4_billboard": [
+        8184,
+        9915
+      ],
+      "mtx4_scale_vec3f": [
+        18900,
+        27994
+      ],
+      "mtx4_translate": [
+        864,
+        1361
+      ],
+      "mtx4_to_mtx": [
+        18492,
+        71741
+      ],
+      "mtx4_to_mat4": [
+        14606,
+        55180
+      ],
+      "mat4_to_mtx4": [
+        2948,
+        9284
+      ],
+      "sm64_perf_render_begin": [
+        79,
+        815
+      ],
+      "sm64_perf_step_begin": [
+        52,
+        295
+      ],
+      "sm64_perf_render_end": [
+        295,
+        1500
+      ],
+      "sm64_perf_step_end": [
+        83,
+        677
+      ],
+      "sm64_perf_input": [
+        16,
+        387
+      ],
+      "sm64_perf_draw": [
+        6,
+        673
+      ],
+      "free": [
+        2,
+        99
+      ],
+      "__libc_free": [
+        4,
+        136
+      ],
+      "__malloc_alloc_meta": [
+        31,
+        322
+      ],
+      "alloc_slot": [
+        348,
+        2348
+      ],
+      "__libc_malloc_impl": [
+        312,
+        2293
+      ],
+      "posix_memalign": [
+        34,
+        131
+      ],
+      "ceilf": [
+        144,
+        456
+      ],
+      "cosf": [
+        38,
+        400
+      ],
+      "floorf": [
+        150,
+        625
+      ],
+      "sinf": [
+        38,
+        664
+      ],
+      "__mmap": [
+        29,
+        140
+      ],
+      "memcmp": [
+        29885,
+        35136
+      ],
+      "memcpy": [
+        16380,
+        62514
+      ],
+      "memset": [
+        152,
+        3131
+      ],
+      "__unlock": [
+        8,
+        191
+      ],
+      "__syscall_ret": [
+        10,
+        73
+      ],
+      "aligned_alloc": [
+        247,
+        1050
+      ],
+      "__cosdf": [
+        164,
+        1215
+      ],
+      "__sindf": [
+        172,
+        708
+      ],
+      "__clzsi2": [
+        32,
+        418
+      ],
+      "__udivdi3": [
+        318,
+        1238
+      ],
+      "__umoddi3": [
+        294,
+        2068
+      ],
+      "__adddf3": [
+        1136,
+        4815
+      ],
+      "__divdf3": [
+        432,
+        3113
+      ],
+      "__muldf3": [
+        8106,
+        13596
+      ],
+      "__subdf3": [
+        678,
+        3012
+      ],
+      "__fixunsdfsi": [
+        66,
+        395
+      ],
+      "__extendsfdf2": [
+        476,
+        1479
+      ],
+      "__truncdfsf2": [
+        448,
+        1348
+      ],
+      "gfx_gpu_async_raw_release": [
+        0,
+        0
+      ],
+      "gfx_async_try_load": [
+        0,
+        0
+      ],
+      "gfx_async_note_repair": [
+        0,
+        0
+      ],
+      "gfx_gpu_async_job": [
+        0,
+        0
+      ],
+      "gfx_gpu_async_raw_acquire": [
+        0,
+        0
+      ],
+      "direct": [
+        0,
+        0
+      ],
+      "gfx_gpu_mesh_sources": [
+        0,
+        0
+      ],
+      "intersect": [
+        0,
+        0
+      ],
+      "am_repair": [
+        0,
+        0
+      ],
+      "__ctzsi2": [
+        0,
+        0
+      ],
+      "gpu_async_repair_word": [
+        0,
+        0
+      ]
+    }
+  },
+  "cycle_change_percent": 12.15168346298261,
+  "prior_qualified_cycles": [
+    3980965,
+    4366717
+  ],
+  "change_vs_prior_qualified_percent": 19.57434411133534,
+  "function_delta": {
+    "gfx_gpu_async_raw_acquire": [
+      376937,
+      1050051
+    ],
+    "gfx_mesh_lookup": [
+      100227,
+      184150
+    ],
+    "am_repair": [
+      95361,
+      169297
+    ],
+    "gfx_gpu_async_job": [
+      95521,
+      154649
+    ],
+    "direct": [
+      57494,
+      116022
+    ],
+    "gfx_async_try_load": [
+      55217,
+      111645
+    ],
+    "gfx_gpu_async_service": [
+      45471,
+      92918
+    ],
+    "gpu_async_repair_word": [
+      42918,
+      92727
+    ],
+    "gfx_gpu_mesh_sources": [
+      30952,
+      72094
+    ],
+    "load_alias_materialize_all": [
+      20768,
+      27325
+    ],
+    "memcpy": [
+      16008,
+      26764
+    ],
+    "intersect": [
+      8432,
+      22676
+    ],
+    "memset": [
+      19714,
+      21188
+    ],
+    "__clzsi2": [
+      6692,
+      14151
+    ],
+    "__ctzsi2": [
+      7170,
+      9353
+    ],
+    "gfx_gpu_async_raw_release": [
+      1882,
+      6880
+    ],
+    "gfx_async_note_repair": [
+      915,
+      4993
+    ],
+    "cur_obj_update": [
+      0,
+      4385
+    ],
+    "detect_object_collisions": [
+      0,
+      1729
+    ],
+    "clear_dynamic_surfaces": [
+      0,
+      1404
+    ],
+    "mtx4_to_mtx": [
+      0,
+      1341
+    ],
+    "make_vertex": [
+      0,
+      1266
+    ],
+    "gfx_pick_combiner": [
+      0,
+      1193
+    ],
+    "of_voice_sync": [
+      0,
+      1092
+    ],
+    "update_game_sound.part.0": [
+      0,
+      1015
+    ],
+    "object_step": [
+      0,
+      936
+    ],
+    "gfx_sp_tri1": [
+      20,
+      798
+    ],
+    "gfx_gpu_vtx_cache_batch": [
+      -284,
+      784
+    ],
+    "geo_process_root": [
+      0,
+      729
+    ],
+    "__subdf3": [
+      0,
+      682
+    ],
+    "guPerspectiveF": [
+      0,
+      617
+    ],
+    "find_floor": [
+      0,
+      614
+    ],
+    "create_skybox_facing_camera": [
+      0,
+      613
+    ],
+    "check_player_object_collision": [
+      0,
+      608
+    ],
+    "seq_channel_layer_process_script": [
+      0,
+      548
+    ],
+    "memcmp": [
+      0,
+      532
+    ],
+    "mtxf_align_terrain_normal": [
+      0,
+      481
+    ],
+    "adsr_update": [
+      0,
+      470
+    ],
+    "process_notes": [
+      0,
+      466
+    ],
+    "gpu_set_depth_test": [
+      0,
+      461
+    ],
+    "decrease_sample_dma_ttls": [
+      0,
+      428
+    ],
+    "main_func": [
+      0,
+      391
+    ],
+    "adjust_analog_stick": [
+      0,
+      391
+    ],
+    "gfx_draw_rectangle": [
+      0,
+      391
+    ],
+    "pan_ahead_of_player": [
+      0,
+      380
+    ],
+    "__sindf": [
+      0,
+      374
+    ],
+    "sequence_channel_process_script": [
+      0,
+      366
+    ],
+    "approach_s16_symmetric": [
+      0,
+      364
+    ],
+    "bhv_openable_cage_door_loop": [
+      0,
+      363
+    ],
+    "alloc_note_from_disabled": [
+      0,
+      360
+    ],
+    "bhv_recovery_heart_loop": [
+      0,
+      347
+    ],
+    "mario_execute_stationary_action": [
+      0,
+      344
+    ],
+    "read_controller_inputs": [
+      0,
+      337
+    ],
+    "<before_first_ELF_symbol>": [
+      -11,
+      335
+    ],
+    "get_dialog_id": [
+      0,
+      326
+    ],
+    "geo_mario_head_rotation": [
+      0,
+      326
+    ],
+    "cur_obj_init_animation_with_sound": [
+      0,
+      325
+    ],
+    "mario_process_interactions": [
+      0,
+      324
+    ],
+    "process_sequences": [
+      0,
+      316
+    ],
+    "bhv_generic_bowling_ball_spawner_loop": [
+      0,
+      316
+    ],
+    "find_in_bounds_yaw_wdw_bob_thi": [
+      0,
+      315
+    ],
+    "send_display_list": [
+      0,
+      314
+    ],
+    "my_rdp_init": [
+      0,
+      314
+    ],
+    "find_poison_gas_level": [
+      0,
+      310
+    ],
+    "geo_switch_mario_eyes": [
+      0,
+      306
+    ],
+    "mario_update_quicksand": [
+      0,
+      305
+    ],
+    "cur_obj_move_standard": [
+      0,
+      305
+    ],
+    "guLookAtReflect": [
+      0,
+      302
+    ],
+    "gpu_set_sampler_parameters": [
+      0,
+      294
+    ],
+    "bhv_chain_chomp_gate_update": [
+      0,
+      292
+    ],
+    "bobomb_buddy_act_idle": [
+      0,
+      287
+    ],
+    "camera_approach_s16_symmetric_bool": [
+      0,
+      286
+    ],
+    "geo_mario_tilt_torso": [
+      0,
+      283
+    ],
+    "adsr_init": [
+      0,
+      283
+    ],
+    "bhv_water_bomb_spawner_update": [
+      0,
+      278
+    ],
+    "osViSwapBuffer": [
+      0,
+      274
+    ],
+    "zoom_out_if_paused_and_outside": [
+      0,
+      269
+    ],
+    "bhv_rotating_exclamation_box_loop": [
+      0,
+      265
+    ],
+    "find_floor_height_and_data": [
+      0,
+      264
+    ],
+    "vec3f_copy": [
+      0,
+      261
+    ],
+    "update_mario_button_inputs": [
+      0,
+      257
+    ],
+    "cur_obj_move_using_fvel_and_gravity": [
+      0,
+      257
+    ],
+    "create_next_audio_buffer": [
+      0,
+      255
+    ],
+    "find_wall_collisions": [
+      0,
+      249
+    ],
+    "geo_camera_fov": [
+      0,
+      247
+    ],
+    "gpu_set_zmode_decal": [
+      0,
+      247
+    ],
+    "guMtxIdent": [
+      0,
+      245
+    ],
+    "bhv_mario_update": [
+      0,
+      234
+    ],
+    "water_bomb_cannon_act_1": [
+      0,
+      231
+    ],
+    "dist_between_objects": [
+      0,
+      227
+    ],
+    "geo_update_animation_frame": [
+      0,
+      214
+    ],
+    "geo_switch_mario_cap_effect": [
+      0,
+      213
+    ],
+    "game_loop_one_iteration": [
+      0,
+      198
+    ],
+    "alloc_slot": [
+      -4,
+      198
+    ],
+    "rotate_camera_around_walls": [
+      0,
+      196
+    ],
+    "update_camera": [
+      0,
+      192
+    ],
+    "cur_obj_update_floor_and_walls": [
+      0,
+      189
+    ],
+    "mtx4_mul": [
+      0,
+      171
+    ],
+    "mtx4_rotate_xyz_and_translate": [
+      0,
+      156
+    ],
+    "render_hud": [
+      0,
+      149
+    ],
+    "check_destructive_object_collision": [
+      0,
+      133
+    ],
+    "set_object_respawn_info_bits": [
+      0,
+      128
+    ],
+    "bhv_goomba_update": [
+      0,
+      125
+    ],
+    "find_c_buttons_pressed": [
+      0,
+      122
+    ],
+    "geo_switch_anim_state": [
+      0,
+      121
+    ],
+    "gfx_run": [
+      6,
+      120
+    ],
+    "sequence_player_process_sound": [
+      0,
+      118
+    ],
+    "exclamation_box_act_2": [
+      0,
+      101
+    ],
+    "check_collision_in_list.part.0": [
+      0,
+      94
+    ],
+    "bhv_fading_warp_loop": [
+      0,
+      93
+    ],
+    "gfx_of_start_frame": [
+      0,
+      85
+    ],
+    "unload_deactivated_objects": [
+      0,
+      82
+    ],
+    "render_hud_power_meter": [
+      0,
+      81
+    ],
+    "vec3f_set_dist_and_angle": [
+      0,
+      80
+    ],
+    "create_shadow_player": [
+      0,
+      75
+    ],
+    "get_sound_dynamics": [
+      0,
+      75
+    ],
+    "__muldf3": [
+      0,
+      72
+    ],
+    "cur_obj_resolve_wall_collisions": [
+      0,
+      68
+    ],
+    "end_master_display_list": [
+      0,
+      67
+    ],
+    "move_segment_table_to_dmem": [
+      0,
+      66
+    ],
+    "__adddf3": [
+      0,
+      65
+    ],
+    "calc_new_obj_vel_and_pos_y": [
+      0,
+      59
+    ],
+    "guMtxIdentF": [
+      0,
+      58
+    ],
+    "my_rsp_init": [
+      0,
+      57
+    ],
+    "gpu_select_texture": [
+      0,
+      56
+    ],
+    "note_disable": [
+      0,
+      55
+    ],
+    "audio_list_pop_back": [
+      0,
+      54
+    ],
+    "geo_move_mario_part_from_parent": [
+      0,
+      53
+    ],
+    "__udivdi3": [
+      0,
+      52
+    ],
+    "try_print_debug_mario_level_info": [
+      0,
+      52
+    ],
+    "render_hud_stars": [
+      0,
+      51
+    ],
+    "note_vibrato_update": [
+      0,
+      50
+    ],
+    "bhv_seesaw_platform_update": [
+      0,
+      49
+    ],
+    "bhv_cannon_closed_loop": [
+      0,
+      49
+    ],
+    "__truncdfsf2": [
+      0,
+      48
+    ],
+    "stationary_ground_step": [
+      0,
+      48
+    ],
+    "bhv_breakable_box_loop": [
+      0,
+      47
+    ],
+    "update_mario_inputs": [
+      0,
+      47
+    ],
+    "gfx_of_swap_buffers_begin": [
+      0,
+      47
+    ],
+    "cur_obj_scale": [
+      0,
+      46
+    ],
+    "sm64_perf_render_end": [
+      0,
+      46
+    ],
+    "note_set_frequency": [
+      0,
+      45
+    ],
+    "audio_of_play": [
+      0,
+      44
+    ],
+    "seq_channel_layer_note_decay": [
+      0,
+      43
+    ],
+    "func_80320ED8": [
+      0,
+      43
+    ],
+    "camera_course_processing": [
+      0,
+      42
+    ],
+    "seq_channel_set_layer": [
+      0,
+      41
+    ],
+    "lakitu_zoom": [
+      0,
+      41
+    ],
+    "correct_shadow_solidity_for_animations": [
+      0,
+      39
+    ],
+    "find_ceil_from_list.constprop.0": [
+      0,
+      39
+    ],
+    "__unlock": [
+      0,
+      38
+    ],
+    "osContStartReadData": [
+      0,
+      38
+    ],
+    "guPerspective": [
+      0,
+      34
+    ],
+    "cosf": [
+      0,
+      34
+    ],
+    "vec3f_to_vec3s": [
+      0,
+      33
+    ],
+    "synthesis_execute": [
+      0,
+      31
+    ],
+    "__libc_malloc_impl": [
+      0,
+      31
+    ],
+    "find_water_level": [
+      0,
+      30
+    ],
+    "bhv_exclamation_box_loop": [
+      0,
+      28
+    ],
+    "gpu_tex_slot_finish": [
+      0,
+      28
+    ],
+    "check_common_idle_cancels": [
+      0,
+      24
+    ],
+    "geo_mario_hand_foot_scaler": [
+      0,
+      24
+    ],
+    "obj_angle_to_object": [
+      0,
+      24
+    ],
+    "bhv_bobomb_buddy_loop": [
+      0,
+      23
+    ],
+    "mario_set_forward_vel": [
+      0,
+      23
+    ],
+    "vec3f_get_dist_and_angle": [
+      0,
+      21
+    ],
+    "render_menus_and_dialogs": [
+      0,
+      20
+    ],
+    "set_camera_mode_radial": [
+      0,
+      20
+    ],
+    "vec3s_set": [
+      0,
+      18
+    ],
+    "reclaim_notes": [
+      0,
+      16
+    ],
+    "save_file_is_cannon_unlocked": [
+      0,
+      16
+    ],
+    "bhv_breakable_box_small_loop": [
+      0,
+      15
+    ],
+    "update_mario_platform": [
+      0,
+      15
+    ],
+    "aligned_alloc": [
+      0,
+      15
+    ],
+    "exclamation_box_act_1": [
+      0,
+      14
+    ],
+    "bhv_cmd_end_loop": [
+      0,
+      14
+    ],
+    "radial_camera_move": [
+      0,
+      13
+    ],
+    "mtx4_translate": [
+      0,
+      13
+    ],
+    "vec3f_set": [
+      0,
+      13
+    ],
+    "bhv_openable_grill_loop": [
+      0,
+      13
+    ],
+    "obj_handle_attacks": [
+      0,
+      12
+    ],
+    "osRecvMesg": [
+      0,
+      10
+    ],
+    "mario_handle_special_floors": [
+      0,
+      9
+    ],
+    "play_mode_normal": [
+      0,
+      8
+    ],
+    "format_integer": [
+      0,
+      8
+    ],
+    "turn_obj_away_from_steep_floor": [
+      0,
+      8
+    ],
+    "mem_pool_alloc": [
+      0,
+      8
+    ],
+    "sm64_perf_step_begin": [
+      0,
+      7
+    ],
+    "geo_switch_mario_hand": [
+      0,
+      7
+    ],
+    "render_hud_camera_status": [
+      0,
+      6
+    ],
+    "geo_switch_mario_stand_run": [
+      0,
+      6
+    ],
+    "alloc_note": [
+      0,
+      5
+    ],
+    "geo_process_held_object": [
+      0,
+      5
+    ],
+    "next_lakitu_state": [
+      0,
+      5
+    ],
+    "cur_obj_set_model": [
+      0,
+      5
+    ],
+    "level_cmd_call_loop": [
+      0,
+      4
+    ],
+    "gfx_of_get_dimensions": [
+      0,
+      3
+    ],
+    "print_displaying_credits_entry": [
+      0,
+      3
+    ],
+    "bhv_1up_loop": [
+      0,
+      3
+    ],
+    "set_mario_animation": [
+      0,
+      3
+    ],
+    "cur_obj_was_attacked_or_ground_pounded": [
+      0,
+      3
+    ],
+    "bhv_hidden_star_trigger_loop": [
+      0,
+      2
+    ],
+    "area_update_objects": [
+      0,
+      2
+    ],
+    "geo_cannon_circle_base": [
+      0,
+      2
+    ],
+    "bhv_bobomb_loop": [
+      0,
+      2
+    ],
+    "squish_mario_model": [
+      0,
+      2
+    ],
+    "gpu_new_texture": [
+      0,
+      2
+    ],
+    "render_hud_mario_lives": [
+      0,
+      1
+    ],
+    "bhv_bubble_cannon_barrel_loop": [
+      0,
+      1
+    ],
+    "find_wall_collisions_from_list": [
+      0,
+      1
+    ],
+    "gpu_submit_prof_read": [
+      0,
+      1
+    ],
+    "obj_resolve_object_collisions": [
+      0,
+      0
+    ],
+    "__syscall_ret": [
+      0,
+      0
+    ],
+    "audio_game_loop_tick": [
+      0,
+      0
+    ],
+    "treat_far_home_as_mario": [
+      0,
+      0
+    ],
+    "get_current_clock": [
+      0,
+      0
+    ],
+    "set_submerged_cam_preset_and_spawn_bubbles": [
+      0,
+      0
+    ],
+    "mtx4_scale_vec3f": [
+      0,
+      0
+    ],
+    "obj_find_wall": [
+      0,
+      0
+    ],
+    "run_demo_inputs": [
+      0,
+      0
+    ],
+    "osContGetReadData": [
+      0,
+      0
+    ],
+    "envfx_update_particles": [
+      0,
+      0
+    ],
+    "geo_skybox_main": [
+      0,
+      0
+    ],
+    "gpu_wait_prof_read": [
+      0,
+      0
+    ],
+    "gfx_of_swap_buffers_end": [
+      0,
+      0
+    ],
+    "surface_type_modes": [
+      0,
+      0
+    ],
+    "__mmap": [
+      0,
+      0
+    ],
+    "update_mario_health": [
+      0,
+      0
+    ],
+    "absf": [
+      0,
+      0
+    ],
+    "note_enable": [
+      0,
+      0
+    ],
+    "__malloc_alloc_meta": [
+      0,
+      0
+    ],
+    "gpu_finish_render": [
+      0,
+      0
+    ],
+    "cur_obj_push_mario_away_from_cylinder": [
+      0,
+      0
+    ],
+    "bhv_chain_chomp_update": [
+      0,
+      0
+    ],
+    "play_sound": [
+      0,
+      0
+    ],
+    "mode_radial_camera": [
+      0,
+      0
+    ],
+    "geo_camera_main": [
+      0,
+      0
+    ],
+    "cur_obj_set_pos_to_home": [
+      0,
+      0
+    ],
+    "breakable_box_small_idle_loop": [
+      0,
+      0
+    ],
+    "set_instrument": [
+      0,
+      0
+    ],
+    "gfx_of_main_loop": [
+      0,
+      -1
+    ],
+    "copy_mario_state_to_object": [
+      0,
+      -1
+    ],
+    "create_shadow_rectangle": [
+      0,
+      -1
+    ],
+    "mario_update_hitbox_and_cap_model": [
+      0,
+      -1
+    ],
+    "cur_obj_is_mario_ground_pounding_platform": [
+      0,
+      -1
+    ],
+    "bhv_hidden_red_coin_star_loop": [
+      0,
+      -2
+    ],
+    "geo_mirror_mario_backface_culling": [
+      0,
+      -2
+    ],
+    "lateral_dist_between_objects": [
+      0,
+      -2
+    ],
+    "posix_memalign": [
+      0,
+      -2
+    ],
+    "play_infinite_stairs_music": [
+      0,
+      -2
+    ],
+    "cur_obj_disable_rendering": [
+      0,
+      -2
+    ],
+    "get_clock_difference": [
+      0,
+      -2
+    ],
+    "cur_obj_init_animation_with_accel_and_sound": [
+      0,
+      -2
+    ],
+    "ceilf": [
+      0,
+      -2
+    ],
+    "obj_copy_pos": [
+      0,
+      -2
+    ],
+    "geo_switch_mario_cap_on_off": [
+      0,
+      -2
+    ],
+    "mario_drop_held_object": [
+      0,
+      -2
+    ],
+    "guMtxF2L": [
+      0,
+      -3
+    ],
+    "gpu_ring_prof_get": [
+      0,
+      -3
+    ],
+    "initiate_painting_warp": [
+      0,
+      -3
+    ],
+    "__fixunsdfsi": [
+      0,
+      -3
+    ],
+    "is_anim_at_end": [
+      0,
+      -3
+    ],
+    "gpu_load_shader": [
+      0,
+      -3
+    ],
+    "reduce_by_dist_from_camera": [
+      0,
+      -3
+    ],
+    "check_blocking_area_processing": [
+      0,
+      -3
+    ],
+    "bhv_1up_hidden_in_pole_spawner_loop": [
+      0,
+      -3
+    ],
+    "mtxf_rotate_xy": [
+      0,
+      -3
+    ],
+    "bhv_bobomb_anchor_mario_loop": [
+      0,
+      -4
+    ],
+    "stub_mario_step_1": [
+      0,
+      -4
+    ],
+    "set_hud_camera_status": [
+      0,
+      -4
+    ],
+    "geo_envfx_main": [
+      0,
+      -4
+    ],
+    "sm64_perf_render_begin": [
+      0,
+      -5
+    ],
+    "main_pool_free": [
+      0,
+      -5
+    ],
+    "get_bank_or_seq": [
+      0,
+      -6
+    ],
+    "cur_obj_can_mario_activate_textbox_2": [
+      0,
+      -6
+    ],
+    "cur_obj_move_y": [
+      0,
+      -7
+    ],
+    "__libc_free": [
+      0,
+      -7
+    ],
+    "update_radial_camera": [
+      0,
+      -7
+    ],
+    "clear_z_buffer": [
+      0,
+      -7
+    ],
+    "note_vibrato_init": [
+      0,
+      -8
+    ],
+    "bhv_hidden_star_loop": [
+      0,
+      -8
+    ],
+    "bhv_1up_hidden_trigger_loop": [
+      0,
+      -8
+    ],
+    "stub_debug_5": [
+      0,
+      -8
+    ],
+    "try_print_debug_mario_object_info": [
+      0,
+      -8
+    ],
+    "obj_attack_collided_from_other_object": [
+      0,
+      -8
+    ],
+    "signum_positive": [
+      0,
+      -9
+    ],
+    "envfx_init_snow": [
+      0,
+      -10
+    ],
+    "geo_switch_mario_hand_grab_pos": [
+      0,
+      -10
+    ],
+    "mtx4_identity": [
+      0,
+      -10
+    ],
+    "import_texture_rgba16": [
+      0,
+      -10
+    ],
+    "find_mario_floor_and_ceil": [
+      0,
+      -12
+    ],
+    "controller_of_read": [
+      0,
+      -13
+    ],
+    "geo_obj_init_animation_accel": [
+      0,
+      -13
+    ],
+    "save_file_get_flags": [
+      0,
+      -14
+    ],
+    "bhv_collect_star_loop": [
+      0,
+      -16
+    ],
+    "sequence_channel_enable": [
+      0,
+      -17
+    ],
+    "geo_mirror_mario_set_alpha": [
+      0,
+      -17
+    ],
+    "mtxf_lookat": [
+      0,
+      -17
+    ],
+    "mem_pool_free": [
+      0,
+      -17
+    ],
+    "cur_obj_call_action_function": [
+      0,
+      -17
+    ],
+    "f32_find_wall_collision": [
+      0,
+      -17
+    ],
+    "make_shadow_vertex_at_xyz": [
+      0,
+      -18
+    ],
+    "bhv_pole_base_loop": [
+      0,
+      -18
+    ],
+    "print_text": [
+      0,
+      -19
+    ],
+    "bhv_water_bomb_cannon_loop": [
+      0,
+      -21
+    ],
+    "parse_width_field": [
+      0,
+      -21
+    ],
+    "alloc_only_pool_alloc": [
+      0,
+      -21
+    ],
+    "cur_obj_play_sound_1": [
+      0,
+      -22
+    ],
+    "mario_get_floor_class": [
+      0,
+      -23
+    ],
+    "floorf": [
+      0,
+      -23
+    ],
+    "create_dl_ortho_matrix": [
+      0,
+      -25
+    ],
+    "bhv_cmd_add_int": [
+      0,
+      -26
+    ],
+    "cur_obj_rotate_yaw_toward": [
+      0,
+      -27
+    ],
+    "initiate_delayed_warp": [
+      0,
+      -28
+    ],
+    "gpu_present_prof_get": [
+      0,
+      -28
+    ],
+    "set_camera_shake_from_point": [
+      0,
+      -29
+    ],
+    "load_patchable_table": [
+      0,
+      -30
+    ],
+    "audio_of_buffered": [
+      0,
+      -32
+    ],
+    "cur_obj_apply_drag_xz": [
+      0,
+      -32
+    ],
+    "calc_y_to_curr_floor": [
+      0,
+      -33
+    ],
+    "gpu_upload_prof_read": [
+      0,
+      -34
+    ],
+    "bhv_1up_hidden_loop": [
+      0,
+      -36
+    ],
+    "process_level_music_dynamics": [
+      0,
+      -37
+    ],
+    "init_render_image": [
+      0,
+      -39
+    ],
+    "get_cutscene_from_mario_status": [
+      0,
+      -39
+    ],
+    "bhv_cmd_break": [
+      0,
+      -40
+    ],
+    "cur_obj_become_intangible": [
+      0,
+      -42
+    ],
+    "free": [
+      0,
+      -43
+    ],
+    "audio_of_get_desired_buffered": [
+      0,
+      -44
+    ],
+    "fov_default": [
+      0,
+      -45
+    ],
+    "king_bobomb_act_0": [
+      0,
+      -45
+    ],
+    "bhv_cmd_set_int": [
+      0,
+      -47
+    ],
+    "init_shadow": [
+      0,
+      -49
+    ],
+    "bhv_yellow_coin_loop": [
+      0,
+      -50
+    ],
+    "render_game": [
+      0,
+      -51
+    ],
+    "sm64_perf_step_end": [
+      0,
+      -52
+    ],
+    "geo_obj_init_animation": [
+      0,
+      -54
+    ],
+    "main_pool_available": [
+      0,
+      -55
+    ],
+    "osGetTime": [
+      0,
+      -55
+    ],
+    "audio_predecode_get": [
+      0,
+      -56
+    ],
+    "check_instant_warp": [
+      0,
+      -56
+    ],
+    "bhv_cmd_call_native": [
+      0,
+      -60
+    ],
+    "render_text_labels": [
+      0,
+      -60
+    ],
+    "mat4_to_mtx4": [
+      0,
+      -62
+    ],
+    "cur_obj_update_floor": [
+      0,
+      -69
+    ],
+    "bhv_red_coin_loop": [
+      0,
+      -70
+    ],
+    "cur_obj_push_mario_away": [
+      0,
+      -74
+    ],
+    "gpu_set_alpha_cvg_sel": [
+      0,
+      -79
+    ],
+    "print_text_fmt_int": [
+      0,
+      -84
+    ],
+    "draw_skybox_tile_grid": [
+      0,
+      -90
+    ],
+    "gfx_of_handle_events": [
+      0,
+      -95
+    ],
+    "load_alias_materialize": [
+      0,
+      -96
+    ],
+    "set_segment_base_addr": [
+      0,
+      -96
+    ],
+    "gpu_set_fog_color": [
+      0,
+      -98
+    ],
+    "sm64_perf_draw": [
+      0,
+      -99
+    ],
+    "produce_one_frame": [
+      0,
+      -99
+    ],
+    "audio_list_push_back": [
+      0,
+      -108
+    ],
+    "level_script_execute": [
+      0,
+      -116
+    ],
+    "update_lakitu": [
+      0,
+      -130
+    ],
+    "gpu_end_frame": [
+      0,
+      -144
+    ],
+    "reset_debug_objectinfo": [
+      0,
+      -170
+    ],
+    "find_ceil": [
+      0,
+      -193
+    ],
+    "set_camera_height": [
+      0,
+      -194
+    ],
+    "__extendsfdf2": [
+      0,
+      -204
+    ],
+    "gpu_upload_texture_rgba16": [
+      0,
+      -207
+    ],
+    "look_down_slopes": [
+      0,
+      -211
+    ],
+    "sm64_perf_input": [
+      0,
+      -215
+    ],
+    "gpu_set_depth_mask": [
+      0,
+      -216
+    ],
+    "mtx4_billboard": [
+      0,
+      -231
+    ],
+    "random_float": [
+      0,
+      -252
+    ],
+    "guOrtho": [
+      0,
+      -261
+    ],
+    "detect_object_hurtbox_overlap": [
+      0,
+      -263
+    ],
+    "round_float": [
+      0,
+      -264
+    ],
+    "update_hud_values.part.0": [
+      0,
+      -264
+    ],
+    "cur_obj_play_sound_2": [
+      0,
+      -265
+    ],
+    "alloc_display_list": [
+      0,
+      -269
+    ],
+    "gfx_end_frame": [
+      0,
+      -271
+    ],
+    "process_sound_request": [
+      0,
+      -272
+    ],
+    "exec_anim_sound_state": [
+      0,
+      -274
+    ],
+    "radial_camera_input": [
+      0,
+      -278
+    ],
+    "__umoddi3": [
+      0,
+      -282
+    ],
+    "audio_signal_game_loop_tick": [
+      0,
+      -284
+    ],
+    "update_mario_geometry_inputs": [
+      0,
+      -292
+    ],
+    "obj_set_hitbox": [
+      0,
+      -293
+    ],
+    "try_do_mario_debug_object_spawn": [
+      0,
+      -300
+    ],
+    "segmented_to_virtual": [
+      0,
+      -305
+    ],
+    "do_cutscene_handler": [
+      0,
+      -306
+    ],
+    "apply_mario_platform_displacement": [
+      0,
+      -306
+    ],
+    "bhv_bob_pit_bowling_ball_loop": [
+      0,
+      -311
+    ],
+    "vec3f_add": [
+      0,
+      -312
+    ],
+    "note_init_volume": [
+      0,
+      -312
+    ],
+    "vec3s_copy": [
+      0,
+      -314
+    ],
+    "sinf": [
+      0,
+      -315
+    ],
+    "gfx_start_frame": [
+      0,
+      -316
+    ],
+    "act_idle": [
+      0,
+      -319
+    ],
+    "make_skybox_rect": [
+      0,
+      -322
+    ],
+    "obj_check_if_collided_with_object": [
+      0,
+      -323
+    ],
+    "gpu_unload_shader": [
+      0,
+      -331
+    ],
+    "profiler_log_thread5_time": [
+      0,
+      -333
+    ],
+    "absi": [
+      0,
+      -336
+    ],
+    "__divdf3": [
+      0,
+      -339
+    ],
+    "small_breakable_box_act_move": [
+      0,
+      -339
+    ],
+    "update_mario_joystick_inputs": [
+      0,
+      -348
+    ],
+    "lvl_init_or_update": [
+      0,
+      -349
+    ],
+    "bhv_wooden_post_update": [
+      0,
+      -350
+    ],
+    "bhv_purple_switch_loop": [
+      0,
+      -352
+    ],
+    "geo_set_animation_globals": [
+      0,
+      -355
+    ],
+    "create_skybox_ortho_matrix": [
+      0,
+      -367
+    ],
+    "display_and_vsync": [
+      0,
+      -371
+    ],
+    "gfx_gpu_present": [
+      0,
+      -377
+    ],
+    "shake_camera_handheld": [
+      0,
+      -379
+    ],
+    "atan2s": [
+      0,
+      -392
+    ],
+    "execute_mario_action": [
+      0,
+      -402
+    ],
+    "gpu_set_use_alpha": [
+      0,
+      -408
+    ],
+    "bhv_checkerboard_platform_loop": [
+      0,
+      -431
+    ],
+    "gpu_start_frame": [
+      0,
+      -480
+    ],
+    "bhv_coin_formation_loop": [
+      0,
+      -493
+    ],
+    "__cosdf": [
+      0,
+      -517
+    ],
+    "find_floor_from_list": [
+      0,
+      -520
+    ],
+    "mtx4_to_mat4": [
+      0,
+      -524
+    ],
+    "create_shadow_circle_4_verts": [
+      0,
+      -564
+    ],
+    "note_set_vel_pan_reverb": [
+      0,
+      -577
+    ],
+    "bhv_king_bobomb_loop": [
+      0,
+      -598
+    ],
+    "gpu_tex_slot_begin": [
+      0,
+      -609
+    ],
+    "sequence_player_process_sequence": [
+      0,
+      -618
+    ],
+    "create_shadow_below_xyz": [
+      0,
+      -633
+    ],
+    "bhv_goomba_triplet_spawner_update": [
+      0,
+      -646
+    ],
+    "alloc_only_pool_init": [
+      0,
+      -666
+    ],
+    "geo_append_display_list": [
+      0,
+      -810
+    ],
+    "mtx4_rotate_zxy_and_translate": [
+      0,
+      -834
+    ],
+    "geo_process_node_and_siblings": [
+      0,
+      -862
+    ],
+    "gfx_gpu_queued_front_release": [
+      0,
+      -871
+    ],
+    "gpu_fast_tex_upload": [
+      3,
+      -881
+    ],
+    "func_8031E16C": [
+      0,
+      -1061
+    ],
+    "gfx_gpu_mesh_wait_source": [
+      -870,
+      -1085
+    ],
+    "update_objects": [
+      0,
+      -1232
+    ],
+    "gfx_gpu_vtx_cache_begin": [
+      0,
+      -1320
+    ],
+    "retrieve_animation_index": [
+      0,
+      -1539
+    ],
+    "load_object_collision_model": [
+      0,
+      -1603
+    ],
+    "gfx_gpu_queued_front_wait_source": [
+      -1914,
+      -1721
+    ],
+    "gfx_gpu_queued_front_supported": [
+      -1740,
+      -2196
+    ],
+    "import_texture": [
+      0,
+      -2286
+    ],
+    "gfx_cpu_submit_pending": [
+      -2063,
+      -2755
+    ],
+    "gfx_gpu_bram_import_wait": [
+      -870,
+      -3126
+    ],
+    "gfx_gpu_cram_vertex_source": [
+      0,
+      -4162
+    ],
+    "gfx_gpu_queued_front_service": [
+      -1750,
+      -4914
+    ],
+    "gfx_queued_front_run": [
+      -2842,
+      -4927
+    ],
+    "gfx_cpu_materialize_fog": [
+      -3369,
+      -5122
+    ],
+    "gfx_triangle_front_run": [
+      -4263,
+      -5966
+    ],
+    "gpu_draw_triangles": [
+      -216,
+      -6234
+    ],
+    "gfx_gpu_bram_import_supported": [
+      -2958,
+      -6890
+    ],
+    "gfx_gpu_vtx_cache_tri": [
+      -2664,
+      -8494
+    ],
+    "gfx_gpu_async_supported": [
+      -1745,
+      -9340
+    ],
+    "emit_tri_state": [
+      75,
+      -11747
+    ],
+    "gfx_gpu_mesh_supported": [
+      -7091,
+      -15663
+    ],
+    "gfx_run_dl": [
+      -3212,
+      -23828
+    ],
+    "gpu_project_clip": [
+      -19197,
+      -29421
+    ],
+    "gfx_sp_vertex": [
+      5842,
+      -32103
+    ],
+    "_gpu_flush_cmd_stream": [
+      -15588,
+      -45970
+    ],
+    "gfx_push_triangle.constprop.0.isra.0": [
+      -23709,
+      -48740
+    ],
+    "gfx_clip_triangle.constprop.0": [
+      -27850,
+      -52667
+    ],
+    "gfx_gpu_draw_direct_records": [
+      -26997,
+      -67430
+    ],
+    "load_alias_vertex_legacy": [
+      -47954,
+      -119453
+    ],
+    "load_alias_copy": [
+      -68920,
+      -121632
+    ],
+    "gfx_gpu_vtx_cache_batch_impl": [
+      -77227,
+      -128254
+    ],
+    "gfx_cpu_indexed_run": [
+      -235619,
+      -334863
+    ]
+  },
+  "overlap": {
+    "1": {
+      "all_cycles": 4876661,
+      "retire": 2269102,
+      "gpu_busy": 2254648,
+      "raw_owner": 798301,
+      "async_owner_and_retire": 316021,
+      "raw_transform": 202421,
+      "raw_cull": 21275,
+      "output_word": 23540,
+      "cpu_repair_pending": 477015,
+      "gpu_fragment": 1425207,
+      "output_full": 340226,
+      "output_full_and_fragment": 307407,
+      "legacy_lease": 2449560,
+      "lease_pending": 878551,
+      "lease_wait_and_fragment": 720851
+    },
+    "2": {
+      "all_cycles": 5105025,
+      "retire": 2331119,
+      "gpu_busy": 2270265,
+      "raw_owner": 467771,
+      "raw_transform": 202210,
+      "async_owner_and_retire": 113771,
+      "output_word": 23000,
+      "gpu_fragment": 1439517,
+      "output_full": 580588,
+      "output_full_and_fragment": 539898,
+      "legacy_lease": 2919181,
+      "lease_pending": 599773,
+      "raw_cull": 18204,
+      "lease_wait_and_fragment": 524552
+    }
+  },
+  "limits": [
+    "Two bounded native CPU/raster/game/audio intervals only. No Pocket FPS or timing claim.",
+    "Function buckets attribute the gap since prior retirement, not exclusive function execution latency; use for diagnosis only.",
+    "All cycle totals are measured boundaries, never summed estimated savings."
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/analysis/profile_native.py": "66c6b9463637d903a5b1d6b6399cc925ccaeeb6596d1467d4e9e45f7984c32c8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app-v3/evidence/app-build-v3/symbols.txt": "ec316f42d64215c70399bca8523187d9ea9c29d7a0031b9f74ddc561fd3b4f89",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/candidate-appv3/run/boundaries.tsv": "8f4c3d7aa420488415fac535547c6c651704c2c181083a9516fd860cc8513c14",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/candidate-appv3/run/pc.csv": "9f97888a7faaeaa1310705febd5a1dd747325aa54cfca8fcdde14bb27fdf0c6d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/candidate-appv3/run/process.json": "df33317cbce49012b475d160714903dad77c6ef2bb03996e83c9a497b6c768a3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/candidate-appv3/run/manifest.json": "eabccf29d6bbed9716f9f977712a454f5bd78907d6249f490955c4d0a348daf4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/candidate-appv3/build.json": "6addc39c823088e2758cdd7cdc94669ccc1f769a93551832577efd807c5ab0f1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/control-appv3/run/boundaries.tsv": "4418a54a232abf9b22da56bcfe0e31a7441849f08e5b47f32a651b8c7931f291",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/control-appv3/run/pc.csv": "e865719477af02231f4f235bfcf00868c17a0476a6640c2eb8e74f3bd73b18e2",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/control-appv3/run/process.json": "d5f9a1b61c3494aa856512542467ee44f501526b3f033c7d7d943b5edf1d371d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/control-appv3/run/manifest.json": "fef27ed076c7f933afa12768614a917d05f1da376b3440127a2cd31d4b1033c4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/control-appv3/build.json": "5c723c0a130d8a0887d6dd4b72c73d2d1f37197a17f0e8e56a31b2756587e891",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/candidate-appv3/run/async-overlap.tsv": "5a382dd0c50d3c4490de776e0d462abdef637babd7a6320fd8a4116f15f97cc6"
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "passed": true,
+  "gpu_sha256": "3b4ddc4d614a569dc9e031856b020f1633bb276c2f4a185df5bbd0bb3c2f6895",
+  "worker_sha256": "9096979f637f1e5947d8b9ed6bc280255dc73b3c68bc968e19edad80d722f20f",
+  "base_gpu_sha256": "87c75d462db6bbb08635f10ccc8fdf021a7a68cfcb12358bffa594c2d533f6d3",
+  "proofs": {
+    "mmio": {
+      "receipt": "docs/measurements/quake2-tiny-audio-20261013/timing-next/feature-cuts/palette-disabled-shadow/mmio-tests-v2/receipt.json",
+      "sha256": "49bbd672d3f628f31cd00da4b45d9e481783dd19ff0c9dd94c1ee4d238593e50",
+      "configurations": [
+        "parent palette enabled",
+        "candidate palette enabled",
+        "candidate palette disabled"
+      ],
+      "checks_per_configuration": {
+        "palette_writes": 8201,
+        "register_reads": 397504,
+        "cycles": 77952
+      },
+      "enabled_complete_transcript_exact": true,
+      "disabled_palette_readback_zero": true
+    },
+    "full_gpu": {
+      "receipt": "docs/measurements/quake2-tiny-audio-20261013/timing-next/feature-cuts/palette-disabled-shadow/combined-full-gpu/receipt.json",
+      "sha256": "3d36985565efbf0896c091b4477dfa3c5f5cff1049cf7241e92dc985ad5aa93c",
+      "frames": 8,
+      "modes": [
+        "paced",
+        "unpaced"
+      ],
+      "exact": [
+        "full color/depth memory",
+        "all counters",
+        "cycles",
+        "fence records"
+      ],
+      "worker_sha256": "9096979f637f1e5947d8b9ed6bc280255dc73b3c68bc968e19edad80d722f20f"
+    }
+  },
+  "source_pin_unchanged": true,
+  "acknowledgement": "The unchanged AXI adapter acknowledges GPU writes independently of readback; actual gpu_core strobe tests exercise ignored stores. No interface or latency changes.",
+  "initial_harness_attempt": "mmio-tests/parent-on passed its C++ assertions. Initial Python receipt parser incorrectly required PASS at stdout start, rejecting normal PSRAM startup diagnostics. Preserved original run; parser corrected and all tests rerun in mmio-tests-v2. No RTL change.",
+  "limitations": [
+    "No fitted area/timing conclusion from these logical tests.",
+    "Full-GPU fixture uses pinned native6 memory configuration. Separate existing compact-audio and final-source memory integration proofs cover unchanged surrounding modules.",
+    "Palette-disabled readback intentionally changes from stored value to zero; palette capability already absent and Quake2/OS never read this register."
+  ],
+  "quartus_launched_by_this_gate": false,
+  "deployed": false
+}

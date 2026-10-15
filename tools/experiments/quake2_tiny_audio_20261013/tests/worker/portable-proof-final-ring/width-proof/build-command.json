@@ -1,0 +1,15 @@
+[
+  "verilator",
+  "--cc",
+  "--exe",
+  "--build",
+  "-j",
+  "2",
+  "-Wno-fatal",
+  "--top-module",
+  "width_proof",
+  "--Mdir",
+  "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/portable-proof-final-ring/width-proof/obj",
+  "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/width-proof/width_proof.v",
+  "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/width-proof/main.cpp"
+]

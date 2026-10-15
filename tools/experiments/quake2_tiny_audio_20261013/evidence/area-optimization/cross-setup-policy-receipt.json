@@ -1,0 +1,18 @@
+{
+  "schema": "mandatory cross_setup.tsv at all four corners; all distinct clock pairs plus all-input-ports to each target",
+  "offline_tests_passed": 20,
+  "native6_comparison": "Prior published >90 same-clock estimate has a pre-existing input/cross-clock setup violation; strict eligibility now rejects it until a reviewed unused-output proof resolves the endpoint. No constraints relaxed.",
+  "files": {
+    "sweep-tooling/sweep.py": "325f7e585c1b34b0e0c11b8d9c7dfcc1e37191ac16a9183dd63826754a1338db",
+    "sweep-tooling/results.py": "0560552cd0a1dbdc686373b8414ab5222fad9d11ed84c8b15fcc024e893d661a",
+    "sweep-tooling/report_sweep_timing.tcl": "1b170c890041e9c0194196cffe5f493ba217a08c7031f20c4a6fb6aaa1e2257a",
+    "sweep-tooling/test_sweep.py": "33a2de86922e8ac7e09458153944dd3ec925c2622c8629d2526e9695f05b81f0",
+    "sweep-tooling/README.txt": "71272cfa001b640fe3002d5d5234468dd4d216177b31bdd4706a70d3482467b3",
+    "area-optimization/cross-setup-policy-tests.log": "ed3cef217b42d5336babf82b573859988ab609559be1530ad7fd178399ba1b27",
+    "area-optimization/global-area/corners-v2-run.json": "6e27c7a2a35bff411930ccb0d0f601249af4a066f7b7602aef805c76bc0c52f3",
+    "area-optimization/global-area/qualification-results-v2.json": "6e209bcf6515c983956f9a381d0e62996f135edcdad409e46236a763fe2d40fc",
+    "area-optimization/native6-interface-check/source-pins.json": "fabeeb47695da5f51229bf74701d5578af185d0d663524b8f717f481808a1d93",
+    "area-optimization/native6-interface-check/corners-run.json": "69c19624c68ac865ea744dab7be6bb42a6b1126e495b6186e5c888dd5cd97c7e",
+    "area-optimization/native6-interface-check/result.json": "b91d333347b7f98904e28dbb21c731aa11e6a286f1593efed1fcb193a5a5c787"
+  }
+}

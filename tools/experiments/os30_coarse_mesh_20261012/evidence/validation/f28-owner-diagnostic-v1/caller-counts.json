@@ -1,0 +1,224 @@
+{
+  "candidate-v4": {
+    "phases": {
+      "1": {
+        "caller": 28,
+        "neutral": 28,
+        "neutral_only": 0
+      },
+      "2": {
+        "caller": 27,
+        "neutral": 27,
+        "neutral_only": 0
+      }
+    },
+    "jobs": 229,
+    "ambiguous_source": 4,
+    "exact_context_nonunique": [],
+    "repeated_source_jobs": [
+      {
+        "caller": true,
+        "neutral": true,
+        "seq": 123,
+        "phase": 1,
+        "matches": [
+          244,
+          250,
+          254,
+          258
+        ],
+        "exact_context_matches": [
+          244
+        ],
+        "contexts": [
+          {
+            "call": 244,
+            "dl_invocation": 88,
+            "continuation": 277708248
+          }
+        ]
+      },
+      {
+        "caller": true,
+        "neutral": true,
+        "seq": 124,
+        "phase": 1,
+        "matches": [
+          244,
+          250,
+          254,
+          258
+        ],
+        "exact_context_matches": [
+          254
+        ],
+        "contexts": [
+          {
+            "call": 254,
+            "dl_invocation": 100,
+            "continuation": 277708248
+          }
+        ]
+      },
+      {
+        "caller": true,
+        "neutral": true,
+        "seq": 226,
+        "phase": 2,
+        "matches": [
+          598,
+          604,
+          608,
+          612
+        ],
+        "exact_context_matches": [
+          598
+        ],
+        "contexts": [
+          {
+            "call": 598,
+            "dl_invocation": 390,
+            "continuation": 277708248
+          }
+        ]
+      },
+      {
+        "caller": true,
+        "neutral": true,
+        "seq": 227,
+        "phase": 2,
+        "matches": [
+          598,
+          604,
+          608,
+          612
+        ],
+        "exact_context_matches": [
+          608
+        ],
+        "contexts": [
+          {
+            "call": 608,
+            "dl_invocation": 402,
+            "continuation": 277708248
+          }
+        ]
+      }
+    ]
+  },
+  "single-v4": {
+    "phases": {
+      "1": {
+        "caller": 28,
+        "neutral": 28,
+        "neutral_only": 0
+      },
+      "2": {
+        "caller": 27,
+        "neutral": 27,
+        "neutral_only": 0
+      }
+    },
+    "jobs": 229,
+    "ambiguous_source": 4,
+    "exact_context_nonunique": [],
+    "repeated_source_jobs": [
+      {
+        "caller": true,
+        "neutral": true,
+        "seq": 123,
+        "phase": 1,
+        "matches": [
+          244,
+          250,
+          254,
+          258
+        ],
+        "exact_context_matches": [
+          244
+        ],
+        "contexts": [
+          {
+            "call": 244,
+            "dl_invocation": 88,
+            "continuation": 277708248
+          }
+        ]
+      },
+      {
+        "caller": true,
+        "neutral": true,
+        "seq": 124,
+        "phase": 1,
+        "matches": [
+          244,
+          250,
+          254,
+          258
+        ],
+        "exact_context_matches": [
+          254
+        ],
+        "contexts": [
+          {
+            "call": 254,
+            "dl_invocation": 100,
+            "continuation": 277708248
+          }
+        ]
+      },
+      {
+        "caller": true,
+        "neutral": true,
+        "seq": 226,
+        "phase": 2,
+        "matches": [
+          598,
+          604,
+          608,
+          612
+        ],
+        "exact_context_matches": [
+          598
+        ],
+        "contexts": [
+          {
+            "call": 598,
+            "dl_invocation": 390,
+            "continuation": 277708248
+          }
+        ]
+      },
+      {
+        "caller": true,
+        "neutral": true,
+        "seq": 227,
+        "phase": 2,
+        "matches": [
+          598,
+          604,
+          608,
+          612
+        ],
+        "exact_context_matches": [
+          608
+        ],
+        "contexts": [
+          {
+            "call": 608,
+            "dl_invocation": 402,
+            "continuation": 277708248
+          }
+        ]
+      }
+    ]
+  },
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/f28-owner-diagnostic-v1/caller_counts.py": "2e66e8d90e3a5512110d01dcbda899a27887a9d97a149b541a0c5b3251027f60",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/independent_lifetime_v3.py": "a9410d9314b337442c20b491770de56ba71e63c4b19ac0b6d428bf227689b8ec",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/independent_dl_v1.py": "2f4ca9b6d6fbbd808b3c0841334cbffe2e029bd12d91c06d49162faf332648c1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v4/.obj/sm64-coarse-mesh-v4-perfdiag/app.elf": "7294008468ae3760e6aac7fda5539e5dadd255c604e3b4a6c66bc028f68e422b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v4/run/vtx-calls.tsv": "6912a9ebbee0ae99f91227b0c23adf1605c3771c995e8db43f72adaa7e9d1b95",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v4/run/mmio.tsv": "6d4f291160d6e1c7ced9d41534b9b09bec931f7a9126b01f47d0d1857cc3616a"
+  }
+}

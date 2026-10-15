@@ -1,0 +1,63 @@
+{
+  "temporary_root": "/tmp/q2-bundle-review-nyp9jsvn",
+  "checks": [
+    {
+      "command": [
+        "python3",
+        "/home/alberto/Repos/openfpgaCore/tools/experiments/quake2_submission_20261012/package.py",
+        "stage",
+        "world",
+        "/tmp/q2-bundle-review-nyp9jsvn/world"
+      ],
+      "returncode": 0,
+      "stdout": "Staged world at /tmp/q2-bundle-review-nyp9jsvn/world\n"
+    },
+    {
+      "check": "world refuses existing destination",
+      "returncode": 1
+    },
+    {
+      "command": [
+        "python3",
+        "/home/alberto/Repos/openfpgaCore/tools/experiments/quake2_submission_20261012/package.py",
+        "stage",
+        "alias",
+        "/tmp/q2-bundle-review-nyp9jsvn/alias"
+      ],
+      "returncode": 0,
+      "stdout": "Staged alias at /tmp/q2-bundle-review-nyp9jsvn/alias\n"
+    },
+    {
+      "check": "alias refuses existing destination",
+      "returncode": 1
+    },
+    {
+      "check": "modified staged source rejected",
+      "returncode": 1
+    }
+  ],
+  "passed": true,
+  "scope": "Isolated staging/portable build and tests; no benchmark or deployment. Checks do not modify measurement inputs.",
+  "staged_builds": {
+    "alias": {
+      "returncode": 0,
+      "elf_sha256": "bcb3e95bb8745811375628188c5b66aa5aa1122b99a78dce0a3c2f9cc23e87d9",
+      "measured_elf_sha256": "bcb3e95bb8745811375628188c5b66aa5aa1122b99a78dce0a3c2f9cc23e87d9",
+      "byte_identical": true,
+      "build_log_sha256": "f1e018b21366e317b46bf7503506076086360eefba193587d88f2347a7cc6683"
+    },
+    "world": {
+      "returncode": 0,
+      "elf_sha256": "661df2c2d20963c1793878baa2e5abab0931b03add01afd956d01d5dc2ac942a",
+      "measured_elf_sha256": "661df2c2d20963c1793878baa2e5abab0931b03add01afd956d01d5dc2ac942a",
+      "byte_identical": true,
+      "build_log_sha256": "e30c202765e406397e0893cc03c8c810c7c7aa088a6c4e6c16e6c0df5c08fc36"
+    }
+  },
+  "test_logs": {
+    "alias-renderer.log": "4f3654801ddc79cb26e02be414f3028beed797d8e02729d29960382af540d6dc",
+    "alias-capacity.log": "110973d5f1ea782d54b08cc76bc44345b13c1e75cf09f1e98058a436536c2ff6",
+    "world-renderer.log": "47a76f102081f19b64f55ae8e188b8a12a1b50477a67979cfead217bec2eb557",
+    "world-geometry.log": "1e251892c9f48029b8b744249037c105a4e32ef3ab1bf118cb6552ac60443301"
+  }
+}

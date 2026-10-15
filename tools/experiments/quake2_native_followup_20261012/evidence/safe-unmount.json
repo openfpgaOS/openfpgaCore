@@ -1,0 +1,7 @@
+{
+  "device": "/dev/sda1",
+  "unmounted": true,
+  "verified_at_utc": "2026-10-12T23:42:32.811456+00:00",
+  "command": "udisksctl unmount -b /dev/sda1",
+  "result": "Unmounted /dev/sda1."
+}

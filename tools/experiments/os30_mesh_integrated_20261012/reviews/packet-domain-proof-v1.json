@@ -1,0 +1,33 @@
+{
+  "status": "CONDITIONAL_NUMERIC_DOMAIN_PROOF_NOT_INTEGRATED_QUALIFICATION",
+  "current_decision": "First native integration retains explicit packet prevalidation before CPU advances or marker publication. This proof gives no assumed cycle saving.",
+  "premises": [
+    "Raw LOAD completes successfully with no sticky unsupported/DMA error; all used rows belong to that completed job.",
+    "Every surviving triangle has clip_or=0 and each W is positive normal and strictly below binary32 0x46fffe00 (32767).",
+    "Raw/list stay immutable until packet emission completes; used_mask is exactly the survivor-list union and live_count<=64.",
+    "App emits only flags bits0..18; textured tile origins are uint16*8 (0..524280, aligned8)."
+  ],
+  "derivation": [
+    "GeometryFmaProbe unsupported rejects nonfinite inputs/results and normal-mode exponents outside [-126,127]. Successful final X/Y/W outputs are finite normal or signed zero. Transform propagates every FMA/reciprocal unsupported flag to raw LOAD failure.",
+    "Successful reciprocal produces normal finite output. Its sign follows W, so a surviving positive W has positive normal inverse-W; the depth converter accepts every such value and clamps safely.",
+    "For finite values and positive W, raw clip_or=0 proves -W<=X,Y<=W. Thus abs(X,Y)<32767 and multiplication by256 cannot overflow signed32 or the converter shift bound; signed zero is accepted.",
+    "Signed16 UV minus an aligned origin in[0,524280], plus an optional16, lies within[-557048,32783]. Scaling by2048 lies within[-1140834304,67139584], safely signed32. All unscaled arithmetic is integer-exact in binary32 below2^24.",
+    "RGB packing has no arithmetic error case. Controller survivor append/union logic ensures list members and used_mask agree; this is a separate ownership/control invariant rather than a numeric guarantee."
+  ],
+  "not_proven_by_this": [
+    "Arbitrary marker flags/offsets or serial/token validity.",
+    "New integrated mux/FSM/raw-store lifetime and no overwrite before packet completion.",
+    "App material/viewport/alpha/LOD correctness or CPU FCSR liveness.",
+    "Any frame-time improvement, physical fit or synthesized resource count."
+  ],
+  "reference_sources_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/GeometryFmaProbe.v": "348d11609de14326dc9408c11e39a385a85a4e0678eaaf5d69f39d6cfba38088",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/geometry_transform_light.v": "6987e27771c84173b31eb53e9f3bce4e7337437414548ef089f3adfe430c810f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/geometry_raw_load.v": "ade3041bfd27ab6200c5d6356775adac778a34eb0d81c1f253ff83367627c144",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/phase10_float_recip2.v": "d68bc3fcdcb750f88cebf9aa8ed890a499d12210cbd50fe9d3a049c168bea5cc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/rtl/geometry_mesh_raw_frontend.v": "61854f2d9949339c9b4c123d1b174da3828601cbf1edcbc0c410fbf854fac764",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/rtl/geometry_mesh_task_ctrl.v": "b2efc5506e55bec2bc3fd2c99532e33b88f6e1270cc55ffc3d28370d21da980d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/geometry_mesh_packet.v": "7514026cf2b23e8f219aa193e24c922bacac05e04079bd6f3edd772cbb97e493",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/native-v1/frozen/src/fpga/common/geometry_import_convert.v": "3beac876e469ec45ff3d3e81c9645671dcb92737d1f84dd188ca454fbbcf7526"
+  }
+}

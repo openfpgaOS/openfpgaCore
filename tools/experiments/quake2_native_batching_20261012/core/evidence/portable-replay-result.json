@@ -1,0 +1,61 @@
+{
+  "passed": true,
+  "frames": [
+    {
+      "frame": "frame_00020",
+      "exact": true,
+      "cycles": 2815736,
+      "cycles_exact": true,
+      "command": [
+        "/tmp/q2-native-followup-20261012/portable-mac-cb4-replay/obj/Vtb_gpu",
+        "+fast_tex=1",
+        "+tagged_tex=1",
+        "+memory_traffic=0",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-native-mesh-20261012/validation/vectors/native-v3-nomixer/frame_00020.vec",
+        "/tmp/q2-native-followup-20261012/portable-mac-cb4-replay/frame_00020.bin"
+      ]
+    },
+    {
+      "frame": "frame_00080",
+      "exact": true,
+      "cycles": 3393528,
+      "cycles_exact": true,
+      "command": [
+        "/tmp/q2-native-followup-20261012/portable-mac-cb4-replay/obj/Vtb_gpu",
+        "+fast_tex=1",
+        "+tagged_tex=1",
+        "+memory_traffic=0",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-native-mesh-20261012/validation/vectors/native-v3-nomixer/frame_00080.vec",
+        "/tmp/q2-native-followup-20261012/portable-mac-cb4-replay/frame_00080.bin"
+      ]
+    },
+    {
+      "frame": "frame_00180",
+      "exact": true,
+      "cycles": 3159878,
+      "cycles_exact": true,
+      "command": [
+        "/tmp/q2-native-followup-20261012/portable-mac-cb4-replay/obj/Vtb_gpu",
+        "+fast_tex=1",
+        "+tagged_tex=1",
+        "+memory_traffic=0",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-native-mesh-20261012/validation/vectors/native-v3-nomixer/frame_00180.vec",
+        "/tmp/q2-native-followup-20261012/portable-mac-cb4-replay/frame_00180.bin"
+      ]
+    },
+    {
+      "frame": "frame_00300",
+      "exact": true,
+      "cycles": 2384050,
+      "cycles_exact": true,
+      "command": [
+        "/tmp/q2-native-followup-20261012/portable-mac-cb4-replay/obj/Vtb_gpu",
+        "+fast_tex=1",
+        "+tagged_tex=1",
+        "+memory_traffic=0",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-native-mesh-20261012/validation/vectors/native-v3-nomixer/frame_00300.vec",
+        "/tmp/q2-native-followup-20261012/portable-mac-cb4-replay/frame_00300.bin"
+      ]
+    }
+  ]
+}

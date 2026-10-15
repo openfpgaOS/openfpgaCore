@@ -1,0 +1,50 @@
+/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app/evidence/group-cache-tests-v1/test.c:272:53: runtime error: index 65536 out of bounds for type 'uint32_t [65536]'
+/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app/evidence/group-cache-tests-v1/test.c:272:53: runtime error: load of address 0x000001462ee0 with insufficient space for an object of type 'uint32_t'
+0x000001462ee0: note: pointer points here
+ 00 00 00 00  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  00 00 00 00
+              ^ 
+=================================================================
+==8==ERROR: AddressSanitizer: global-buffer-overflow on address 0x000001462ee0 at pc 0x0000004017f0 bp 0x7ffcdcdd3920 sp 0x7ffcdcdd3910
+READ of size 4 at 0x000001462ee0 thread T0
+    #0 0x0000004017ef in gfx_mesh_lookup_impl /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app/evidence/group-cache-tests-v1/test.c:272
+    #1 0x000000403613 in gfx_mesh_lookup /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app/evidence/group-cache-tests-v1/test.c:315
+    #2 0x000000403613 in first /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app/evidence/group-cache-tests-v1/test.c:400
+    #3 0x000000406537 in main /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app/evidence/group-cache-tests-v1/test.c:418
+    #4 0x7ff4f5227780  (/usr/lib/libc.so.6+0x27780) (BuildId: 503200d7fda94a5dc6058d7e0694e5d1dcb2e372)
+    #5 0x7ff4f52278b8 in __libc_start_main (/usr/lib/libc.so.6+0x278b8) (BuildId: 503200d7fda94a5dc6058d7e0694e5d1dcb2e372)
+    #6 0x0000004011f4 in _start (/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app/evidence/group-cache-tests-v1/test+0x4011f4) (BuildId: 034baa8467d86ec95c8aaad02098fec274eca450)
+
+0x000001462ee0 is located 0 bytes after global variable 'image' defined in '/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app/evidence/group-cache-tests-v1/test.c:12:17' (0x000001422ee0) of size 262144
+SUMMARY: AddressSanitizer: global-buffer-overflow /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app/evidence/group-cache-tests-v1/test.c:272 in gfx_mesh_lookup_impl
+Shadow bytes around the buggy address:
+  0x000001462c00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x000001462c80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x000001462d00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x000001462d80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x000001462e00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+=>0x000001462e80: 00 00 00 00 00 00 00 00 00 00 00 00[f9]f9 f9 f9
+  0x000001462f00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x000001462f80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x000001463000: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x000001463080: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x000001463100: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==8==ABORTING

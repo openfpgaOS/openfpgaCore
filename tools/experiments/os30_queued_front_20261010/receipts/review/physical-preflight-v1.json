@@ -1,0 +1,38 @@
+{
+  "status": "PASS_INDEPENDENT_STATIC_QGF_PHYSICAL_PREFLIGHT",
+  "files_checked": 361,
+  "baseline_originals_unchanged": 353,
+  "changed_sources": [
+    "src/fpga/common/os30/geometry_raw_load.v",
+    "src/fpga/common/os30/gpu_core.v",
+    "src/fpga/common/os30/phase10_load_alias.v",
+    "src/fpga/targets/pocket/os30/core_top.v"
+  ],
+  "added_sources": [
+    "src/fpga/common/os30/geometry_float_cull_mem.v",
+    "src/fpga/common/os30/geometry_import_convert.v",
+    "src/fpga/common/os30/geometry_import_view.v",
+    "src/fpga/common/os30/gpu_queued_front.v"
+  ],
+  "native_module_copies_exact": true,
+  "qualified_qsf_prefix_exact_except_root_path": true,
+  "ports_checked": 22,
+  "same_clk_cpu_point_to_point_binding": true,
+  "reset": "Consumer reset cancels queue/snapshots only; wrapper drains in-flight queue FMA before raw grant; raw DMA has geometry fabric reset. Actual reset arbitration passed Q/tests/wrapper-v1.",
+  "configured_mhz": 90,
+  "seed": 3,
+  "placement_effort_multiplier": 3.0,
+  "limits": [
+    "Static provenance and source/wiring review only. No Quartus, fit, timing, CDC or pin qualification performed.",
+    "No performance promotion or deployment approval implied."
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/prepare_physical.py": "2a4ccb8d3d97527f64170aa9fad878dc5b31f228573a7b6d97faddcdc5873571",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/physical-v1/inputs.json": "f050e5a2aa78f101cceb10f5ae6bcdb5eaf43357250e3fb69211d6828b97adcd",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/physical-v1/manifest.json": "c04843282f461d84101cab662ab026a346946f4ce918ea94f7250da77c4732c1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/physical-v1/static-port-audit.json": "c3cdcdf266883c4c062c4945b217440ac5cf52a7dd516e965555838ed6322398",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/physical-v1/build/ap_core.qsf": "b6895980b705e10a05f38c4725edd9de863207251b0281ed5a94bba387f20f37",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/physical-v1/frozen/src/fpga/targets/pocket/os30/core_top.v": "db14b59e9b8e1006fea24676f06b0fb16b02503b6ddc59f12a570bdab818b609",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/wrapper-v1/manifest.json": "d8e92c65fee6e08680d228a21f7c3761a968b5400defb370721b49050f790489"
+  }
+}

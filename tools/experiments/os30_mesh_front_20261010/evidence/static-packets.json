@@ -1,0 +1,45 @@
+{
+  "status": "PASS_IMMUTABLE_TASK_PACKET_AND_SOURCE_DECODER",
+  "tasks": 319,
+  "triangles": 2459,
+  "vertices": 4034,
+  "decode_checks": 21307,
+  "flattened_command_order_checks": 4121,
+  "immutable_mutation_checks": 3,
+  "negative_cases": {
+    "state_boundary": "state/list/LOAD boundary",
+    "list_call_boundary": "state/list/LOAD boundary",
+    "second_load_boundary": "state/list/LOAD boundary",
+    "zero_vertices": "LOAD shape",
+    "destination_overflow": "LOAD shape",
+    "empty": "empty task",
+    "tri2_second_half_outside_owned": "incoming slot reference"
+  },
+  "compile_command": [
+    "gcc",
+    "-shared",
+    "-fPIC",
+    "-O2",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/task_decoder.c",
+    "-o",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/task_decoder.so"
+  ],
+  "extracted_decoder_sha256": "3d3bdf3d7035d45693c5a7c08fd935a2aed947fd4823c32f7eeb245c3b15de9e",
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/compile_tasks.py": "737e9c8fea7ed4ab8823d37de35a8fd3ae6567613459182c122bf47016c3b0e5",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/layout-v2.json": "002aa856ebbd48c6ad079fcaa1b2608c39ef954ec35811c1d6989cf6e4123ed2",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64-v2/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "49a72cfd370563bb3c283a72d35a4d32007905565778259d8cad060e87fbd503",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/fixture-v2/capture/run-reference/snapshot/sdram.bin": "843fd9fb239c733b9562f7c6f3a273471ea77ff28165b45ff2bad184dfc4c49a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/coverage-frame360-spans.json": "644c7d775469404f89e17534b1c93f69339179010102ed6e140bb6491c8c75ed",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/coverage-frame360-events.json": "28ba4c35605290e3698f636c49297bad5c88b660a3f38940f0d3308507f307ec",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/task_decoder.c": "32750dedc200b9b2eabe72e6d6a8d7e3d2fd489cc2600f647aea240ddd0bb1b4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/task_decoder.so": "ad1e12a780024dc3b9045b41f8712860df7d37851c573bbb73dd3da13597bfb5",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/task-vectors-frame360.json": "0d262a8ad8f763554f14be15a62f3cafda0ff20fcf5a6754016ad58c321ff542",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/task-plan-frame360.json": "8e2dc05d15bb8a4a0c85eaff71c70dc32eb0b7c4bde225523c20c9c813737f31"
+  },
+  "limitations": [
+    "Arithmetic, materials, viewport state and transformed clipping/equal-W coverage await task-local passive trace.",
+    "Expansion preserves the exact flattened original CPU command sequence including state/list markers; this is not a GPU packet or cycle-accurate execution proof.",
+    "Task data are immutable owned byte strings in this model. A real DMA implementation needs explicit asset lifetime or owned pool retention until completion."
+  ]
+}

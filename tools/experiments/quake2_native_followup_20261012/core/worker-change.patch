@@ -1,0 +1,96 @@
+--- a/src/fpga/common/gpu_geometry_worker.v
++++ b/src/fpga/common/gpu_geometry_worker.v
+@@ -113,7 +113,8 @@
+ reg [5:0] native_vertices, native_vertex;
+ reg [6:0] native_triangles, native_tri;
+ reg [31:0] native_old_word, native_current_word;
+-reg [2:0] native_column, native_purpose;
++reg [3:0] native_column;
++reg [2:0] native_purpose;
+ reg [6:0] native_resume;
+ reg [31:0] native_read_addr;
+ reg [1:0] native_read_bank;
+@@ -154,8 +155,13 @@
+ always @(posedge clk) begin
+     // M10K output registration isolates memory clock skew from the decode,
+     // address arithmetic and DSP operand paths. FSM waits cover both stages.
+-    native_ram_q <= native_mem[native_addr];
+-    native_q <= native_ram_q;
++    // Native MAC issues one coefficient each enabled cycle. Pause both
++    // read registers with its issue counter so enable holds preserve alignment;
++    // fill writes below remain live and drain independently while paused.
++    if (enable) begin
++        native_ram_q <= native_mem[native_addr];
++        native_q <= native_ram_q;
++    end
+     if (native_fill_write) native_mem[native_fill_addr] <= mesh_rdata;
+     else if (INCLUDE_NATIVE_MESH && take_input && state == COPY && mode == NATIVE) begin
+         if (native_load_index >= 7 && native_load_index < 31)
+@@ -278,7 +284,10 @@
+         points[slot] <= {sy,sx};
+     if (take_input && state == COPY && mode == OBJECT && index < 12)
+         matrix[index[3:0]] <= input_data;
+-    product <= mul_a * mul_b;
++    // A native MAC has several products in flight; its pipeline freezes with
++    // the native issue counter. Legacy scheduling remains unchanged.
++    if (!INCLUDE_NATIVE_MESH || mode != NATIVE || enable)
++        product <= mul_a * mul_b;
+ end
+ always @(posedge clk) begin
+     if (!reset_n || soft_reset || ring_reset) begin
+@@ -557,33 +566,29 @@
+                 end
+             end
+             N_MAC_ADDR: begin
+-                native_addr <= {3'd0,row,3'd0} + {5'd0,native_column};
+-                state <= N_MAC_LOAD;
+-            end
+-            N_MAC_LOAD: state <= N_MAC_WAIT_Q;
+-            N_MAC_WAIT_Q: state <= N_MAC_LAUNCH;
+-            N_MAC_LAUNCH: begin
+-                mul_a <= native_q;
+-                case (native_column)
+-                0: mul_b <= {24'd0,native_old_word[7:0]};
+-                1: mul_b <= {24'd0,native_old_word[15:8]};
+-                2: mul_b <= {24'd0,native_old_word[23:16]};
+-                3: mul_b <= {24'd0,native_current_word[7:0]};
+-                4: mul_b <= {24'd0,native_current_word[15:8]};
+-                default: mul_b <= {24'd0,native_current_word[23:16]};
+-                endcase
+-                state <= N_MAC_WAIT;
+-            end
+-            N_MAC_WAIT: state <= N_MAC_ADD;
+-            N_MAC_ADD: begin
+-                accumulator <= native_column == 0 ? product[47:0] : accumulator + product[47:0];
++                // One pipelined DSP accepts six products on consecutive
++                // clocks. Coefficients pass through two RAM registers, the
++                // operand registers, and product before accumulation. Cycles
++                // 0..6 fetch coeff[0..5]/offset, 3..8 issue, 5..10 accumulate.
++                if (native_column <= 6)
++                    native_addr <= {3'd0,row,3'd0} + {4'd0,native_column};
++                if (native_column >= 3 && native_column <= 8) begin
++                    mul_a <= native_q;
++                    case (native_column)
++                    3: mul_b <= {24'd0,native_old_word[7:0]};
++                    4: mul_b <= {24'd0,native_old_word[15:8]};
++                    5: mul_b <= {24'd0,native_old_word[23:16]};
++                    6: mul_b <= {24'd0,native_current_word[7:0]};
++                    7: mul_b <= {24'd0,native_current_word[15:8]};
++                    default: mul_b <= {24'd0,native_current_word[23:16]};
++                    endcase
++                end
++                if (native_column >= 5 && native_column <= 10)
++                    accumulator <= native_column == 5 ? product[47:0]
++                                                      : accumulator + product[47:0];
+                 native_column <= native_column + 1'b1;
+-                if (native_column == 5) begin
+-                    native_addr <= {3'd0,row,3'd0} + 8'd6; state <= N_MAC_OFFSET;
+-                end else state <= N_MAC_ADDR;
+-            end
+-            N_MAC_OFFSET: state <= N_MAC_OFFSET_Q;
+-            N_MAC_OFFSET_Q: state <= N_MAC_ROW;
++                if (native_column == 10) state <= N_MAC_ROW;
++            end
+             N_MAC_ROW: begin
+                 case (row)
+                 0: cx <= (accumulator >>> 16) + $signed(native_q);

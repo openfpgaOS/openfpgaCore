@@ -1,0 +1,15 @@
+{
+  "passed": true,
+  "worker_sha256": "e0f4ffbd20f2a20ab416543a0e9d830d7ec6b4d8d55df094479428b67f933fbb",
+  "receipts": {
+    "docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/lockstep-gates/receipt.json": "f84df800717a277fbd199c6b63aff347c31abf8678fece74bd75f545947b8db0",
+    "docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/width-proof/receipt.json": "2183eb18845a6a3c716eaad01789940b818da9a71f2c91060604eda6229e3bff",
+    "docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/full-gpu-v1/receipt.json": "8727259965e7a1b5e8089de4bb8c77d0473aac096c19ae35beb4b6989cf64053"
+  },
+  "independent_review": {
+    "agent": "/root/q2_mesh_offload_design",
+    "passed": true,
+    "reason": "Typed capacity preserves original modular assignment truncation; free_words!=0 replacement exact for all pointer values without occupancy assumptions; lookahead preserves ADDR_BITS wrapped increment and cycle/consume behavior."
+  },
+  "scope": "Broad old/new cycle lockstep, actual Verilog width tests, full8frame GPU16mode exact output/counters/fences; not physical timing proof."
+}

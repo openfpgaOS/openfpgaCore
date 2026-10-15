@@ -1,0 +1,26 @@
+{
+  "passed": true,
+  "checks": {
+    "package inventory, prepared pins, full fit-input pins and forward/reverse patch": true,
+    "fresh stage and all staged source pins": true,
+    "existing stage refused without mutation": true,
+    "changed staged source rejected": true,
+    "changed package payload rejected": true,
+    "omitted without-mixer transformation rejected": true,
+    "changed non-QSF fit input pin rejected": true,
+    "unknown and duplicate build flags rejected": true,
+    "missing and repeated mixer macro rejected": true,
+    "unsafe paths rejected": true,
+    "actual build recipe derives every recorded fit input hash without running Quartus": true,
+    "all worker test inputs match already executed pointer-backpressure receipt": true
+  },
+  "manifest_sha256": "d4ecc0992d596542f2193a95c6aac94b6594c2a1228fc0d3b3644c912818e5f9",
+  "build_args": [
+    "--without-mixer"
+  ],
+  "fit_input_count": 127,
+  "worker_sha256": "27fdcfc565b3232186bc5febfb84cd084aca054bdc8d4429e0d125d656b0f19b",
+  "source_only": true,
+  "qualification": "PENDING: pointer-backpressure silent-core fit and physical timing selection incomplete; no bitstream selected or deployed.",
+  "physical_fit_or_deployment_performed": false
+}

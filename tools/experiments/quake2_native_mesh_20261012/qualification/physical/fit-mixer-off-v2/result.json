@@ -1,0 +1,192 @@
+{
+  "fit": "/tmp/quake2-native-mesh-20261012/fit-mixer-off-v2",
+  "phase_returncodes": {
+    "map": 0,
+    "fit": 0,
+    "asm": 0,
+    "sta": 0,
+    "corners": 3
+  },
+  "configured_clock_MHz": 100,
+  "seed": 2,
+  "constrained_timing_passed": false,
+  "source_recipe_sha256": "2dad1a814a6478bfd6aa2bf152e959bdf180c4bfbdeeba65b9de57fa2de8beb2",
+  "report_sha256": {
+    "build-receipt.json": "19e0c8dd477f9289dc430cf64f1afaaca4f05c3e7d35dbb74a682142dda3ae68",
+    "fit.log": "b8f7a00058ec6bfc0e53698f3eeeb5a8216967374e0dfe85660fc28c82ab3cfd",
+    "corners.log": "1a28aad31cc0a78d1e3672a25de46f73a0d5fbcbb2ea869072699f10d0e17830",
+    "src/fpga/targets/pocket/output_files/ap_core.map.summary": "ca17b24bb635a2c2d551cd2bce95d8b36bf595a70f27b3b90720e9e3d3574e41",
+    "src/fpga/targets/pocket/output_files/ap_core.fit.summary": "cfe88c5142b1ef6093c4fdbb43aaf7ac309504bb4ba250f6b55aa24037b5e5da",
+    "src/fpga/targets/pocket/output_files/ap_core.sta.summary": "b1e7953085d29f7daba89ac3c37770979bf45a13db4b45e86b04195e3e44751f",
+    "src/fpga/targets/pocket/output_files/ap_core.sta.rpt": "ee74fdd13cebc7f56fd4519107d4070b46588595a18c72a8d6bae484202d3625",
+    "timing/clocks.tsv": "3d74e106ba76402423170363b97bf4e58fac6746a7002dc90cf343c72a2a1633",
+    "timing/fast_0_hold.rpt": "a73c889de2d7550dd731bae9e8c090bb5bea893c44a2b31565d4b687fcabae12",
+    "timing/fast_0_pulse_width.rpt": "2abc1f2d38351a054f7eb829acf5db8164742601b5e8c63a463ae8ea0ccd2b19",
+    "timing/fast_0_recovery.rpt": "c7390e975df6dc3826a80f857b125653053be3b2f1349688c36de4b18c84513d",
+    "timing/fast_0_removal.rpt": "4a3278dd0e683173d8c2060c6fe86989d288b97492b7bcb7db321d30a612fbb7",
+    "timing/fast_0_setup.rpt": "a446da6fa9cbd9e0380e6a23fe1312a5cc8b74a23ab937bd477002ab4fba6ae1",
+    "timing/fast_85_hold.rpt": "bc1130076575382144bb82324e6ba037aee44b74dec1974d7f49b16deeb1991a",
+    "timing/fast_85_pulse_width.rpt": "2abc1f2d38351a054f7eb829acf5db8164742601b5e8c63a463ae8ea0ccd2b19",
+    "timing/fast_85_recovery.rpt": "8089fffb75bf0ad3231b5f1e925109a0b13c02ac7235971854c8418047ce1902",
+    "timing/fast_85_removal.rpt": "1b3f3b6bd26570b13d924ca72a787bbbc1e8f2a4226e9d7fe7a9d57a21d45ba1",
+    "timing/fast_85_setup.rpt": "96288be4c6f185b0dd670272d5c1938c431a0ba21276f8a9aed4601bcb0e059b",
+    "timing/slow_0_hold.rpt": "1361126d636038414ab2fa46e10677f8d64afeb3bfa3ca1c1810170e6fe6e4e4",
+    "timing/slow_0_pulse_width.rpt": "2abc1f2d38351a054f7eb829acf5db8164742601b5e8c63a463ae8ea0ccd2b19",
+    "timing/slow_0_recovery.rpt": "36ceafeb62425d5cb60dbd327da6a64fd99bf9290e94f78b38e810e3a3de1312",
+    "timing/slow_0_removal.rpt": "0525b1b4f4f6d5bc797ac01106c5c9f7dacf982112da66f6080cd0bb8dbefce8",
+    "timing/slow_0_setup.rpt": "f17c3e2b724ae1485f4cb20bab519055644fe7a46806f0fc34eb4de22ef07dc4",
+    "timing/slow_85_hold.rpt": "5a08520bd495d199cda576cb66176fc7d47e4537f810d4a694b6be52ba976d33",
+    "timing/slow_85_pulse_width.rpt": "2abc1f2d38351a054f7eb829acf5db8164742601b5e8c63a463ae8ea0ccd2b19",
+    "timing/slow_85_recovery.rpt": "80fd533b32182679226e2a117362a349e83f6a1bbf894c67366ec019cecbb90e",
+    "timing/slow_85_removal.rpt": "e4dc96dc6492b2f89238facf27b8ee2a07b9d911c91e16e647926a8390a46d93",
+    "timing/slow_85_setup.rpt": "1da89e24173956a6bb86e35a662ccbd602e792bafda0fb546b05b8ca49db98bb",
+    "timing/summary.tsv": "7152cb94ddde37478afdc555e5ddffe80685708519d3c230b865efb455d935e6"
+  },
+  "deployed": false,
+  "fit_successful": true,
+  "ALMs": {
+    "used": 17164,
+    "available": 18480
+  },
+  "M10Ks": {
+    "used": 300,
+    "available": 308
+  },
+  "DSPs": {
+    "used": 35,
+    "available": 66
+  },
+  "main_clock_restricted_Fmax_MHz": {
+    "slow_85": 88.84,
+    "slow_0": 90.46
+  },
+  "all_corner_checks": [
+    {
+      "model": "slow",
+      "temperature": "85",
+      "check": "setup",
+      "slack": "-1.256"
+    },
+    {
+      "model": "slow",
+      "temperature": "85",
+      "check": "hold",
+      "slack": "0.280"
+    },
+    {
+      "model": "slow",
+      "temperature": "85",
+      "check": "recovery",
+      "slack": "4.129"
+    },
+    {
+      "model": "slow",
+      "temperature": "85",
+      "check": "removal",
+      "slack": "1.137"
+    },
+    {
+      "model": "slow",
+      "temperature": "85",
+      "check": "pulse_width",
+      "slack": "0.500"
+    },
+    {
+      "model": "slow",
+      "temperature": "0",
+      "check": "setup",
+      "slack": "-1.054"
+    },
+    {
+      "model": "slow",
+      "temperature": "0",
+      "check": "hold",
+      "slack": "0.268"
+    },
+    {
+      "model": "slow",
+      "temperature": "0",
+      "check": "recovery",
+      "slack": "4.284"
+    },
+    {
+      "model": "slow",
+      "temperature": "0",
+      "check": "removal",
+      "slack": "1.073"
+    },
+    {
+      "model": "slow",
+      "temperature": "0",
+      "check": "pulse_width",
+      "slack": "0.500"
+    },
+    {
+      "model": "fast",
+      "temperature": "85",
+      "check": "setup",
+      "slack": "0.946"
+    },
+    {
+      "model": "fast",
+      "temperature": "85",
+      "check": "hold",
+      "slack": "0.059"
+    },
+    {
+      "model": "fast",
+      "temperature": "85",
+      "check": "recovery",
+      "slack": "7.151"
+    },
+    {
+      "model": "fast",
+      "temperature": "85",
+      "check": "removal",
+      "slack": "0.454"
+    },
+    {
+      "model": "fast",
+      "temperature": "85",
+      "check": "pulse_width",
+      "slack": "0.500"
+    },
+    {
+      "model": "fast",
+      "temperature": "0",
+      "check": "setup",
+      "slack": "0.963"
+    },
+    {
+      "model": "fast",
+      "temperature": "0",
+      "check": "hold",
+      "slack": "-0.020"
+    },
+    {
+      "model": "fast",
+      "temperature": "0",
+      "check": "recovery",
+      "slack": "7.527"
+    },
+    {
+      "model": "fast",
+      "temperature": "0",
+      "check": "removal",
+      "slack": "0.407"
+    },
+    {
+      "model": "fast",
+      "temperature": "0",
+      "check": "pulse_width",
+      "slack": "0.500"
+    }
+  ],
+  "worst_setup_ns": -1.256,
+  "worst_hold_ns": -0.02,
+  "worst_recovery_ns": 4.129,
+  "worst_removal_ns": 0.407,
+  "worst_pulse_width_ns": 0.5,
+  "bitstream_sha256": "082d2280471b6cd63c54c677da0b1495b00b2f29e0b13a6b807d36438e1a1936",
+  "raw_rbf_sha256": "a09a624ae708370abfc4a53ba951dab30b430d1652cfb8582c5692d2c8d407a0"
+}

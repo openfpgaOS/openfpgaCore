@@ -1,0 +1,30 @@
+{
+  "status": "RTL_READY_FOR_LINT_AND_DIRECTED_TESTS",
+  "baseline_model": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2",
+  "baseline_prepared_sha256": "9dc6be7d6567ccbd7ea78c56123e37f33d19d575fd94169fc32f67a93ff28ec6",
+  "baseline_source_sha256": "ab1f1aeeb135cd2f80e44adb39616c35f28f1e164ab639b2f5645fbb447000ae",
+  "candidate_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/work-v2/gpu_color_depth_cache.sv",
+  "candidate_source_sha256": "7748ec9e9b818215144d6170d5bdb05fd8a254c3e7863547b96396dbc5de069e",
+  "patch_sha256": "f423c6cf99dffeb6722e509d8a1a02697acb6ddd29fa9750bde22aa3452e67f1",
+  "recipe_sha256": "77e1098bcdaa2c26a74ac74a2c55aa0d0eff1e881d4a67b9bde59fb172618a27",
+  "defines": [
+    "INCLUDE_GPU_CACHE_READ_PRIORITY"
+  ],
+  "paired_gpu_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/work/gpu_core.v",
+  "paired_gpu_sha256": "56ab019679f812cdce2020b34085e0238ef9ab3ebc97c92394f6aae102f9c0c7",
+  "paired_gpu_define": "INCLUDE_GPU_DEPTH_SELECTIVE_WAIT",
+  "required_parameter": "REGISTER_READ_LOOKUP=1; otherwise priority remains unchanged.",
+  "changed_logic": [
+    "s_awready suppresses acceptance when disjoint pending AR is preferred.",
+    "s_arready accepts exactly that read instead.",
+    "IDLE AW branch uses the same predicate, otherwise AR branch captures owned addr."
+  ],
+  "added_state_bits": 0,
+  "added_ram_bits": 0,
+  "limitations": [
+    "No resource inference, timing, fit or hardware claim.",
+    "Cross-line and longer bursts conservatively retain AW priority.",
+    "This combines with the new queue tag gate; that gate alone assumes AW priority for all popped writes.",
+    "Posted downstream writes remain protected by the unchanged cache line scoreboard and fill hazard."
+  ]
+}

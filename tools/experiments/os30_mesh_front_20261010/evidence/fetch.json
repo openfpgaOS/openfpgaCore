@@ -1,0 +1,51 @@
+{
+  "status": "PASS",
+  "build_command": [
+    "verilator",
+    "--cc",
+    "--exe",
+    "--build",
+    "-j",
+    "4",
+    "-Wno-fatal",
+    "--top-module",
+    "geometry_mesh_command_fetch",
+    "--Mdir",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/fetch-v2/obj",
+    "-CFLAGS",
+    "-std=c++17 -O1 -fsanitize=address,undefined -fno-omit-frame-pointer",
+    "-LDFLAGS",
+    "-fsanitize=address,undefined",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/geometry_mesh_command_fetch.v",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/test_fetch.cpp"
+  ],
+  "inputs": [
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/geometry_mesh_command_fetch.v",
+      "sha256": "a740d2c2d961bcbe3421e7de594ca842b3c3caf2a38dff7de89ff067c9b93cf8"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/test_fetch.cpp",
+      "sha256": "92140b00a9c8b5e829d6a0d3506bb909b31307bacf0913f99452222bd8d951bd"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/run_fetch.py",
+      "sha256": "68c826b0d8f795c29f91f57485595035354d8a1fd531419577f88413d8adc193"
+    }
+  ],
+  "result": {
+    "status": "PASS",
+    "cases": 83,
+    "words_checked": 4160,
+    "accepted_reads": 2093,
+    "drained_reads": 2093,
+    "held_signal_checks": 9050,
+    "cycles": 19059
+  },
+  "sanitizers": {
+    "address": true,
+    "undefined": true,
+    "leaks": false
+  },
+  "scope": "Standalone two-word AXI prefetcher. Bounded original command fetch, captured source/count, address and command backpressure, error handling and cancellation drain. Shared-master arbitration remains integration work."
+}

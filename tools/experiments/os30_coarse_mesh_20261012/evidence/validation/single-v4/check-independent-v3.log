@@ -1,0 +1,11 @@
+Traceback (most recent call last):
+  File "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/check_replays_v3.py", line 123, in <module>
+    main()
+    ~~~~^^
+  File "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/check_replays_v3.py", line 93, in main
+    result['async_lifetime'] = hook.check(run, baseline, fixture, ingress, output)
+                               ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/independent_single_v3.py", line 98, in check
+    assert len(matches)==1,('ambiguous original LOAD owner',seq,matches)
+           ^^^^^^^^^^^^^^^
+AssertionError: ('ambiguous original LOAD owner', 123, [244, 250, 254, 258])

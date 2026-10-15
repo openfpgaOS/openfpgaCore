@@ -1,0 +1,56 @@
+{
+  "status": "PASS_ACTUAL_QGF_LOAD_ADMISSION_METADATA",
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/run_metadata.py": "80e12a3f69bf95f22a656f905dd4ca5d4745bc8e756d9021789734428814b151",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/tb_metadata.v": "a91b5d043ec07f83cc99841b810567de363b87edc6aab3c61151eb0122db3c74",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/test_metadata.cpp": "2f6a0b6d8bf804bdc18fe9916c1790f62d542659f2575fff1db0a53039942115",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/model/frozen/src/fpga/common/geometry_raw_load.v": "a49563b15545d9d89e0b33d09428897baa0256af6d8e582dfdd51755ad0da860",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/model/frozen/src/fpga/common/geometry_transform_light.v": "6987e27771c84173b31eb53e9f3bce4e7337437414548ef089f3adfe430c810f"
+  },
+  "scope": "Actual raw LOAD SCAN/metadata with test-only synchronous transform output RAM and external DMA completion",
+  "commands": [
+    {
+      "argv": [
+        "verilator",
+        "--cc",
+        "--exe",
+        "--build",
+        "-j",
+        "2",
+        "-Wno-fatal",
+        "--top-module",
+        "tb_metadata",
+        "--Mdir",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/metadata-v1/obj",
+        "-CFLAGS",
+        "-std=c++17 -O1 -fsanitize=address,undefined -fno-omit-frame-pointer",
+        "-LDFLAGS",
+        "-fsanitize=address,undefined",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/tb_metadata.v",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/model/frozen/src/fpga/common/geometry_raw_load.v",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/metadata-v1/geometry_transform_light_stub.v",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/test_metadata.cpp"
+      ],
+      "returncode": 0,
+      "log_sha256": "b45328fe960e196fe5b942256112d498a7623d0315005ff52865b9bd85dca0e5"
+    },
+    {
+      "argv": [
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/metadata-v1/obj/Vtb_metadata"
+      ],
+      "returncode": 0,
+      "log_sha256": "ec16a1513fb5b8d73296356c74e6073cfa0ad7c8407587d3a948d91180f8efb7"
+    }
+  ],
+  "result": {
+    "pass": true,
+    "batches": 292,
+    "checks": 102701,
+    "triangle_admissions_checked": 2104210,
+    "accepted": 37164,
+    "conservative_hash_collisions": 1026,
+    "cycles": 43978
+  },
+  "test_transform_sha256": "7b92ae92ccfdfd4394b6581c791f5c7864dfe4943fc4211401ca454685a10b65",
+  "executable_sha256": "30b7d0960c1ba603cc3240d73622898d2f35263fdf2a2ee54aab9b18946ea97a"
+}

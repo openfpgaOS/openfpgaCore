@@ -1,0 +1,15 @@
+F28 remaining CPU submission work (read-only)
+
+The complete warm interval is4,630,859 cycles versus4,631,100 for the same-ELF control:241cycles fewer (0.0052%), effectively tied. Retired instructions fall from2,202,217 to2,023,020. Cold remains4,806,008 versus4,256,732; combined9,436,867 versus8,887,832 (+549,035cycles). These measured boundaries determine performance. All three control/AJ02/AJ03 strict v4 checks passed.
+
+103 async members use33 requests (19GROUPs+14single). The223 remaining legacy LOADs invoke acquisition, but126 reuse a held lease. There are97 actual grants, each with three acquisition writes, followed by97 releases.507 release-if-pending calls generate97 completed-sequence MMIO reads:83 release and14 mark the lease quiescent. Acquisition performs486 status reads, including389 unsuccessful iterations; the zero-repair service path is called777 times.
+
+Hardware lease-pending time totals20,328cycles (median1, max1,667);75 of97 waits take one cycle. Granted residence1,987,610cycles includes131,497 legacy raw-transform cycles and106,537 cycles concurrent with old async output. This is useful ownership, not CPU blocking. Output full totals1,028,967cycles,931,824 overlapping fragment rasterization. These residence counters overlap.
+
+GEO writes are4,575 versus2,459 control: matrix2,496 versus1,136; scalar1,022 versus345; LOAD setup669 versus978; lease388 versus0. Thus there are2,037 extra context writes, despite103 fewer legacy LOADs. The source invalidates legacy matrix/scalar dirty state after every newly acquired lease because the shared worker may have changed it.
+
+A hypothetical fused ticket-bearing ACQUIRE could replace291 acquisition writes with97:194 fewer transactions (4.24% of candidate GEO writes). The two removed store PCs carry776 charged preceding-retirement-gap cycles, which are neither full posted-write latency nor predicted frame savings. No new ABI or implementation was made.
+
+Top added charged function buckets are acquire+96,579, mesh lookup+50,428, interpreter+48,215, admission+37,277, route-task+28,914, group build+20,437 and service+19,552. Removed buckets include CPU indexed work−171,677, prepared vertex upload−66,617 and canonical copy−51,365. Software setup/classification and context traffic still offset the reduced geometry work; these diagnostic buckets are not exclusive intervals and cannot be subtracted as future savings.
+
+Compared with F27 candidate, F28 executes27 fewer legacy LOADs, six fewer leases and337 fewer GEO writes; its own warm interval is93,403cycles shorter, with different ELF/layout. Against same-F28 AJ02 single-job mode, grouping saves18,659 warm cycles (0.4013%); the comparison with unchanged same-F28 control remains a tie. No physical fit, deployment or FPS prediction is supported.

@@ -1,0 +1,13 @@
+{
+  "status": "PREPARED_ONLY_NO_FIT",
+  "bindings": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/physical/prepared-v1/inputs.json": "578efa7118f4cd30a10a60904de7c0a9549c1a37aee96e4cd43794d66e1f7d38",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/physical/prepare.py": "b08da7b75eae63cffed7765cab654527d19694eae8fbc64bfff4bed81bc5ffb6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/physical/assessment-v1.txt": "0a31b708ec2fefb99485d6e5c5a70c76e2ddfdfa528fbe00be3154a490490e48",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/native-v2/prepared.json": "ccccf48d9977525721831e6c27dedcb59bd8fa241bbddbe11974b7661eac7762",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/timing-qualification.json": "137f97f30f6810187ec93b48a116c2ea202bb2e8c32bd6a43f354f07d64f02dd"
+  },
+  "source_inventory_count": 367,
+  "native_inventory_count": 181,
+  "changed_inputs": 14
+}

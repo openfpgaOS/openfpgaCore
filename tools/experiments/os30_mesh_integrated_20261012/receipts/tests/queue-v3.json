@@ -1,0 +1,42 @@
+{
+  "status": "PASS",
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/queue-test-v3/run.py": "5647d367bcb6b14a0ef32797d11127b86bbb9292125385eb940398084409c144",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/queue-test-v3/test.cpp": "397c0e04d55f4674e3b697ec37b4ba5d36a5f0ab845151954a94791f6beec541",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/queue-test-v3/geometry_mesh_queue.v": "a3ac412006c503332f4a6d8895155d869f367bb39924e8a6a4c4245d1ff230e4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/frozen/src/fpga/common/geometry_mesh_queue.v": "a3ac412006c503332f4a6d8895155d869f367bb39924e8a6a4c4245d1ff230e4"
+  },
+  "command": [
+    "verilator",
+    "--cc",
+    "--exe",
+    "--build",
+    "-j",
+    "4",
+    "-Wno-fatal",
+    "--top-module",
+    "geometry_mesh_queue",
+    "--Mdir",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/queue-test-v3/obj",
+    "-CFLAGS",
+    "-std=c++17 -O1 -fsanitize=address,undefined -fno-omit-frame-pointer",
+    "-LDFLAGS",
+    "-fsanitize=address,undefined",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/queue-test-v3/geometry_mesh_queue.v",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/queue-test-v3/test.cpp"
+  ],
+  "environment": {
+    "ASAN_OPTIONS": "detect_leaks=0"
+  },
+  "result": {
+    "status": "PASS",
+    "packets": 760,
+    "checks": 2316365,
+    "cycles": 395730,
+    "words": 91157,
+    "stalled_cycles": 284652,
+    "concurrent_fill_drain_cycles": 114212,
+    "reservation_blocked_cycles": 258410
+  },
+  "scope": "Actual MTF2 multi-packet512word dual-port FIFO; randomized independent producer and consumer, simultaneous fill/drain, metadata captured under changing inputs, exact payload order through many wraps, full416word packets, zero/one packets, marker before commit, stale marker, short/oversized/error containment, reset during fill/drain and recovery. AddressSanitizer/UBSan enabled; LeakSanitizer disabled due host ptrace restriction. No arithmetic or physical fit claim."
+}

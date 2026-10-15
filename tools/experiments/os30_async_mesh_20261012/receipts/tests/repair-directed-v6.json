@@ -1,0 +1,170 @@
+{
+  "status": "PASS",
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/run_native.py": "a07fcb44e7b7240840d9c530b8052fea4961327ce26b260ef2bdbe307879e9d5",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/make_reference.py": "85e52561bdb2989ef8bde6568b414f95ea9b61f85312a6723653d6971a5bcdea",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/native_test.c": "46331c3b4116896a9d75b5be5e0c03a67a13c3e44813491fa8adc51c31adc5cb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/async_mesh_repair.c": "bac8a9d82b9b491b10008312349b1fe078ecae722fc0ce260317c0a778bb3f24",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/async_mesh_repair.h": "0aeb6d69e84a5f5345d62f14227fea76bd2169932ec0a5960a5c3d9b63b530ef",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/native-vectors-v3/vectors.json": "cb1bb8ee2bd4474a4da37a69baf8ce947abd7f52903388e7d73a4e4b4491681b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/prepared.json": "9dc6be7d6567ccbd7ea78c56123e37f33d19d575fd94169fc32f67a93ff28ec6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/build.json": "1026b4814394d9be0f4ccb8d6615cd3214dd9cfa8f11bb26b3ae69cb6bf43af2",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/obj/Vtb_system__ALL.a": "07a538ab40e08d4347f36980460f266e1280d93948fa3d8cd7a9b7967edaf778",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/obj/libverilated.a": "3e8808cd75c1ebb5746335f1070764a1bd1b07d1a422b871b04f5bead3c77937",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/native-v6/vectors.h": "c0e9c625b80d5b20ae56e8cc5d3d3642231154e21d10f2356fc24d4001450cbb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/native-v6/reference.c": "1309a1a847fd8cff534a911d549d075d01eb9f32dd14e650bd8fb15192913724",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/native-v6/reference.json": "e6b0d6ed994b161ec8ba83fbe90cbcdb86f9e7d63f6767c2c97acbe6ca4d4efb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/native-v6/start.S": "a4c5d96a2c0fed8e88b156fb6d017bcae8921ced7ea7344d64fb0543efa8e785",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/native-v6/kernel.ld": "6f74364a543633b4960f6d87ef10cf7fe2538708e24634e95495357f2f564bfd",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/native-v6/host.cpp": "9bb4c9dfdc26f326c0077714af33bab5828737bad6cd131bed5398a5f4465dc2",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/native-v6/string.h": "2da17fe3a0dfeed722e044e71f909f95f19699b30525fb012ac9b0d13f0dbcfb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/native-v6/math.h": "56acdbde9be375e1a81f96f3c6a78aff2510227a87717c9cb2b28cbf0bd36ee8"
+  },
+  "vectors": 138,
+  "commands": [
+    {
+      "argv": [
+        "riscv64-elf-gcc",
+        "-march=rv32imafc_zicsr_zifencei",
+        "-mabi=ilp32f",
+        "-O3",
+        "-fno-strict-aliasing",
+        "-ffreestanding",
+        "-fno-builtin",
+        "-fno-stack-protector",
+        "-msmall-data-limit=0",
+        "-I/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair",
+        "-I/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/native-v6",
+        "-fno-fast-math",
+        "-ffp-contract=off",
+        "-c",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/async_mesh_repair.c",
+        "-o",
+        "repair.o"
+      ],
+      "returncode": 0,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "riscv64-elf-gcc",
+        "-march=rv32imafc_zicsr_zifencei",
+        "-mabi=ilp32f",
+        "-O3",
+        "-fno-strict-aliasing",
+        "-ffreestanding",
+        "-fno-builtin",
+        "-fno-stack-protector",
+        "-msmall-data-limit=0",
+        "-I/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair",
+        "-I/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/native-v6",
+        "-ffast-math",
+        "-c",
+        "reference.c",
+        "-o",
+        "reference.o"
+      ],
+      "returncode": 0,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "riscv64-elf-gcc",
+        "-march=rv32imafc_zicsr_zifencei",
+        "-mabi=ilp32f",
+        "-O3",
+        "-fno-strict-aliasing",
+        "-ffreestanding",
+        "-fno-builtin",
+        "-fno-stack-protector",
+        "-msmall-data-limit=0",
+        "-I/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair",
+        "-I/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/native-v6",
+        "-fno-fast-math",
+        "-ffp-contract=off",
+        "-nostdlib",
+        "-Wl,--no-relax,-T,kernel.ld",
+        "start.S",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/native_test.c",
+        "repair.o",
+        "reference.o",
+        "-lgcc",
+        "-o",
+        "kernel.elf"
+      ],
+      "returncode": 0,
+      "log_sha256": "5b82b693094df310148f6f40b7f80aebe984c6ac3eff1341950fdd3a1286fa60"
+    },
+    {
+      "argv": [
+        "riscv64-elf-objcopy",
+        "-O",
+        "binary",
+        "kernel.elf",
+        "kernel.bin"
+      ],
+      "returncode": 0,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "g++",
+        "-std=c++20",
+        "-fcoroutines",
+        "-DVM_TIMING=1",
+        "-O2",
+        "-I/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/obj",
+        "-I/usr/share/verilator/include",
+        "-I/usr/share/verilator/include/vltstd",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/native-v6/host.cpp",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/obj/Vtb_system__ALL.a",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/obj/libverilated.a",
+        "-pthread",
+        "-latomic",
+        "-o",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/native-v6/host"
+      ],
+      "returncode": 0,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/native-v6/host",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/native-v6/kernel.bin",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/native-v6/outputs.bin",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/native-v6/result.json",
+        "138"
+      ],
+      "returncode": 0,
+      "log_sha256": "82c13bb37a0d494ce1760786eea5e7807b6e042d7adea58ed215ab201f8d8aed"
+    }
+  ],
+  "scope": "Arithmetic/packet differential only on actual frozen Vexii CPU. Reference extracts baseline source functions; this is not a full-frame performance test.",
+  "failures": [],
+  "compared_words": 4005,
+  "outputs_sha256": {
+    "inputs.json": "675918ef3eba69410502837afd8ebd7cb66d54faeda13bebc05f57c0f9b893b4",
+    "vectors.h": "c0e9c625b80d5b20ae56e8cc5d3d3642231154e21d10f2356fc24d4001450cbb",
+    "start.S": "a4c5d96a2c0fed8e88b156fb6d017bcae8921ced7ea7344d64fb0543efa8e785",
+    "kernel.ld": "6f74364a543633b4960f6d87ef10cf7fe2538708e24634e95495357f2f564bfd",
+    "host.cpp": "9bb4c9dfdc26f326c0077714af33bab5828737bad6cd131bed5398a5f4465dc2",
+    "string.h": "2da17fe3a0dfeed722e044e71f909f95f19699b30525fb012ac9b0d13f0dbcfb",
+    "math.h": "56acdbde9be375e1a81f96f3c6a78aff2510227a87717c9cb2b28cbf0bd36ee8",
+    "reference.c": "1309a1a847fd8cff534a911d549d075d01eb9f32dd14e650bd8fb15192913724",
+    "reference.json": "e6b0d6ed994b161ec8ba83fbe90cbcdb86f9e7d63f6767c2c97acbe6ca4d4efb",
+    "compile-repair.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "repair.o": "bc221cea58a73806c5b3e70a1bca43890fd2824ad55fd935f66612ade728f8ab",
+    "compile-reference.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "reference.o": "e2d96a73e5559bf8dfda09e433dc22de77ffe1900be8a8cca030b83b6fefb919",
+    "build-kernel.log": "5b82b693094df310148f6f40b7f80aebe984c6ac3eff1341950fdd3a1286fa60",
+    "kernel.elf": "b5b1801d356fccd6c4b8a716a51846b6c23543948edd8a27c3ade6a8ff33bf2e",
+    "objcopy.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "kernel.bin": "667d3e91be16b4ef99332f773308ca3ca2d5e1977a01725d185b7a8781863d67",
+    "kernel.dis": "18c7d920d7dff94099bd90ccd654b3df27c2735ad65f1a8d4fdb0dab6f1ef7c0",
+    "build-host.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "host": "a8dfb46d662546ec25791692433357eaa99e10b647005a6db75d282e3aa389e8",
+    "run.log": "82c13bb37a0d494ce1760786eea5e7807b6e042d7adea58ed215ab201f8d8aed",
+    "outputs.bin": "417e1c0b844298409f39d8472d44b5df02920591394b13408c4217f34665addc",
+    "result.json": "06ecf50d2d3e88865434c106e85086517dd0890e5e53352cbf546a8f1ce96ad7"
+  }
+}

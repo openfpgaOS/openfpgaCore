@@ -1,0 +1,66 @@
+{
+  "passed": true,
+  "reexecuted": false,
+  "reason": "All worker, wrapper and test source pins equal the recorded, previously executed tests.",
+  "prior_receipt_sha256": "9f6720f9060ad767c626731511d8814d107cfb6b243d5d23d966b0fd4c5f9abf",
+  "prior_receipt": {
+    "source_sha256": {
+      "gpu_geometry_worker.v": "829827085023e6bf62832595e8f75ee57558d232e478640a6e65b4c728abdca5",
+      "geometry_worker_tb.v": "69744a77df5ec6eb98a921bcba4f7cce68ff6bb431673acedfd483e53ba3410b",
+      "geometry_worker.cpp": "1e19d21c43b6d964ea2c0691802d1f0bf5bece4eb1efe9155478ef75ad3f1267",
+      "legacy-disabled/geometry_worker_tb.v": "f0077c5b29445a57b1bed821682d9ee3d4e01636715b065d68f9e7190cba60d7",
+      "legacy-disabled/geometry_worker.cpp": "97832457de13eb3cd40c667ee82ae6ccac8096c72394fd03c9ad738329aeeebd"
+    },
+    "version": "Verilator 5.052 2026-09-05 rev v5.052",
+    "commands": [
+      [
+        "verilator",
+        "--cc",
+        "--exe",
+        "--build",
+        "-j",
+        "4",
+        "-Wno-fatal",
+        "--top-module",
+        "geometry_worker_tb",
+        "--Mdir",
+        "/tmp/quake2-native-mesh-20261012/worker-output-mux-v1/results/native/obj",
+        "/tmp/quake2-native-mesh-20261012/worker-output-mux-v1/source/geometry_worker_tb.v",
+        "/tmp/quake2-native-mesh-20261012/worker-output-mux-v1/source/gpu_geometry_worker.v",
+        "/tmp/quake2-native-mesh-20261012/worker-output-mux-v1/source/geometry_worker.cpp"
+      ],
+      [
+        "/tmp/quake2-native-mesh-20261012/worker-output-mux-v1/results/native/obj/Vgeometry_worker_tb"
+      ],
+      [
+        "verilator",
+        "--cc",
+        "--exe",
+        "--build",
+        "-j",
+        "4",
+        "-Wno-fatal",
+        "--top-module",
+        "geometry_worker_tb",
+        "--Mdir",
+        "/tmp/quake2-native-mesh-20261012/worker-output-mux-v1/results/legacy-disabled/obj",
+        "/tmp/quake2-native-mesh-20261012/worker-output-mux-v1/source/legacy-disabled/geometry_worker_tb.v",
+        "/tmp/quake2-native-mesh-20261012/worker-output-mux-v1/source/gpu_geometry_worker.v",
+        "/tmp/quake2-native-mesh-20261012/worker-output-mux-v1/source/legacy-disabled/geometry_worker.cpp"
+      ],
+      [
+        "/tmp/quake2-native-mesh-20261012/worker-output-mux-v1/results/legacy-disabled/obj/Vgeometry_worker_tb"
+      ]
+    ],
+    "scope": "Synthetic exact-output reference: native MD2 transform/projection/palette/indices; mixed legacy; malformed descriptors; queue stalls/wrap; paused compute; soft/ring/media reset while request/response outstanding. Does not establish full-game parity, physical timing, or FPS.",
+    "passed": true
+  },
+  "test_directory_sha256": {
+    "geometry_worker.cpp": "1e19d21c43b6d964ea2c0691802d1f0bf5bece4eb1efe9155478ef75ad3f1267",
+    "geometry_worker_tb.v": "69744a77df5ec6eb98a921bcba4f7cce68ff6bb431673acedfd483e53ba3410b",
+    "gpu_geometry_worker.v": "829827085023e6bf62832595e8f75ee57558d232e478640a6e65b4c728abdca5",
+    "legacy-disabled/geometry_worker.cpp": "97832457de13eb3cd40c667ee82ae6ccac8096c72394fd03c9ad738329aeeebd",
+    "legacy-disabled/geometry_worker_tb.v": "f0077c5b29445a57b1bed821682d9ee3d4e01636715b065d68f9e7190cba60d7",
+    "run_worker_tests.py": "ea834c1114559686aeff07d6ea1ac90033bea29dc588357355d3145ef5d8ab82"
+  }
+}

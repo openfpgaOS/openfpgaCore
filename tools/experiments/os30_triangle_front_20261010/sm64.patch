@@ -1,0 +1,699 @@
+--- a/src/sdk/include/of_gpu.h
++++ b/src/sdk/include/of_gpu.h
+@@ -411,6 +411,17 @@
+ #define GPU_CMD_LOAD_VERTS           0x53   /* transform one raw vert into a 5-bit GPU
+                                              * vertex-cache slot. 7-word. */
+ #define GPU_CMD_DRAW_INDEXED_TRI     0x54   /* triangle from 3 cached slots. 1-word. */
++/* Experimental os30 BIM2: capability at geometry register0x0d must match
++ * before these commands are emitted. Source ownership is CLAIM(generation)
++ * followed by ordered RELEASE. CLAIM snapshots raw rows; status9 reserves
++ * raw START only while copying, independently of GPU-held snapshot banks. */
++#define OF_GPU_BRAM_IMPORT_CAP       0x42494d32u
++#define GPU_CMD_BRAM_IMPORT_CONTEXT  0x5D   /* signed rawUV offsetsU,V,flags|RGB565 */
++#define GPU_CMD_BRAM_IMPORT_VERTEX   0x5E   /* generation,src[4:0]|dst[9:5] */
++#define GPU_CMD_BRAM_IMPORT_RELEASE  0x5F   /* generation */
++#define OF_GPU_BRAM_TEXTURED         (1u << 16)
++#define OF_GPU_BRAM_HALF_TEXEL        (1u << 17)
++#define OF_GPU_BRAM_SOURCE_RGB       (1u << 18)
+ #define GPU_CMD_LOAD_VERT_CLIP       0x56   /* park ONE pre-transformed clip-space
+                                              * vert {x,y,w} in the cache (no MAC);
+                                              * wire-identical to 0x53 otherwise. */
+--- a/src/sm64/pocket/perf_pocket.c
++++ b/src/sm64/pocket/perf_pocket.c
+@@ -381,7 +381,7 @@
+ #if SM64_PERF_DETAILS
+     print_text(12,210,"PERF P3 VERT");
+ #else
+-    print_text(12,210,"PERF F12 UPLOAD");
++    print_text(12,210,"PERF F14 FRONT3");
+ #endif
+     if(!s->valid) {
+         print_text(12,178,"WAIT 5 SECONDS IN LEVEL");
+--- a/src/sm64/sm64/src/pc/gfx/gfx_gpu.c
++++ b/src/sm64/sm64/src/pc/gfx/gfx_gpu.c
+@@ -291,6 +291,86 @@
+ #endif
+ static int           g_clip_load;       /* 0x56 clip-load + 0x54 indexed-tri available
+                                          * (OF_HW_GPU_VERT_TRI && OF_HW_GPU_CLIP_LOAD) */
++
++#ifndef GFX_GPU_BRAM_IMPORT_APP
++#define GFX_GPU_BRAM_IMPORT_APP 1
++#endif
++/* BIM2 snapshot experiment: capability-gated and independent of the old geometry
++ * worker. Stats: claim attempts/successes, imported vertices, releases,
++ * raw-copy waits/polls, failures, unsupported capability. */
++uint32_t gfx_bram_stats[8];
++/* Public probe state permits an identical captured ELF/state to probe the
++ * actual model's capability after replay restore:0 unknown,1 BIM2,2 absent. */
++unsigned sm64_bram_import_capability;
++static unsigned g_bram_disabled;
++#ifndef OF_PC
++#define BRAM_GEO_REGS ((volatile uint32_t *)0x4b000000u)
++#endif
++int gfx_gpu_bram_import_supported(void) {
++#ifndef OF_PC
++    if (!GFX_GPU_BRAM_IMPORT_APP || !g_clip_load || !g_truecolor || g_bram_disabled)
++        return 0;
++    if (!sm64_bram_import_capability) {
++        sm64_bram_import_capability = BRAM_GEO_REGS[0x0d] == OF_GPU_BRAM_IMPORT_CAP ? 1u : 2u;
++        if (sm64_bram_import_capability == 2u) ++gfx_bram_stats[7];
++    }
++    return sm64_bram_import_capability == 1u;
++#else
++    return 0;
++#endif
++}
++
++/* Probe before scanning vertices/building context. The CPU is the only claim
++ * producer; a GPU release can only increase free snapshot capacity. This is
++ * an optimization hint: acquire still checks source state and CLAIM result. */
++int gfx_gpu_bram_import_available(void) {
++#ifndef OF_PC
++    const uint32_t status = BRAM_GEO_REGS[1];
++    return (status & (3u << 11)) && !(status & (1u | (1u << 9)));
++#else
++    return 0;
++#endif
++}
++
++void gfx_gpu_bram_import_wait(void) {
++#ifndef OF_PC
++    if (sm64_bram_import_capability != 1u) return;
++    if (BRAM_GEO_REGS[1] & (1u << 9)) {
++        /* BIM2 bit9 reserves the raw rows only while copying into a snapshot.
++         * GPU-held READY banks do not block the next raw LOAD. */
++        of_gpu_kick_now();
++        unsigned polls = 0;
++        while (BRAM_GEO_REGS[1] & (1u << 9)) ++polls;
++        ++gfx_bram_stats[4]; gfx_bram_stats[5] += polls;
++    }
++#endif
++}
++
++int gfx_gpu_bram_import_acquire(uint32_t generation) {
++#ifndef OF_PC
++    if (!gfx_gpu_bram_import_supported()) return 0;
++    ++gfx_bram_stats[0];
++    const unsigned status = BRAM_GEO_REGS[1];
++    /* Busy copier/producer is ordinary backpressure. Keep CPU fallback
++     * available without waiting or disabling the feature. */
++    if (status & (1u | (1u << 9))) return 0;
++    if ((status & (1u << 10)) || (status & 6u) != 6u ||
++        BRAM_GEO_REGS[0x0e] != generation) {
++        ++gfx_bram_stats[6]; g_bram_disabled = 1; return 0;
++    }
++    __asm__ volatile("fence rw,rw" ::: "memory");
++    BRAM_GEO_REGS[0x0f] = generation;
++    __asm__ volatile("fence rw,rw" ::: "memory");
++    const unsigned claim = BRAM_GEO_REGS[0x10];
++    /* Duplicate generation, no free bank, or busy copier means no ownership.
++     * In particular, never queue RELEASE for a rejected claim. */
++    if (!(claim & 1u)) return 0;
++    ++gfx_bram_stats[1]; return 1;
++#else
++    (void)generation; return 0;
++#endif
++}
++
+ 
+ /* ---- vertex-cache (0x56/0x54) sticky-state + per-frame wire counters ----
+  * g_vc_state_dirty is an ELIGIBILITY-MEMO invalidator ONLY: set by every rapi
+@@ -1593,8 +1673,9 @@
+ }
+ 
+ /* Known-index CPU run: same per-triangle packet arithmetic and order. */
+-void gfx_gpu_vtx_cache_batch(const struct gfx_vc_prepared vertices[32],
+-                             const uint32_t *jobs, unsigned count, uint8_t alpha) {
++static void gfx_gpu_vtx_cache_batch_impl(const struct gfx_vc_prepared vertices[32],
++                                         const uint32_t *jobs, unsigned count, uint8_t alpha,
++                                         const struct gfx_bram_import *import) {
+     SM64_PERF_SCOPE(SM64_PERF_SEND);
+     /* The shared emitter checks material changes and dynamic draw fields
+      * before building state. Every path still passes through that one memo. */
+@@ -1622,11 +1703,45 @@
+         g_vc_vp_valid = 1;
+     }
+ 
++    /* Every slot has one immutable value throughout this run. Import the
++     * unique BRAM-backed dirty slots before any draws, then release the
++     * snapshot before rasterization. Older partial-LOAD slots still use the normal
++     * CPU payload path below. The caller owns a snapshot of this generation. */
++#ifndef OF_PC
++    if (import && import->slots) {
++        unsigned slots = import->slots, imported = 0;
++        for (unsigned bits = slots; bits; bits &= bits - 1u) ++imported;
++        const unsigned words = 6u + 3u * imported;
++        _gpu_stream_reserve_words(words);
++        uint32_t *packet = _gpu_ring_claim();
++        *packet++ = ((uint32_t)GPU_CMD_BRAM_IMPORT_CONTEXT << 24) | 3u;
++        *packet++ = (uint32_t)import->u_offset;
++        *packet++ = (uint32_t)import->v_offset;
++        *packet++ = import->flags_rgb;
++        for (unsigned slot = 0; slots; ++slot, slots >>= 1) {
++            if (!(slots & 1u)) continue;
++            *packet++ = ((uint32_t)GPU_CMD_BRAM_IMPORT_VERTEX << 24) | 2u;
++            *packet++ = import->generation;
++            *packet++ = (slot - import->first) | (slot << 5);
++        }
++        *packet++ = ((uint32_t)GPU_CMD_BRAM_IMPORT_RELEASE << 24) | 1u;
++        *packet++ = import->generation;
++        _gpu_ring_commit(words);
++        g_vc_words += words; g_vc_loads += imported;
++        gfx_bram_stats[2] += imported; ++gfx_bram_stats[3];
++
++    }
++#endif
++
+     /* No state mutation occurs inside this bounded CPU-only run. */
+     for (unsigned tri = 0; tri < count; ++tri) {
+         const uint32_t job = jobs[tri];
+         const uint8_t slot[3] = {job & 31u, (job >> 5) & 31u, (job >> 10) & 31u};
+-        const unsigned dirty_mask = (job >> 15) & 7u;
++        unsigned dirty_mask = (job >> 15) & 7u;
++        if (import) {
++            for (unsigned k = 0; k < 3; ++k)
++                if (import->slots & (1u << slot[k])) dirty_mask &= ~(1u << k);
++        }
+ #ifndef OF_PC
+     /* One reservation preserves the same ordered 0x56 loads and 0x54 draw.
+      * Material and viewport commands above have already been staged. */
+@@ -1684,6 +1799,23 @@
+         of_gpu_kick();
+     }
+     }
++#ifndef OF_PC
++    /* Publish the completed import/release/draw batch so scarce snapshots
++     * cannot sit held solely by CPU staging. Deferred submission still overlaps
++     * this publication with the next raw LOAD. */
++    if (import && import->slots) of_gpu_kick_now();
++#endif
++}
++
++void gfx_gpu_vtx_cache_batch(const struct gfx_vc_prepared vertices[32],
++                             const uint32_t *jobs, unsigned count, uint8_t alpha) {
++    gfx_gpu_vtx_cache_batch_impl(vertices, jobs, count, alpha, NULL);
++}
++
++void gfx_gpu_vtx_cache_import_batch(const struct gfx_vc_prepared vertices[32],
++                                    const uint32_t *jobs, unsigned count, uint8_t alpha,
++                                    const struct gfx_bram_import *import) {
++    gfx_gpu_vtx_cache_batch_impl(vertices, jobs, count, alpha, import);
+ }
+ 
+ /* Raw geometry path. Reuses the existing ring/cache and material emitter;
+--- a/src/sm64/sm64/src/pc/gfx/gfx_gpu.h
++++ b/src/sm64/sm64/src/pc/gfx/gfx_gpu.h
+@@ -88,6 +88,25 @@
+  * Caller keeps material, viewport, alpha and all32slots fixed during the run. */
+ void gfx_gpu_vtx_cache_batch(const struct gfx_vc_prepared vertices[32],
+                              const uint32_t *jobs, unsigned count, uint8_t alpha);
++/* Experimental BIM1. Only current raw LOAD rows may be imported. CPU culling
++ * and canonical vertices remain unchanged. All imports precede this immutable
++ * run's draws; RELEASE then lets the next LOAD overlap GPU rasterization. */
++#define GFX_BRAM_TEXTURED  (1u << 16)
++#define GFX_BRAM_HALF_TEXEL (1u << 17)
++#define GFX_BRAM_SOURCE_RGB (1u << 18)
++struct gfx_bram_import {
++    uint32_t generation, slots;
++    int32_t u_offset, v_offset;
++    uint32_t flags_rgb;
++    unsigned first;
++};
++int gfx_gpu_bram_import_supported(void);
++int gfx_gpu_bram_import_available(void);
++int gfx_gpu_bram_import_acquire(uint32_t generation);
++void gfx_gpu_bram_import_wait(void);
++void gfx_gpu_vtx_cache_import_batch(const struct gfx_vc_prepared vertices[32],
++                                    const uint32_t *jobs, unsigned count, uint8_t alpha,
++                                    const struct gfx_bram_import *import);
+ /* Private immutable cached ELF Vtx source to LOD5 CRAM byte offset.
+  * Caller must drain LOAD before a miss can upload; zero returns CPU fallback. */
+ int gfx_gpu_cram_vertex_source(const void *source,unsigned count,uint32_t *offset);
+--- a/src/sm64/sm64/src/pc/gfx/gfx_pc.c
++++ b/src/sm64/sm64/src/pc/gfx/gfx_pc.c
+@@ -1015,6 +1015,11 @@
+ 
+ 
+ #if defined(TARGET_OPENFPGA) && !GFX_GPU_GEOMETRY_WORKER_APP && !defined(OF_PC)
++/* TFP1 keeps the current raw LOAD resident until a CPU reader needs it.
++ * The helper is defined beside the alias ABI below; fog must copy first so
++ * a later materialization cannot overwrite its computed alpha. */
++static void load_alias_materialize(uint32_t mask);
++static void load_alias_materialize_all(void);
+ #define GFX_CPU_DEFERRED_FOG 1
+ /* This backend ignores the fog channel and substitutes opaque shade alpha
+  * while use_fog is active. Preserve the original alpha lazily for any later
+@@ -1025,6 +1030,7 @@
+ 
+ static __attribute__((noinline)) void gfx_cpu_materialize_fog(uint32_t needed) {
+     SM64_PERF_SCOPE(SM64_PERF_VTX_CPU);
++    load_alias_materialize_all();
+     cpu_fog_pending &= ~needed;
+     for (unsigned slot = 0; needed; ++slot, needed >>= 1) {
+         if (!(needed & 1u)) continue;
+@@ -1058,14 +1064,23 @@
+ static uint32_t load_submit_jobs[64];
+ static unsigned load_submit_count;
+ static uint8_t load_submit_alpha;
++/* By-value ownership descriptor: BIM2 snapshots survive the next raw START,
++ * while this run's material, prepared fallback slots and jobs stay immutable. */
++static struct gfx_bram_import load_submit_import;
+ /* queued batches, submitted while LOAD runs, fallback submissions. */
+ uint32_t load_submit_stats[3];
+ static __attribute__((noinline)) void gfx_cpu_submit_pending(void) {
+     unsigned count = load_submit_count;
+     if (!count) return;
+     load_submit_count = 0;
+-    gfx_gpu_vtx_cache_batch(load_submit_payload, load_submit_jobs,
+-                            count, load_submit_alpha);
++    if (load_submit_import.slots) {
++        gfx_gpu_vtx_cache_import_batch(load_submit_payload, load_submit_jobs,
++                                      count, load_submit_alpha, &load_submit_import);
++        load_submit_import.slots = 0;
++    } else {
++        gfx_gpu_vtx_cache_batch(load_submit_payload, load_submit_jobs,
++                               count, load_submit_alpha);
++    }
+ }
+ #else
+ #define GFX_LOAD_SUBMIT_OVERLAP 0
+@@ -1093,6 +1108,26 @@
+ #define LOAD_ALIAS_REGS ((struct LoadAliasRegisters *)0x4b000000u)
+ #define LOAD_ALIAS_ID 0x4c4f4405u
+ #define LOAD_ALIAS_VIEW ((const uint32_t *)0x13f80000u)
++/* Only current-generation rows may enter TFP1/BIM2. Lazy canonical slots
++ * refer to that same raw bank; every surviving slot is copied before reuse. */
++static uint32_t load_bram_slots, load_bram_generation;
++static unsigned load_bram_first;
++static uint32_t load_lazy_slots;
++static unsigned load_lazy_first;
++/* Probe state is reset to unknown in both sides of the native same-ELF test. */
++unsigned sm64_triangle_front_capability;
++/* attempted batches/triangles, accepted batches/triangles, kept/clip/cull,
++ * hardware fallback, bank fallback, lazy slots, materialized slots/calls,
++ * polling iterations, protocol/timeout errors, scope skips, absent probes. */
++uint32_t gfx_front_stats[16];
++#define TRI_FRONT_REGS ((volatile uint32_t *)0x4b000000u)
++static int gfx_triangle_front_supported(void) {
++    if (!sm64_triangle_front_capability) {
++        sm64_triangle_front_capability = TRI_FRONT_REGS[0x11] == 0x54465031u ? 1u : 2u;
++        if (sm64_triangle_front_capability == 2u) gfx_front_stats[15]++;
++    }
++    return sm64_triangle_front_capability == 1u;
++}
+ /* calls, launched, successful, vertices, ineligible, absent/disabled,
+  * unsupported, read errors, source-pool fallback, timeout-drained, other error, writes. */
+ uint32_t load_driver_stats[16];
+@@ -1109,6 +1144,43 @@
+         uint32_t uv=s[5];float u=(float)(int16_t)uv,v=(float)(int16_t)(uv>>16);
+         memcpy(d+5,&u,4);memcpy(d+6,&v,4);d[7]=s[6];d[8]=s[7];
+     }
++}
++/* Copy contiguous needed runs, preserving the raw-to-canonical conversion
++ * and leaving untouched slots (including already materialized fog alpha)
++ * alone. No current matrix, texture, light or fog state enters this copy. */
++static __attribute__((noinline)) void load_alias_materialize(uint32_t mask) {
++    uint32_t needed = load_lazy_slots & mask;
++    if (!needed) return;
++    gfx_front_stats[11]++;
++    while (needed) {
++        unsigned first = (unsigned)__builtin_ctz(needed), count = 1;
++        while (first + count < 32 && (needed & (1u << (first + count)))) ++count;
++        uint32_t copied = count == 32 ? 0xffffffffu : ((1u << count) - 1u) << first;
++        load_alias_copy((uint32_t *)&rsp.loaded_vertices[first],
++                        LOAD_ALIAS_VIEW + (first - load_lazy_first) * 8u, count);
++        load_lazy_slots &= ~copied;
++        needed &= ~copied;
++        gfx_front_stats[10] += count;
++    }
++}
++/* Outside the G_VTX survivor barrier, pending slots are one contiguous
++ * successful LOAD block. The first ordinary CPU reader copies it once;
++ * subsequent triangle culling has no per-slot materialization overhead. */
++static __attribute__((noinline)) void load_alias_materialize_all(void) {
++    const uint32_t needed = load_lazy_slots;
++    if (!needed) return;
++    const unsigned first = (unsigned)__builtin_ctz(needed);
++    const unsigned count = 32u - (unsigned)__builtin_clz(needed) - first;
++    load_alias_copy((uint32_t *)&rsp.loaded_vertices[first],
++                    LOAD_ALIAS_VIEW + (first - load_lazy_first) * 8u, count);
++    load_lazy_slots = 0;
++    gfx_front_stats[10] += count;
++    gfx_front_stats[11]++;
++}
++static inline void load_alias_materialize_triangle(unsigned a, unsigned b, unsigned c) {
++    uint32_t mask = (a < 32 ? 1u << a : 0u) | (b < 32 ? 1u << b : 0u)
++                  | (c < 32 ? 1u << c : 0u);
++    if (load_lazy_slots & mask) load_alias_materialize_all();
+ }
+ static inline void load_alias_discard(unsigned count) {
+     __asm__ volatile("fence rw,rw" ::: "memory");
+@@ -1170,6 +1242,10 @@
+     }
+     load_alias_controls_valid=1;
+     LOAD_ALIAS_REGS->source=source_offset;LOAD_ALIAS_REGS->shape=count;
++    /* BIM2 copies raw rows into an immutable snapshot. Only that short copy
++     * reserves the raw bank; queued GPU imports do not delay the next START. */
++    gfx_gpu_bram_import_wait();
++    load_bram_slots=0;
+     __asm__ volatile("fence rw,rw" ::: "memory");
+     LOAD_ALIAS_REGS->control=1;
+     load_driver_stats[1]++;load_driver_stats[11]+=writes;
+@@ -1191,11 +1267,22 @@
+     if(status&8u)load_driver_stats[6]++;
+     if(status&0x60u)load_driver_stats[7]++;
+     if(!timed_out&&(status&6u)==6u&&!(status&0xe8u)) {
+-        /* The alias is permanently CPU-read-only: no pre-invalidate and
+-         * no dirty writeback ownership. Invalidate after the entire LOAD,
+-         * then consume all results before allowing the next START. */
++        /* Discard every successful generation, including lazy ones. A later
++         * sparse CPU fallback must never hit a previous raw alias cache line. */
+         load_alias_discard(count);
+-        load_alias_copy((uint32_t *)&rsp.loaded_vertices[first],LOAD_ALIAS_VIEW,count);
++        const uint32_t loaded = (count == 32 ? 0xffffffffu : ((1u << count) - 1u)) << first;
++        if (gfx_triangle_front_supported() && gfx_gpu_bram_import_supported()) {
++            load_lazy_first = first;
++            load_lazy_slots = loaded;
++            gfx_front_stats[9] += count;
++        } else {
++            load_alias_copy((uint32_t *)&rsp.loaded_vertices[first],LOAD_ALIAS_VIEW,count);
++        }
++        if(gfx_gpu_bram_import_supported()) {
++            load_bram_first=first;
++            load_bram_generation=((const volatile uint32_t *)LOAD_ALIAS_REGS)[0x0e];
++            load_bram_slots=(count==32?0xffffffffu:((1u<<count)-1u))<<first;
++        }
+         load_driver_stats[2]++;load_driver_stats[3]+=count;return 1;
+     }
+     load_driver_stats[10]++;return 0;
+@@ -1225,6 +1312,13 @@
+ #if GFX_CPU_DEFERRED_FOG
+     uint32_t overwritten = dest_index >= 32 ? 0 : n_vertices >= 32 - dest_index
+         ? (0xffffffffu << dest_index) : ((1u << n_vertices) - 1u) << dest_index;
++#if LOAD_ALIAS_ENABLED
++    /* Do this for EVERY G_VTX, including software-only/ineligible LOADs.
++     * Preserve old survivors before raw ownership or fog coefficients change;
++     * overwritten lazy values are dead and can be dropped without reading. */
++    load_alias_materialize(~overwritten);
++    load_lazy_slots &= ~overwritten;
++#endif
+     gfx_cpu_flush_fog(~overwritten);
+     cpu_fog_pending &= ~overwritten;
+     const bool fog_active = configEnableFog && (rsp.geometry_mode & G_FOG);
+@@ -1279,6 +1373,9 @@
+         size_t n = n_vertices;
+         if (n > 32 - dest_index) n = 32 - dest_index;
+         vc_slot_stale |= (n >= 32 ? 0xFFFFFFFFu : ((1u << n) - 1u)) << dest_index;
++#if LOAD_ALIAS_ENABLED
++        load_bram_slots &= ~((n >= 32 ? 0xFFFFFFFFu : ((1u << n) - 1u)) << dest_index);
++#endif
+     }
+ #endif
+     const float aspect_scale = gfx_vertex_aspect_scale;
+@@ -2204,6 +2301,9 @@
+ 
+ static void gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx) {
+     SM64_PERF_SCOPE(SM64_PERF_TRI); SM64_PERF_TOP_SCOPE(SM64_PERF_TOP_TRIANGLE);
++#if LOAD_ALIAS_ENABLED
++    load_alias_materialize_triangle(vtx1_idx, vtx2_idx, vtx3_idx);
++#endif
+     struct LoadedVertex *v1 = &rsp.loaded_vertices[vtx1_idx];
+     struct LoadedVertex *v2 = &rsp.loaded_vertices[vtx2_idx];
+     struct LoadedVertex *v3 = &rsp.loaded_vertices[vtx3_idx];
+@@ -2973,6 +3073,22 @@
+     d->u = qu; d->v = qv; d->rgb = rgb; d->depth = qd;
+ }
+ 
++#if LOAD_ALIAS_ENABLED
++/* Hardware importer deliberately rejects nonfinite/subnormal clip inputs.
++ * Keep those rare values on the existing CPU conversion path before taking
++ * a snapshot; valid zero X/Y, ordinary finite W and reciprocal use RNE exactly. */
++static int gfx_bram_vertex_supported(const struct LoadedVertex *v) {
++    uint32_t x,y,w,wi;
++    memcpy(&x,&v->x,4);memcpy(&y,&v->y,4);
++    memcpy(&w,&v->w,4);memcpy(&wi,&v->w_inv,4);
++    x&=0x7fffffffu;y&=0x7fffffffu;
++    return !v->clip_rej && (!x||(x>=0x00800000u&&x<0x7f800000u))
++        && (!y||(y>=0x00800000u&&y<0x7f800000u))
++        && w>=0x00800000u&&w<0x46fffe00u
++        && wi>=0x00800000u&&wi<0x7f800000u;
++}
++#endif
++
+ /* Complete one fallback triangle using an already computed rejection
+  * class. The exact original post-cull clip/push tail follows below. */
+ static void gfx_cpu_push_checked(unsigned a, unsigned b, unsigned c, unsigned reject) {
+@@ -3006,12 +3122,170 @@
+ #endif
+ }
+ 
++#if LOAD_ALIAS_ENABLED
++/* Ordered preflight has no render side effects. It consumes only raw-local
++ * indices first; hardware uses the same clip/cull arithmetic as the CPU
++ * fallback. Only a surviving supported run may prepare a cold material.
++ * Every unsupported job sends the
++ * WHOLE batch back through that fallback before importing or drawing. */
++static __attribute__((noinline)) Gfx *gfx_triangle_front_run(Gfx *cmd) {
++    SM64_PERF_SCOPE(SM64_PERF_TRI); SM64_PERF_TOP_SCOPE(SM64_PERF_TOP_TRIANGLE);
++    Gfx *first = cmd;
++    if (!load_bram_slots || !gfx_triangle_front_supported()
++        || !gfx_gpu_bram_import_supported()) return first;
++    if (!gfx_gpu_bram_import_available()) { gfx_front_stats[8]++; return first; }
++#if GFX_LOAD_SUBMIT_OVERLAP
++    if (load_submit_count) return first;
++    struct gfx_vc_prepared *payload = load_submit_payload;
++    uint32_t *jobs = load_submit_jobs;
++#else
++    struct gfx_vc_prepared payload[32];
++    uint32_t jobs[64];
++#endif
++    unsigned count = 0;
++    for (;;) {
++        unsigned slots[6];
++        unsigned n = gfx_geometry_decode(cmd, slots);
++        if (!n || count + n > 64) break;
++        uint32_t used = 0;
++        for (unsigned i = 0; i < n * 3; ++i) {
++            if (slots[i] >= 32) goto collected;
++            used |= 1u << slots[i];
++        }
++        if ((load_bram_slots & used) != used) break;
++        /* Both halves pass ownership before a TRI2 is added. */
++        for (unsigned t = 0; t < n; ++t) {
++            unsigned *s = &slots[t * 3];
++            jobs[count] = s[0] | (s[1] << 5) | (s[2] << 10);
++            TRI_FRONT_REGS[0x200 + count] = (s[0] - load_bram_first)
++                | ((s[1] - load_bram_first) << 5) | ((s[2] - load_bram_first) << 10);
++            ++count;
++        }
++        ++cmd;
++    }
++collected:
++    if (!count) { gfx_front_stats[14]++; return first; }
++    gfx_front_stats[0]++; gfx_front_stats[1] += count;
++    const unsigned cull = ((rsp.geometry_mode & G_CULL_FRONT) ? 1u : 0u)
++                        | ((rsp.geometry_mode & G_CULL_BACK) ? 2u : 0u);
++    TRI_FRONT_REGS[0x12] = load_bram_generation;
++    TRI_FRONT_REGS[0x13] = count | (cull << 8);
++    __asm__ volatile("fence rw,rw" ::: "memory");
++    TRI_FRONT_REGS[0x14] = 1u;
++    unsigned polls = 0, status;
++    do { status = TRI_FRONT_REGS[0x14]; ++polls; } while ((status & 1u) && polls < 65536u);
++    const unsigned timed_out = (status & 1u) != 0;
++    /* Never abandon accepted raw/FMA ownership. A timeout disables future
++     * preflights only after the current one drains, then uses CPU fallback. */
++    if (timed_out) do { status = TRI_FRONT_REGS[0x14]; ++polls; } while (status & 1u);
++    gfx_front_stats[12] += polls;
++    if (timed_out || (status & 0xau) != 2u) {
++        gfx_front_stats[13]++; sm64_triangle_front_capability = 2u; return first;
++    }
++    const uint32_t keep_lo = TRI_FRONT_REGS[0x15], keep_hi = TRI_FRONT_REGS[0x16];
++    const uint32_t fallback_lo = TRI_FRONT_REGS[0x17], fallback_hi = TRI_FRONT_REGS[0x18];
++    if ((status & 4u) || fallback_lo || fallback_hi) { gfx_front_stats[7]++; return first; }
++    const unsigned kept = (unsigned)__builtin_popcount(keep_lo) + (unsigned)__builtin_popcount(keep_hi);
++    const unsigned clipped = TRI_FRONT_REGS[0x19];
++    if (kept > count || clipped > count - kept) {
++        gfx_front_stats[13]++; sm64_triangle_front_capability = 2u; return first;
++    }
++    if (kept) {
++        /* This is the first live triangle in an immutable run. Preparing a
++         * cold material here has the same ordered side effects as the CPU
++         * path; fully culled or unsupported preflights never reach it. */
++        bool use_fog, use_alpha, use_texture;
++        struct ColorCombiner *comb = gfx_prepare_triangle_material(&use_fog, &use_alpha, &use_texture);
++        if (!triangle_vc_elig) { gfx_front_stats[14]++; return first; }
++        const int rgb_in = triangle_vc_rgb_input, alpha_in = triangle_vc_alpha_input;
++        unsigned rgb_source = rgb_in >= 0 ? comb->shader_input_mapping[0][rgb_in] : 0;
++        uint8_t alpha = 255;
++        if (rgb_in >= 0 && rgb_source == CC_LOD) { gfx_front_stats[14]++; return first; }
++        if (alpha_in >= 0) {
++            const unsigned source = comb->shader_input_mapping[1][alpha_in];
++            if (source == CC_LOD || (source == CC_SHADE && !use_fog)) {
++                gfx_front_stats[14]++; return first;
++            }
++            if (source != CC_SHADE) {
++                struct RGBA tmp;
++                /* Only PRIM/ENV/default reach here: no canonical vertex read. */
++                alpha = gfx_vc_resolve(source, NULL, NULL, &tmp)->a;
++            }
++        }
++        const int textured = triangle_vc_elig & GFX_VC_TEXTURED;
++        const float bias = textured && (rdp.other_mode_h & (3U << G_MDSFT_TEXTFILT)) != G_TF_POINT ? 0.5f : 0.0f;
++        gfx_vc_texture_state(comb, textured, bias);
++        uint32_t stale = vc_slot_stale, prepared = 0;
++        unsigned output = 0;
++        for (unsigned i = 0; i < count; ++i) {
++            if (!((i < 32 ? keep_lo >> i : keep_hi >> (i - 32)) & 1u)) continue;
++            uint32_t job = jobs[i];
++            const unsigned a = job & 31u, b = (job >> 5) & 31u, c = (job >> 10) & 31u;
++            const uint32_t used = (1u << a) | (1u << b) | (1u << c);
++            const unsigned dirty = ((stale >> a) & 1u) | (((stale >> b) & 1u) << 1)
++                                 | (((stale >> c) & 1u) << 2);
++            prepared |= stale & used;
++            stale &= ~used;
++            jobs[output++] = job | (dirty << 15);
++        }
++        struct gfx_bram_import import = {0};
++        import.slots = prepared;
++        import.generation = load_bram_generation; import.first = load_bram_first;
++        import.u_offset = textured ? (int32_t)(rdp.texture_tile.uls * 8) : 0;
++        import.v_offset = textured ? (int32_t)(rdp.texture_tile.ult * 8) : 0;
++        import.flags_rgb = (textured ? GFX_BRAM_TEXTURED : 0)
++                         | (bias != 0.0f ? GFX_BRAM_HALF_TEXEL : 0) | 0xffffu;
++        if (rgb_in >= 0) {
++            if (rgb_source == CC_SHADE) import.flags_rgb |= GFX_BRAM_SOURCE_RGB;
++            else {
++                struct RGBA tmp;
++                const struct RGBA *c = gfx_vc_resolve(rgb_source, NULL, NULL, &tmp);
++                const uint16_t rgb = ((uint16_t)(c->r >> 3) << 11) | ((uint16_t)(c->g >> 2) << 5) | (c->b >> 3);
++                import.flags_rgb = (import.flags_rgb & ~0xffffu) | rgb;
++            }
++        }
++        /* A rejected snapshot CLAIM owns nothing. No draw or canonical slot
++         * has changed; the original indexed path still handles the whole run. */
++        if (prepared && !gfx_gpu_bram_import_acquire(import.generation)) {
++            gfx_front_stats[8]++; return first;
++        }
++        if (buf_vbo_len) gfx_flush();
++#if GFX_LOAD_SUBMIT_OVERLAP
++        if ((cmd->words.w0 >> 24) == (uint8_t)G_VTX) {
++            load_submit_import = import;
++            load_submit_alpha = alpha;
++            load_submit_count = kept;
++            load_submit_stats[0]++;
++        } else
++#endif
++        {
++            if (prepared) gfx_gpu_vtx_cache_import_batch(payload, jobs, kept, alpha, &import);
++            else gfx_gpu_vtx_cache_batch(payload, jobs, kept, alpha);
++        }
++        vc_slot_stale = stale;
++    }
++    gfx_front_stats[2]++; gfx_front_stats[3] += count;
++    gfx_front_stats[4] += kept; gfx_front_stats[5] += clipped;
++    gfx_front_stats[6] += count - kept - clipped;
++#ifdef TARGET_POCKET
++    tri_diag.total += count;
++    tri_diag.clip_reject += clipped;
++    tri_diag.cull_reject += count - kept - clipped;
++    tri_diag.direct += kept;
++#endif
++    return cmd;
++}
++#endif
++
+ /* A run ends at EVERY non-triangle command, including G_VTX. Loaded slots,
+  * material, viewport, texture and alpha are therefore immutable throughout.
+  * Store the ORIGINAL per-triangle dirty masks, not one reordered union of
+  * uploads: backend packets remain load[0],load[1],load[2],draw for each tri. */
+ static __attribute__((noinline)) Gfx *gfx_cpu_indexed_run(Gfx *cmd) {
+     SM64_PERF_SCOPE(SM64_PERF_TRI); SM64_PERF_TOP_SCOPE(SM64_PERF_TOP_TRIANGLE);
++#if LOAD_ALIAS_ENABLED
++    if (load_lazy_slots) load_alias_materialize_all();
++#endif
+ #if GFX_LOAD_SUBMIT_OVERLAP
+     struct gfx_vc_prepared *payload = load_submit_payload;
+     uint32_t *jobs = load_submit_jobs;
+@@ -3118,11 +3392,43 @@
+     fallback = true;
+ submit:
+     if (count) {
++        struct gfx_bram_import import={0};
++#if LOAD_ALIAS_ENABLED
++        import.slots=prepared&load_bram_slots;
++        if(import.slots&&gfx_gpu_bram_import_supported()
++           &&gfx_gpu_bram_import_available()) {
++            /* All material, viewport, source rows and canonical vertices are
++             * immutable for this run. Reject unsupported rows independently. */
++            for(unsigned i=0;i<32;++i)
++                if((import.slots&(1u<<i))&&!gfx_bram_vertex_supported(&rsp.loaded_vertices[i]))
++                    import.slots&=~(1u<<i);
++            import.generation=load_bram_generation;import.first=load_bram_first;
++            import.u_offset=textured?(int32_t)(rdp.texture_tile.uls*8):0;
++            import.v_offset=textured?(int32_t)(rdp.texture_tile.ult*8):0;
++            import.flags_rgb=(textured?GFX_BRAM_TEXTURED:0)
++                |(bias!=0.0f?GFX_BRAM_HALF_TEXEL:0)|0xffffu;
++            if(rgb_in>=0) {
++                const unsigned source=comb->shader_input_mapping[0][rgb_in];
++                if(source==CC_SHADE)import.flags_rgb|=GFX_BRAM_SOURCE_RGB;
++                else {
++                    struct RGBA tmp;
++                    const struct RGBA *c=gfx_vc_resolve(source,&rsp.loaded_vertices[0],&rsp.loaded_vertices[0],&tmp);
++                    const uint16_t rgb=((uint16_t)(c->r>>3)<<11)|((uint16_t)(c->g>>2)<<5)|(c->b>>3);
++                    import.flags_rgb=(import.flags_rgb&~0xffffu)|rgb;
++                }
++            }
++            /* Flush legacy draws before snapshot ownership starts. A failed claim has
++             * no import packets and restores ordinary CPU preparation. */
++            if(import.slots&&buf_vbo_len)gfx_flush();
++            if(import.slots&&!gfx_gpu_bram_import_acquire(import.generation))import.slots=0;
++        } else import.slots=0;
++#endif
+         /* Only triangle commands have been consumed: slots and material are
+          * still unchanged. Prepare unique dirty slots away from the hot job
+          * scan; jobs retain every original load/draw ordering decision. */
+         for (unsigned i = 0; prepared; ++i, prepared >>= 1) {
+             if (!(prepared & 1u)) continue;
++            if(import.slots&(1u<<i))continue;
+             const struct LoadedVertex *v = &rsp.loaded_vertices[i];
+             float u = 0.0f, tex_v = 0.0f;
+             if (textured) {
+@@ -3146,13 +3452,15 @@
+         if (buf_vbo_len) gfx_flush();
+ #if GFX_LOAD_SUBMIT_OVERLAP
+         if (!fallback && (cmd->words.w0 >> 24) == (uint8_t)G_VTX) {
++            load_submit_import = import;
+             load_submit_alpha = alpha;
+             load_submit_count = count;
+             load_submit_stats[0]++;
+         } else
+ #endif
+         {
+-            gfx_gpu_vtx_cache_batch(payload, jobs, count, alpha);
++            if(import.slots)gfx_gpu_vtx_cache_import_batch(payload,jobs,count,alpha,&import);
++            else gfx_gpu_vtx_cache_batch(payload, jobs, count, alpha);
+         }
+         vc_slot_stale = stale;
+     }
+@@ -3290,6 +3598,10 @@
+                 /* A valid ineligible material cannot emit a cached run.
+                  * Keep its original handler without speculative culling. */
+                 if (!triangle_material_ready || triangle_vc_elig) {
++#if LOAD_ALIAS_ENABLED
++                    Gfx *front_next = gfx_triangle_front_run(cmd);
++                    if (front_next != cmd) { cmd = front_next; continue; }
++#endif
+                     Gfx *next = gfx_cpu_indexed_run(cmd);
+                     if (next != cmd) { cmd = next; continue; }
+                 }
+@@ -3308,6 +3620,10 @@
+                 /* A valid ineligible material cannot emit a cached run.
+                  * Keep its original handler without speculative culling. */
+                 if (!triangle_material_ready || triangle_vc_elig) {
++#if LOAD_ALIAS_ENABLED
++                    Gfx *front_next = gfx_triangle_front_run(cmd);
++                    if (front_next != cmd) { cmd = front_next; continue; }
++#endif
+                     Gfx *next = gfx_cpu_indexed_run(cmd);
+                     if (next != cmd) { cmd = next; continue; }
+                 }

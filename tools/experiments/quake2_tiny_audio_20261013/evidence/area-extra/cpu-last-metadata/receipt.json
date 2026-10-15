@@ -1,0 +1,112 @@
+{
+  "status": "PASS",
+  "build_command": [
+    "verilator",
+    "--cc",
+    "--exe",
+    "--build",
+    "--assert",
+    "--x-initial",
+    "unique",
+    "-j",
+    "4",
+    "-Wno-fatal",
+    "--top-module",
+    "lsu_axi_shim",
+    "--Mdir",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-extra/cpu-last-metadata/obj-random",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-extra/cpu-last-metadata/miter.v",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-extra/cpu-last-metadata/miter.cpp"
+  ],
+  "runs": [
+    {
+      "seed": 1,
+      "argv": [
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-extra/cpu-last-metadata/obj-random/Vlsu_axi_shim",
+        "+verilator+rand+reset+2",
+        "+verilator+seed+1"
+      ],
+      "passed": true
+    },
+    {
+      "seed": 2,
+      "argv": [
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-extra/cpu-last-metadata/obj-random/Vlsu_axi_shim",
+        "+verilator+rand+reset+2",
+        "+verilator+seed+2"
+      ],
+      "passed": true
+    },
+    {
+      "seed": 1977,
+      "argv": [
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-extra/cpu-last-metadata/obj-random/Vlsu_axi_shim",
+        "+verilator+rand+reset+2",
+        "+verilator+seed+1977"
+      ],
+      "passed": true
+    },
+    {
+      "seed": 2494483,
+      "argv": [
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-extra/cpu-last-metadata/obj-random/Vlsu_axi_shim",
+        "+verilator+rand+reset+2",
+        "+verilator+seed+2494483"
+      ],
+      "passed": true
+    }
+  ],
+  "writes_each": 18960,
+  "stall_schedules_each": 15,
+  "warm_reset_with_four_pending_writes": true,
+  "all_valid_outputs_cycle_exact": true,
+  "read_write_nonalias_invariant_checked": true,
+  "resources": {
+    "before": {
+      "ALMs": 304,
+      "registers": 199,
+      "M10K_bits": 0
+    },
+    "after": {
+      "ALMs": 240,
+      "registers": 91,
+      "M10K_bits": 0
+    }
+  },
+  "source_pins": {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/rtl-candidate/src/fpga/common/os30/cpu_system.v",
+    "before": "a2631ad66d3bbc3d004e746f28ce628a3692dd0cc156ac39e36fe0a6694fdaf3",
+    "after": "3bbbab4ac1ccee10484471a2d294c25af44c610223cb9b799a27fa4b1cfe912e"
+  },
+  "scope": "Actual extracted OS30 posted-write shim under legal AXI responses; no changes to target decode or queue protocol. Not unbounded formal or physical timing proof.",
+  "sha256": {
+    "prepare.py": "6f93bdcb4fdb376468eb556b85385e1fea9431320bad8217c81f25efc9cccb9e",
+    "verify.py": "486cbccb8597a0b8eff3d7aa635ca5898c11d1bd0496617209995e3c31b55846",
+    "cpu_system_before.v": "a2631ad66d3bbc3d004e746f28ce628a3692dd0cc156ac39e36fe0a6694fdaf3",
+    "cpu_system_after.v": "3bbbab4ac1ccee10484471a2d294c25af44c610223cb9b799a27fa4b1cfe912e",
+    "before.v": "5a6042f05ac21ac6e873df0e77569232133e8fd7ad9c2e45fae88d2484aec123",
+    "after.v": "e2b60990dd8d88799819944ea45c22295389e94621dc70b806cdac35147ec50a",
+    "miter.v": "7d84db888724e90b8f5ef94d4811fb5ade33a4018f2378401c264bb192cb161a",
+    "miter.cpp": "adce454cd970bdf773a28d1e2ac66bbcd30dd0a84b8c294667fb645d07ecf20e",
+    "source-pins.json": "2b695a2df511fc4d84b373b708503bac788a7671569fbe52ac67c048fbaf0681",
+    "build-random.log": "31aae1925f4bc93d62784062448cbe52f22d7c69e8ae7dd8c7e17112fc5977d3",
+    "random-1.log": "3d77bc923bf427483397a1a180fc028fe362a4510d5a244d9ca888c74d775c14",
+    "random-2.log": "3d77bc923bf427483397a1a180fc028fe362a4510d5a244d9ca888c74d775c14",
+    "random-1977.log": "3d77bc923bf427483397a1a180fc028fe362a4510d5a244d9ca888c74d775c14",
+    "random-2494483.log": "3d77bc923bf427483397a1a180fc028fe362a4510d5a244d9ca888c74d775c14",
+    "map-before/queue.qpf": "1aa7e6912f51fe937cd919aada077edb939590d6d03f3ea67a73315d56882f66",
+    "map-before/queue.qsf": "2b58779eb01596624877007e13c3f59c7a8eba45d1eadad4c9208327b2a74a4b",
+    "map-before/queue.sdc": "69a86abd0d85ebb20aef22d29da5379f0c675a9f1d4484d8ae8de3247720e88e",
+    "map-before/map.log": "bfdf80ab525509cb6c0315a9a516b4a56fc6b18ef23f9122bf66248d6dfd3dc9",
+    "map-after/queue.qpf": "1aa7e6912f51fe937cd919aada077edb939590d6d03f3ea67a73315d56882f66",
+    "map-after/queue.qsf": "3e5369b6b72c7213fa4bdf362171a7ab3be07e3d119f2e56adef8f6621579d01",
+    "map-after/queue.sdc": "69a86abd0d85ebb20aef22d29da5379f0c675a9f1d4484d8ae8de3247720e88e",
+    "map-after/map.log": "5b5aac0b2c345ea600dcca67fbe19c17bfd63c56b5d48ab7f3eeafd80656b4e4",
+    "map-after/output_files/queue.map.summary": "705d82086676e58a77199f8261bf133af17621ce5c05c9f3a7a2c35f240ff080",
+    "map-after/output_files/queue.map.rpt": "1d6a9d9e8ee7d638044754631b3066d7ddf5139126b1a4baabb847dc98fef0a5",
+    "map-after/output_files/queue.flow.rpt": "3400b0b58ff894d2026642b154135ab9806e353a56f3df32c734843a4a09c9f1",
+    "map-before/output_files/queue.map.summary": "99445def56f8e4740c45268d8ba2f79eeed0b4a90d63c2376489e553ea1745cd",
+    "map-before/output_files/queue.map.rpt": "bb9d7e5f362f480a4d379dc18d9928f9770f627d3ae1452d608b69f58acb6bce",
+    "map-before/output_files/queue.flow.rpt": "4026b0fc9b1df091ab67f63a9b2c1c0468fe5d7072190dcb51a376ef4150c2a5"
+  }
+}

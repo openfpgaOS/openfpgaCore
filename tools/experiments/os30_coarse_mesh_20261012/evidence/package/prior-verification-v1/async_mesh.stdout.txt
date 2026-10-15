@@ -1,0 +1,1 @@
+PASS source-only inventory; 6 exact forward/reverse patch round trips; frozen input/evidence hashes with explicit historical relocations

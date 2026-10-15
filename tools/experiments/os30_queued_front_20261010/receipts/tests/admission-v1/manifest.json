@@ -1,0 +1,38 @@
+{
+  "status": "PASS_ACTUAL_QGF_ADMISSION_C_LOOP",
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/check_admission.py": "2e020e4554ba2a4031aa8356f672365811df686cfd7c1ccf65136739059505f5",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "d3d0a0e3163be954f6086cf509620d18e750e152481df10a6e9e921cc1352cde",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/admission_tail.c": "9f2384bd3914aa51db53883b18795043ae963d432ba9e5bc77639a814f436b2d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/admission-v1/test.c": "dea9119d25d1f42c1f1b9f31c679b7cbb30819172a97ba0498ed20b503c6e893"
+  },
+  "extracted_block_sha256": "402c14c7fe22ec2ca57efd6fd12b7bcb167bb5d86610b9c0a7378480a4d5d11f",
+  "scope": "Actual C metadata/atomic TRI2 collection loop; display-list decoder is a test stub. Hardware metadata separately tested on real LOAD SCAN.",
+  "build": {
+    "command": [
+      "cc",
+      "-std=c11",
+      "-O2",
+      "-fsanitize=address,undefined",
+      "-fno-omit-frame-pointer",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/admission-v1/test.c",
+      "-o",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/admission-v1/test"
+    ],
+    "returncode": 0,
+    "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "run": {
+    "command": [
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/admission-v1/test"
+    ],
+    "returncode": 0,
+    "log_sha256": "6ed231f56acf4b1d85704f499dd51147f4cd38b668dce94ca8a56fff36c92293"
+  },
+  "result": {
+    "pass": true,
+    "streams": 20003,
+    "checks": 60009
+  },
+  "executable_sha256": "9d220ec11669db15db2bcdba70b9bd4d59c454be3f893f90912b459c3bd09429"
+}

@@ -1,0 +1,43 @@
+{
+  "passed": true,
+  "cache_sha256": "8f320a9ffba4e2ab608250ced03f869b96de97651fb10bd2d345c22a670d6e41",
+  "parent_sha256": "ab1f1aeeb135cd2f80e44adb39616c35f28f1e164ab639b2f5645fbb447000ae",
+  "scope": "Metadata input payload factoring only; WE, addresses, state, protocol and all processing cycles preserved.",
+  "unit": {
+    "receipt": "unit-v2/receipt.json",
+    "sha256": "bda44d4e267e114a5d4ba2289a290659e93ca24f7b07c9f226774560fdb00fcb",
+    "parameter_configurations": 4,
+    "random_seeds_per_config": 2,
+    "collision_poison": true,
+    "total_shadow_clocks": 7729929,
+    "enabled_metadata_writes_checked": 2040139,
+    "metadata_write_states": [
+      0,
+      6,
+      7,
+      8,
+      16,
+      24
+    ],
+    "assertions": "Every clock: data_we/data_wa/data_w/data_ra/meta_we/meta_wa equal exact original block; meta_w equal on every enabled write, including collision-poison consumer."
+  },
+  "full_gpu_sdram": {
+    "receipt": "full-write-path/receipt.json",
+    "sha256": "db7e2854585174b7e95b5b26e69452ca02ff31e49cf971eea358084ac023767a",
+    "all_color_depth_bytes_exact": 614400,
+    "timed_write_records_exact": 19442,
+    "cycles_exact": 1791183
+  },
+  "source_unchanged": true,
+  "proof": "Every old enabled metadata write is one of INIT zero, ALLOC clean-tag, W_WAIT/W_GET dirty-tag, MAINT zero, maintenance WB_DATA zero. Candidate changes only unconsumed payload when WE=0. Both RAM storage and collision-poison consumers are WE-qualified. No assumptions about reachable states are needed for this case split.",
+  "harness_note": "unit-v1 preserved: exactOS30SET_BITS8 directed conflict tests exceeded the generic16,384-word host array (word17,018). unit-v2 increases only host array capacity to65,536 words while preserving addresses/random bounds/transactions. No RTL/assertion failure caused the rerun.",
+  "limitations": [
+    "CPU/audio/bridge/scanout traffic is synthetic. No actual CPU core or audio mixer is instantiated.",
+    "The inherited controller model is split-DQ MiSTer io_sdram_test, not Pocket PHY.",
+    "Fast-texture/native-mesh external ports are tied idle; this directed0x4E/clear test exercises the raster/write path. Native/particle worker jobs are covered in the separate fullGPU capture and worker lockstep gates.",
+    "No Dock/output-video, whole-device FPS, audio PCM or physical timing claim."
+  ],
+  "inherited_refresh_warning": "One inherited refresh interval1701 cycles versus limit1700 appears identically in both runs and prior control. No claim of physical DRAM retention/timing closure.",
+  "quartus_launched": false,
+  "deployed": false
+}

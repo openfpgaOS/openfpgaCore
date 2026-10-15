@@ -1,0 +1,63 @@
+CPU posted-write address/mask RAM and last-pushed metadata cache
+=============================================================
+
+The candidate source and all test/map inputs are pinned in receipt.json.
+The component map changes 304 to 240 ALMs and 199 to 91 registers, on top
+of the previously qualified write-data RAM optimization. This is a synthesis
+estimate, not a promise of whole-design placement or timing improvement.
+
+The four queue slots are retained until downstream B retires an entire
+selected burst. Count is in [0,4], and tail=(head+count) modulo four.
+An accepted CPU write writes only the free tail; full blocks acceptance.
+Valid AW reads the occupied head. Valid W reads an occupied slot selected
+by head+burst_index. Therefore these valid reads cannot collide with a
+simultaneous accepted write. Uninitialized memory or same-address read
+results are unobservable while the queue is empty. Removing the arrays'
+reset writes and allowing no_rw_check is safe under this invariant. The
+head address also feeds the coalescing target decoder while empty, but
+all multiword decisions require count>=2 and therefore mask that value.
+The implementation retains asynchronous read latency and does not change
+queue size, posted response timing, target decoding or B retirement.
+
+The old push operation compared the new address/mask with array[tail-1]
+and stored a one-bit matches_previous flag. Only flags for entries after
+the current head are used: match01 starts at head+1 and requires count>=2;
+match02 and match03 additionally require counts>=3 and >=4. The flag for
+the head is never used to merge with an already retired predecessor.
+
+Two scalar registers now remember the most recently accepted address and
+mask. Before every push following another push, these equal the payload
+written by the immediately previous push. Pop cannot alter that payload
+until a later push reuses the slot. Whenever a newly pushed entry has an
+occupied predecessor, that predecessor was the immediately preceding
+push, so comparison against the scalar registers is exactly equivalent
+to reading array[tail-1]. If there is no occupied predecessor (initial
+reset, empty queue, or a simultaneous pop that empties the old queue),
+the new entry is the new head. Its possibly different match flag is never
+used. The next push then sees the correct updated scalar values. Neither
+scalar requires reset because no meaningful comparison precedes a valid
+write to both scalars.
+
+This removes the previous-entry read port from both small memories. Head
+and active-beat reads remain unchanged; Quartus may implement equivalent
+head reads with duplicated physical RAMs for timing. No assumption about
+that physical duplication is part of the correctness argument.
+
+Evidence: the actual extracted LSU/AXI shim runs beside the baseline with
+all valid AW/W/read/posted-response outputs compared cycle by cycle.
+Four randomized uninitialized-memory seeds each exercise 18,960 ordered
+writes across 15 independent AW/W backpressure schedules, all 256 high
+address bytes, local same-address FIXED coalescing, memory-target singles,
+queue wrap/full/concurrent retirement and warm reset with four pending
+writes: 75,840 writes total. An independent scoreboard checks address,
+data, byte mask, burst length, WLAST, posted responses and stall stability.
+Assertions check the occupancy, tail relation and valid W/read-write
+non-alias invariants every cycle. All pass. This is a directed/random
+miter plus induction argument, not an unbounded formal proof or physical
+setup/hold qualification. The selected integrated source needs a full fit.
+
+Cleanup note: the generated after file retains an empty reset for-loop
+and its unused integer declaration from the original reset block; Quartus
+warns about the unused loop iterator and prunes it. Remove both together
+when integrating, rather than retaining that avoidable warning. No state
+or executable assignments are contained in the empty loop.

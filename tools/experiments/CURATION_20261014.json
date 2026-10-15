@@ -1,0 +1,40 @@
+{
+  "status": "PASS",
+  "scope": "2026-10-14 curation of 18 formerly untracked experiment directories; no original bundle changes",
+  "original_files_rehashed": 9145,
+  "original_bytes": 703156989,
+  "unchanged_directories": 18,
+  "local_only_files": 7122,
+  "local_only_bytes": 651871028,
+  "versionable_original_files": 2023,
+  "versionable_original_bytes": 51285961,
+  "checks": {
+    "all_original_size_and_sha256_unchanged": true,
+    "all_local_inventory_entries_verified": true,
+    "all_historical_source_and_test_recipes_visible_except_explicit_archived_full_bundle": true,
+    "new_generated_payloads_visible_to_git": false,
+    "verifier_python_ast": "PASS",
+    "git_diff_check": "PASS"
+  },
+  "commands": [
+    "python3 -B tools/experiments/verify_local_evidence.py",
+    "git diff --check -- .gitignore tools/experiments"
+  ],
+  "source_sha256": {
+    ".gitignore": "b8d432a251cd7e5e840e7ad33beae75f74b0041ce31b8595b8ce56e3006e824f",
+    "tools/experiments/CURRENT_STATE.md": "1ce1ffa1727e063f5a8627b4df774543c51304518c1bad0eb6943027e5ae0ab3",
+    "tools/experiments/RELEASE_EXPERIMENTS_20261014.txt": "cccc4dbd2afb2ac6a05a4ef2abed6acf59d0004ea36c5e1b5cd6166495f1a38c",
+    "tools/experiments/LOCAL_EVIDENCE_20261014.json": "689c9bdf19c5167aee2df455feba9e4e7b891378e8b0dadd7a44c876482b9342",
+    "tools/experiments/verify_local_evidence.py": "1efd520aa4d542894bed369201c5ce41a93bdc2d812e1ad7653931ac64ce3ebc"
+  },
+  "actions_not_performed": [
+    "delete",
+    "move",
+    "rewrite original bundle",
+    "historical simulation",
+    "physical build",
+    "seed sweep",
+    "deployment",
+    "commit"
+  ]
+}

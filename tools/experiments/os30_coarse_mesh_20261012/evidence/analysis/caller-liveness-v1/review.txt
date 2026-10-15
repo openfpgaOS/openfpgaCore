@@ -1,0 +1,9 @@
+Caller-aware liveness: control-only expansion finds no additional supported spans
+
+The exact F24 cold snapshot traversal matches all354 native CPU LOAD calls and4,121 commands. Among320 immutable own-slot VTX/TRI spans,146 were already dead-proven; allowing immutable G_DL/G_ENDDL caller traversal proves the same146, adding0 spans/triangles/LOADs.
+
+The source mechanics permit such a proof: a pushed G_DL resumes at cmd+8, a tail branch preserves the caller continuation, and G_ENDDL itself has no canonical/fog side effects. However real returned-to code reaches state barriers or mutable caller storage before the pending slots are overwritten. Of164 structurally END-stopped spans,47 reach TEXTURE,47 SETTIMG,13 TILESYNC,6 MOVEMEM,5 PIPESYNC,1 GEOMETRYMODE,1 SETENVCOLOR and44 mutable resumes. This structural count includes tasks excluded by later topology-cache/admission gates and is not the162 compiled suffix-route count.
+
+A safe future implementation would pass explicit return continuations and key positive proofs by exact task plus caller return PCs; never promote a contextual result into source-only MeshTask.dead_after. Groups would still stop at calls/returns: only the liveness proof crosses control flow. Exact source-generation, repair-hint, union-fog and canonical ownership checks remain. Root-list return remains a hard barrier because frame completion flushes fog and materializes canonical state.
+
+No app or RTL change is justified by this scoped cold result. Warm caller stacks were not observed; warm command identities differ from cold, so cold stacks cannot stand in for a warm proof. Crossing state operations or using mutable caller snapshots would require a separate audit. No performance or fit gain is inferred.

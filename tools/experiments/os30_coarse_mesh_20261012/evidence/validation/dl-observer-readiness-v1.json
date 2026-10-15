@@ -1,0 +1,40 @@
+{
+  "status": "SOURCE_READY_PENDING_NATIVE_OBSERVATION",
+  "elf_sha256": "7294008468ae3760e6aac7fda5539e5dadd255c604e3b4a6c66bc028f68e422b",
+  "common_cpu_observer": "Identical source-bound entry/return/VTX observations for capability-off, AJ02 and AJ03.",
+  "verified": [
+    "Python syntax for new recipes.",
+    "20 reviewed instruction sites match exact ELF bytes.",
+    "All gfx_run_dl direct callers and its only ret instruction enumerated.",
+    "Existing AJ03 hardware observer apply/once functions AST-identical.",
+    "No old recipes, app/native sources, hardware signals or clocks mutated."
+  ],
+  "register_contract": {
+    "vertex_command": "s1 (x9)",
+    "parent_command_at_recursive_entry": "s1 minus8; parent already advances s1 before jal",
+    "root_a1": 0
+  },
+  "schema": {
+    "dl_events_kinds": {
+      "1": "entry",
+      "2": "first caller resume retirement",
+      "3": "actual gfx_run_dl return-instruction retirement"
+    },
+    "read_validity": "Cache-aware capture ambiguity is explicitly logged; independent proof must reject required invalid witnesses."
+  },
+  "run_recipe": {
+    "driver": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/replay_v2.py",
+    "binding_default": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/f28-dl-binding-v1.json",
+    "candidate_hook": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/group_hooks_v2.py",
+    "control_hook": null,
+    "aj02_hook": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/async_hooks_v2.py"
+  },
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/replay.py": "46531a4d7bf78e98594a653513b652815ab0e868003fbba45995494e0b064538",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/group_hooks.py": "bce47b378cb9e394d9448ba963d7fbabc37231f7f33a9c1f69155e48478b5e3b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/replay_v2.py": "7c53f5d8f311fc766ef158835d2534ed5f040a1ac929bdc253084a1124d7a684",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/group_hooks_v2.py": "6d78b89bbce3893672eba2cc128dd74825be7daa64ab191de29ec06ca764be42",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/bind_f28_dl_v1.py": "dc6164fe0367c58a5933badbfa270de974166f89bd70ef4635713fccc9081599",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/f28-dl-binding-v1.json": "e9732e24cecfab1b3f69a8c9fddb30908736c97d25fd01fbb507cc4697aae8aa"
+  }
+}

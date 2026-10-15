@@ -1,0 +1,58 @@
+{
+  "status": "PASS_COMPONENT_QUALIFICATION",
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/async_mesh_repair.c": "bac8a9d82b9b491b10008312349b1fe078ecae722fc0ce260317c0a778bb3f24",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/async_mesh_repair.h": "0aeb6d69e84a5f5345d62f14227fea76bd2169932ec0a5960a5c3d9b63b530ef",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/make_reference.py": "85e52561bdb2989ef8bde6568b414f95ea9b61f85312a6723653d6971a5bcdea",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/run_native.py": "a07fcb44e7b7240840d9c530b8052fea4961327ce26b260ef2bdbe307879e9d5",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/native_test.c": "46331c3b4116896a9d75b5be5e0c03a67a13c3e44813491fa8adc51c31adc5cb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/run_host.py": "d5933c76caf09a312ff10a2478f106ebceb5d9dc8710fcb5a7836ad4765802f3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/test_host.c": "fb2dc645a0df4f54db481ffdec797d943f098b4c57fcab614233ba8f48c31245",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/native-v7/manifest.json": "e889f352ad84b14cc139d8f6971fadc43b20aad1159a30a928ca3fe9c88b6a0c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/native-v7/result.json": "87b6dfc806d15c8568a6798627ab1eacda318a120b6c3bd066ec6232697412e0",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/native-v6/manifest.json": "10c6686d97f2dc8d2565649809ac8b135b817ab19f1de331d4d724eea3482ed7",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/host-v1/result.json": "a44cce7490160178bf02def29659b766934642689f68e88ff0e4d411e03bb588",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/app-review-v1.json": "646c409ad0fa04b68424740387acf6a462ae0a2b9361e6bf4f328d007410b984",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/compiled-app-math-v1.json": "3b47a23a8e81cdc9039b7d9f8a6c113fd68237a9d5d3b4e8176f71c2ad11d717",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/development-history-v1.json": "b8abcbe7662c016048cb152c9c156a3c1b92e387f03cfc07599106d1fa5eecf1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/finalize.py": "833715d5f8b74a98785f0c831d80acbd138073cf3e9b1bd3315416d9f929ee27"
+  },
+  "native": {
+    "tasks": 1184,
+    "exact_ordinary_words": 66348,
+    "captured_geometry_tasks": 638,
+    "captured_source_vertices": 8068,
+    "captured_raw_words": 64544,
+    "captured_input_triangles": 4918,
+    "scene_tasks_exercising_full_raw_recompute_repair": 319,
+    "randomized_tasks": 512,
+    "special_raw_failure_tasks": 34,
+    "mismatches": 0,
+    "fcsr_restored": true,
+    "target": "Exact current frozen Vexii native CPU model; reduced-FMA behavior is included."
+  },
+  "host": {
+    "tasks": 8192,
+    "checks": 442190,
+    "sanitizers": "ASan+UBSan; leak detector disabled because ptrace cannot support LSan and helper performs no allocation",
+    "checks_scope": "Packet bounds/format, clipping capacity, callback cancellation at every selected output prefix, malformed-input zero emission, caller rounding mode/exception preservation."
+  },
+  "reference": {
+    "clip_cull_projection_quantization_packing": "Mechanically extracted unchanged baseline functions, compiled with original fast-math flags. Source hashes and extracted fragment hashes are in native-v7/reference.json.",
+    "scalar_raw_failure": "Original executable instruction DAG, independently assembled after discovering that a reduced fast-math source extraction changes compiler reassociation/NaN comparisons. All scene rows additionally match the separately captured actual raw results.",
+    "material": "Uniform controlled textured/untextured, shaded/constant RGB565, tile bias/origin/alpha/projection cases. These vectors do not establish real shader setup or texture ownership."
+  },
+  "correctness_details": [
+    "UV transform preserves fused (value-origin)*0.03125+bias, including clipped fractional UV.",
+    "W admission preserves the original executable FLE rejection guards, including unordered W behavior; equal W uses the direct packet path.",
+    "Clipped fan order, six-plane strict-inside tests, interpolated color truncation and direct perspective scale match the reference.",
+    "No renderer globals, heap allocation, SDK ring calls or mutable material lookups exist in the helper. Only the supplied emit callback owns output progress.",
+    "Caller must couple cancellation with consumer/output reset; it must not send END after a cancelled partial packet.",
+    "App supplies immutable original source bytes/context for raw failure, and a complete current raw snapshot otherwise; raw/context lifetime belongs to the worker."
+  ],
+  "remaining_gates": [
+    "Same-ELF complete native CPU+geometry+raster interval correctness and elapsed cycles.",
+    "Actual integrated reset/repair/lease/output-order protocol checks.",
+    "Physical area/timing only if measured full-frame benefit warrants it; no claim here."
+  ]
+}

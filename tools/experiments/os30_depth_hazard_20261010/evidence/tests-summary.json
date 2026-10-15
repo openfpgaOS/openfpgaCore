@@ -1,0 +1,87 @@
+{
+  "status": "PASS_FOCUSED_DEPTH_HAZARD_ORDERING",
+  "scope": "Directed and seeded randomized verification only; parent owns whole-frame native evidence and any performance or physical qualification.",
+  "receipts": [
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/tests/cache-v1/manifest.json",
+      "sha256": "a09a79930a0b380e5288d3d4b1c88bfd3614b9b6375f52619e29cdc5a32a7683",
+      "status": "PASS_ACTUAL_RENDER_CACHE_ORDERING",
+      "result": {
+        "pass": true,
+        "cycles": 196298,
+        "checks": 477748,
+        "reads": 2017,
+        "writes": 2473,
+        "downstream_reads": 1814,
+        "ar_while_posted": 1678,
+        "same_line_posted_ar": 168,
+        "aw_priority_cycles": 79,
+        "write_stall_cycles": 56320,
+        "partial_writes": 9092,
+        "flushes": 26,
+        "local_reset_with_posted_write": 1
+      }
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/tests/queue-v1/manifest.json",
+      "sha256": "c6ffafbee65123d710961f7dfd61d4c69aac587c586a9df075a2d2c8bcdf942e",
+      "status": "PASS_ACTUAL_EXTRACTED_DEPTH_QUEUE",
+      "result": {
+        "pass": true,
+        "cycles": 152255,
+        "checks": 723153,
+        "pushes": 100117,
+        "pops": 98933,
+        "simultaneous_push_pop": 65261,
+        "pointer_wraps": 12294,
+        "safe_queries": 47379,
+        "same_word_queries": 68908,
+        "same_line_queries": 67334,
+        "conservative_hash_aliases": 5420,
+        "holding_guard_queries": 57695,
+        "pending_commit_pop": 5425,
+        "full_queue_cycles": 2776,
+        "resets": 152,
+        "ring_resets_preserved": 446
+      }
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/tests/cache-priority-v1/manifest.json",
+      "sha256": "9a8812e4419a2f46ff4c06636de8e76a1d6bf9f53b08d2e1363b0818d7b7e9d4",
+      "status": "PASS_GUARDED_RENDER_CACHE_ARBITRATION",
+      "result": {
+        "pass": true,
+        "cycles": 257100,
+        "checks": 645637,
+        "reads": 3023,
+        "writes": 2979,
+        "downstream_reads": 2837,
+        "ar_while_posted": 2522,
+        "same_line_posted_ar": 197,
+        "aw_priority_cycles": 161,
+        "write_stall_cycles": 71220,
+        "partial_writes": 11615,
+        "flushes": 26,
+        "local_reset_with_posted_write": 1,
+        "guarded_ar_priority_cycles": 5274,
+        "concurrent_cases": 506,
+        "read_first_cases": 500,
+        "write_first_cases": 6
+      }
+    }
+  ],
+  "test_sources_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/tests/test_cache_order.cpp": "2547d87d1b58695419f9e78baee9063293c1bd1a22d372e532552cc2f8d83f2e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/tests/run_cache.py": "28511a6e9f7834bcf562736b291e0f43b67a4c5d3958801dc3262a0ac6d1cf7a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/tests/test_depth_queue.cpp": "b878e9f1d44808ffa670f24c0878a322aa08fba21499844aa7e579285e765799",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/tests/run_queue.py": "6af584fa24d991006bd08a3ea462092d76b8c961cec9be19bd3f7cd0ed5a90e6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/tests/test_cache_priority.cpp": "8b026239f3f425016f7aeca92df37e5478196e59cd756e48a73abed94696f4a9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/tests/run_cache_priority.py": "e4514866cc3b6d018c3b35b8c3b6a5b54aaf05496bc1b753306658fecc3751d4"
+  },
+  "limitations": [
+    "Queue harness extracts the actual source block without modifying it, but drives legal queue controls and the depth query tag; it does not simulate the enclosing GPU pipeline.",
+    "Cache tests instantiate the actual source and exact native cache parameters but use an adversarial behavioral downstream memory with delayed in-order B, not physical SDRAM timing.",
+    "The cache arbitration prototype may reorder only not-yet-accepted disjoint single-line bursts; tests do not authorize relaxed blend, command barriers, same-line, or flush ordering.",
+    "These local tests establish safety for exercised cases; only paired native whole-frame runs establish workload effects."
+  ]
+}

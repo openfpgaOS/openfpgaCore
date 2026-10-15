@@ -1,0 +1,163 @@
+{
+  "schema": 1,
+  "status": "READ_ONLY_QUALIFIED_FIRMWARE_RING_COMPATIBILITY_REVIEW",
+  "conclusion": "Qualified Pocket boot/OS are not GPU command-ring producers. For isolated direct-SM64 trial, smaller physical ingress with unchanged logical pointers needs updated app SDK but no boot/OS source change demonstrated by this review. Retain old boot/OS binaries pending full boot validation; do not rebuild them solely to change unused SDK header.",
+  "qualified_paths": {
+    "core_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core",
+    "firmware_makefile": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/Makefile",
+    "firmware_container": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/tools/firmware-container.sh",
+    "firmware_output_directory": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging",
+    "physical_boot_MIF": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/firmware.mif",
+    "physical_OS": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/os.bin",
+    "api_master": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/api/of_gpu.h",
+    "mesh_app_sdk": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v2/src/sdk/include/of_gpu.h",
+    "chip32_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/fpga/targets/pocket/chip32/loader.asm",
+    "pinned_chip32_binary": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/tools/experiments/os30_psram32_20261009/firmware-sdk/pinned-loader.bin"
+  },
+  "build_recipe_if_later_needed": {
+    "command": "bash <new-private-core>/tools/firmware-container.sh TARGET=pocket OF_EXPERIMENT_SDRAM_STAGING=1 all",
+    "outputs": [
+      "src/firmware/os/bld/pocket-sdram-staging/firmware.elf",
+      "src/firmware/os/bld/pocket-sdram-staging/firmware.mif",
+      "src/firmware/os/bld/pocket-sdram-staging/os.bin"
+    ],
+    "no_install": "Do not invoke install or replace baseline frozen firmware. Build source and dependencies only in a new clone. MIF is baked into bitstream; OS pair retains experiment boot ABI."
+  },
+  "artifacts": {
+    "src/firmware/os/bld/pocket-sdram-staging/os.bin": {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/os.bin",
+      "sha256": "2d6deb9d7d7086e1004293bef5a51d3e0eefbb941ce5814b3a9ae6d499c10890",
+      "matches_firmware_artifacts": true
+    },
+    "src/firmware/os/bld/pocket-sdram-staging/firmware.mif": {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/firmware.mif",
+      "sha256": "fcc89a80f17fae2196eb0266a18beed7aad4b1a0967709df61b293e1829693a4",
+      "matches_firmware_artifacts": true
+    },
+    "src/firmware/os/bld/pocket-sdram-staging/firmware.elf": {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/firmware.elf",
+      "sha256": "ca2746466bc920996a4e49f3066ff9c69d3d2da77068e2ac4e116ba910f0e211",
+      "matches_firmware_artifacts": true
+    }
+  },
+  "source_receipt_checks": {
+    "src/firmware/api/app.ld": {
+      "expected": "8b490f5d6095d18b94b5e2db98f95b52ed135f162f696e0f6100695447019888",
+      "actual": "8b490f5d6095d18b94b5e2db98f95b52ed135f162f696e0f6100695447019888",
+      "matches": true
+    },
+    "src/firmware/os/Makefile": {
+      "expected": "c4ef4975cdc3fd6d77ebeb3ec0872f23ccb6dfa0b2c98ae76c330b64458447c4",
+      "actual": "c4ef4975cdc3fd6d77ebeb3ec0872f23ccb6dfa0b2c98ae76c330b64458447c4",
+      "matches": true
+    },
+    "src/firmware/os/hal/regs.h": {
+      "expected": "1a44d47caaed1d259fa39ea5f2bb2bdef6a231dc25dfc7a69b06d3b97e63fab1",
+      "actual": "1a44d47caaed1d259fa39ea5f2bb2bdef6a231dc25dfc7a69b06d3b97e63fab1",
+      "matches": true
+    },
+    "src/firmware/os/targets/pocket/target_platform.h": {
+      "expected": "929645495ba91242e61df4af7de2547aacfa160944fd8f01b4b3160d21a05533",
+      "actual": "929645495ba91242e61df4af7de2547aacfa160944fd8f01b4b3160d21a05533",
+      "matches": true
+    },
+    "src/firmware/os/targets/pocket/boot/boot.c": {
+      "expected": "dcb6ad5ddd62c52b2ca881875889c3485566199e4faf80ac29f7a8268252ebd5",
+      "actual": "dcb6ad5ddd62c52b2ca881875889c3485566199e4faf80ac29f7a8268252ebd5",
+      "matches": true
+    },
+    "src/firmware/os/targets/pocket/file.c": {
+      "expected": "73a779bc279a351fd83badc9098c7e6d8132f317090f08d126306892fca10fd0",
+      "actual": "73a779bc279a351fd83badc9098c7e6d8132f317090f08d126306892fca10fd0",
+      "matches": true
+    },
+    "src/firmware/os/targets/pocket/save.c": {
+      "expected": "c42b85049624181277de0bc77e6cc4904e5862f7815f8700ab5d1c6db3addb09",
+      "actual": "c42b85049624181277de0bc77e6cc4904e5862f7815f8700ab5d1c6db3addb09",
+      "matches": true
+    },
+    "src/firmware/os/hal/memtest.c": {
+      "expected": "ad0d7ded310b83d22d71c2eb3d64ab9b98e97f592c23b90c81d2793df4b354ca",
+      "actual": "ad0d7ded310b83d22d71c2eb3d64ab9b98e97f592c23b90c81d2793df4b354ca",
+      "matches": true
+    },
+    "src/firmware/os/hal/hal.c": {
+      "expected": "7cf0d0b23a034553e25e11fa384fd160ab7fb2b3d020f4e7cce7228c390e279f",
+      "actual": "7cf0d0b23a034553e25e11fa384fd160ab7fb2b3d020f4e7cce7228c390e279f",
+      "matches": true
+    }
+  },
+  "proof": [
+    "36 actual pocket-sdram-staging dependency files contain no of_gpu.h dependency; firmware/api/of.h:82 explicitly excludes per-app GPU header.",
+    "Pocket boot.c:101-109 defines only reset/status/DMA/texture-flush registers. Its sole GPU operation sequence351-361 soft-resets, waits DMA_BUSY, clears DMA source/length, flushes texture, ring-resets. It uploads no commands or ring pointer.",
+    "Pocket video.c:1215 only reads GPU_FENCE_REACHED_REG. OS regs.h exposes that fence register; kernel loader and OS files have no GPU command ring submission helpers.",
+    "Chip32 loader runs on Pocket host, selects/loads core and host reset/init; no GPU ring interface.",
+    "Existing isolated SM64 INI selects ELF=sm64.elf directly; no menu app precedes it.",
+    "Current built firmware ELF/MIF/OS hashes match historical firmware-artifacts receipt and qualified physical MIF/OS hashes."
+  ],
+  "compatibility_limits": [
+    "This is source/dependency/artifact audit, not a fresh full-boot simulation.",
+    "Every additional app/menu/diagnostic bundled into a reduced-ring profile must use the negotiated-capacity SDK or be independently proven not to submit GPU commands.",
+    "Do not promote reduced-ring hardware to normal profiles with legacy app binaries.",
+    "Keep writes to GPU_DMA_LEN0x1c unchanged if adding read-only capacity at the same offset; boot writes zero there.",
+    "Keep existing logical pointer modulus and GPU_FENCE/reset ABI when changing storage depth."
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/Makefile": "c4ef4975cdc3fd6d77ebeb3ec0872f23ccb6dfa0b2c98ae76c330b64458447c4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/targets/pocket/boot/boot.c": "dcb6ad5ddd62c52b2ca881875889c3485566199e4faf80ac29f7a8268252ebd5",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/targets/pocket/video.c": "49649063f469713a14bb62dbd0f01536324174ed8af4c0778d7adabfe1e52619",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/hal/regs.h": "1a44d47caaed1d259fa39ea5f2bb2bdef6a231dc25dfc7a69b06d3b97e63fab1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/kernel/loader.c": "a23b8b4e079303f748712ac4bb79e856ff68e84baa802feeb79b785e7eb4f40a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/api/of.h": "5862a61a427ba576cbea316c158fe4432279a632f36940bfb9634f679e6967d6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/api/of_gpu.h": "2bb8f61d9e9134f225e95b358ad4d58314a1916001420829c21d819dff175d3d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/tools/firmware-container.sh": "fda8121da4d88ae0d88e38a4b79f942ef47770a0dcc188e0e9dfcaa315daf549",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/fpga/targets/pocket/chip32/loader.asm": "a85ef65310d818639532aca892361b9c71329613809933f1025bb30f45d98632",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/tools/experiments/os30_psram32_20261009/firmware-review.json": "36abbd8a0efacf84e19430ff4e9ae94109218f186ad1711127ae20ec71f154cd",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/tools/experiments/os30_psram32_20261009/firmware-artifacts.json": "c4aacd82a07e3bb57e27405c43a3225fbe614831ebb269dcc0921bdd4a5499de",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/tools/experiments/os30_psram32_20261009/firmware-sdk/loader-input.json": "fea77c3f14205a5e902b79313e0ab8d76734adc4657626546b13ff26fd19986f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/tools/experiments/os30_psram32_20261009/firmware-sdk/pinned-loader.bin": "fc1f8d37eb0fb322006b4428f0b59d2801c9b74978bd3f24103f5f9bbfca3c99",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/inputs.json": "a1d09c8d78e887fe61900b632a389c82d3b79c6e861ef1d0f8d024b029311226",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/os.bin": "2d6deb9d7d7086e1004293bef5a51d3e0eefbb941ce5814b3a9ae6d499c10890",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/firmware.mif": "fcc89a80f17fae2196eb0266a18beed7aad4b1a0967709df61b293e1829693a4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v2/src/sdk/include/of_gpu.h": "7e4b105e444b7307b36010da87749eff445650b6983283eeab9223e6af3dc01d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/upload-burst/assembly/sd-root/Assets/sm64upload/common/sm64.ini": "6b7521a2579e02ac638449e9843d1f15fb9d1eb3705a59e0ee5ca178bd3fc5a7"
+  },
+  "actual_compiler_dependencies_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/api/of_smp_tables.d": "025059ee298db7c9b1bb481e40abed76fb3067330976873f73762f2554491094",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/hal/cache.d": "46a2f61256d8d8cdc3727b6ad4af44fcbb1f4cb437716d14ac19016d56953733",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/hal/codec.d": "347e7dec22d5344746e0dd0a2e2c0833817377565f46fdc7b5599fa1a55052e4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/hal/disk.d": "de0d97c78e87a86d9ede80a3ff22264726671f3e99d00f18a02c2dd8eb4c91ed",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/hal/hal.d": "50df3007786cfe88ab77de93418def46ff81ecf6ce555f02f8606e36a199f8ba",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/hal/hid_mouse.d": "ad1d0731fd6201d494507439c554bdeaeb471f2e20e1f34725988df77e68d21a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/hal/link.d": "945dea207d9849c74d80ec78ca91a755046ea452661c7c4c7814ab075b9e1153",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/hal/lzw.d": "8a7126dbee69d74ddc6da428f9d816bb63dddc9340d1def7964b66645dfbc51f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/hal/memtest.d": "42d26d3b7b2acd25a1acaaa19acde91465b73ea05fccec40a4e1fed0c38ba7bc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/hal/mixer.d": "4bc7d801d4d923c8d5f500171c48fa2f60ed5aeb868fdf9ab4086f39b10a9be4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/hal/net.d": "3c885091e70074fa87d73189eb2bbe7ca2eaa076e7f853911f46af891f1e8610",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/hal/platform.d": "2dcd0145d05b8b5bbd91b91db8c2147574ee9250d7d454f9a16ea506459eacdd",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/hal/sw_mixer.d": "27a8aefdd57e2fee0f276a5c7af034d6e735c35e25cc014b7421b8e455ac1d63",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/kernel/bank_preload.d": "d233227b04983b248e1fb0c02ebb9a33791b9a8e952ea32b500a4e9c5b467e7d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/kernel/caps_table.d": "ae8de9735ee80c14a7b0134a7000d8e746386b7afcd5fe20daa98ffb9396488f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/kernel/config.d": "400765fa55dbd43c882e83c0246e8a7b37ce5450b23274d35e7977776e39c1c8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/kernel/irq.d": "27c6ef9d2bf1182b7297a7aa94e253851c524a33e2e8703fdd924adc01a8cce7",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/kernel/loader.d": "800411fd85204a637539f35730d66382d1427a72809fc249dcd010ee14a0be40",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/kernel/main.d": "370a4967b61957a53a98f39d3e9fe16fb68d387a087ffbc641c5a10e2060da1b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/kernel/misaligned.d": "ebd93e650916196fa9dc6ba21982dfd590a927b4bb90d081998d08e46a9ead0f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/kernel/of_malloc.d": "f90c1241a572eea6c30dfc2e2ddc038e02d33821d97cd530bc81018176faa0e5",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/kernel/services_table.d": "6a5b70201d89c8ccfc1d04b9cd6486b4829b5a5bd3d2949244152cf657c1d550",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/kernel/syscall.d": "ab3f07307ca3a8d1280527d9b775466ed96bdf70e4e5aa0b5f17bca7ca893b2a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/lib/iso9660/iso9660_vfs.d": "d59b6a9fc7b1476e76bf882b2e24a6686553ddb5ae2caae690890fd133236573",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/lib/iso9660/lib9660.d": "0c8ed34111bad9bb22f49fc16246045a7570ccedc16c18bf4955dcdea8039b13",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/targets/pocket/analogizer.d": "05e9ad7e271758443ba620d81ff9e75d773d710be98c5aa0bac3f89f07a0f060",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/targets/pocket/audio.d": "8350a628186f97772776a5e5a79792b4c3fbe333a0402d8b5a4b957e38a608bd",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/targets/pocket/boot/boot.d": "18cc0068af59ee7262fdf3637b765e68c7242ff7db330458987237853c181520",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/targets/pocket/disk_boot.d": "4d2990ce253b3fe513ab853d2d866c3869d8d97cfb3cb843fb6c3972525fe92e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/targets/pocket/file.d": "58d8a5aec01a9b8c19e185cea9db9c635b58f9e276a1ff76a989c50e25183e07",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/targets/pocket/input.d": "d5519648df38bdbdec15c117d4b68f77364efef6afd03bb8fa3c9131e5cca689",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/targets/pocket/save.d": "81c18fb9b5d4b96ac8e0a037b376db2876db67ff1b8fa76defb68061a7a01fff",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/targets/pocket/snac.d": "5402848f88db263a349693364e06d3233da69f4e4e4298227d0fe96ef339b9b9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/targets/pocket/terminal.d": "0d71b439e3b8112f0154aacac91fcd4891d99381be515cf2c7be3fb4729b635a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/targets/pocket/timer.d": "ee3aa43cfbce64492f60152dc0856543917248435d1c26a85e4f3771fdcee435",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/src/firmware/os/bld/pocket-sdram-staging/targets/pocket/video.d": "6072b0aee777008673202a1163bf3a18487026d8ec0f3a3da0feb2f71a5b380c"
+  }
+}

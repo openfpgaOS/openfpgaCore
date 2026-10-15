@@ -1,0 +1,29 @@
+{
+  "argv": [
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/qsim/qsim",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/elf/baseline.elf",
+    "--out",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/runs/baseline/main/startup",
+    "--app",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/inputs/main/quake2.app",
+    "--data-dir",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/inputs/main/data",
+    "--profile",
+    "--frames",
+    "20",
+    "--max-insns",
+    "4e9",
+    "--gpu-sched",
+    "eager",
+    "--mem",
+    "flat",
+    "--no-normalize-build-stamp",
+    "--label",
+    "baseline-main-startup"
+  ],
+  "cwd": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/inputs/main",
+  "environment": {
+    "SM64_GEOMETRY_CAP": "1",
+    "Q2_GPU_WORKER_CAP": "1"
+  }
+}

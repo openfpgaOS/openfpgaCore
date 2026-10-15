@@ -1,0 +1,52 @@
+{
+  "capability": "0x42494d32 BIM2",
+  "scope": "Isolated two-bank immutable result snapshots; original native-v3 untouched",
+  "memory": {
+    "banks": 2,
+    "words_per_bank": 256,
+    "word_bits": 32,
+    "combined_words": 512,
+    "expected_M10K": 2,
+    "copy_cycles": "258 from accepted CLAIM with no CPU alias burst active;256 storedwords, explicit mux/BRAM PRIME"
+  },
+  "mmio_words": {
+    "0x0d": "Read BIM2 capability",
+    "0x0e": "Read raw LOAD generation; increments after every successful LOAD independently of snapshots",
+    "0x0f": "Write raw generation token to attempt nonblocking CLAIM and background copy",
+    "0x10": {
+      "access": "Read latched result of most recent CLAIM, remains until next CLAIM/reset",
+      "bits": {
+        "0": "accepted",
+        "1": "chosen bank (valid only if accepted)",
+        "2": "rejected: same generation already has an outstanding bank",
+        "3": "rejected: no free bank",
+        "4": "rejected: result invalid, producer active, token mismatch, count not1..32, or simultaneous LOAD completion",
+        "5": "rejected: copier already reserved/active"
+      }
+    }
+  },
+  "status_bits": {
+    "9": "Raw result copy reservation active; START must wait for this only",
+    "10": "Sticky GPU import/release fault or rejected START while copying; ordinary CLAIM rejection never sets it",
+    "12:11": "Free-bank mask: bit11bank0, bit12bank1"
+  },
+  "gpu_commands": "Unchanged0x5D/0x5E/0x5F; token is full32-bit raw LOAD generation and uniquely selects a nonfree bank; duplicate CLAIM is rejected",
+  "claim_policy": "If accepted, source remains protected until all256words captured; CPU alias in flight drains first. If rejected, application uses ordinary CPU payload immediately and queues no RELEASE. Busy/duplicate/no-free is expected fallback, not permanent disable.",
+  "copy_lifetime": "Raw producer protection ends after final snapshot write, independently of command consumption. New LOAD may overlap old snapshot imports and rasterization.",
+  "gpu_lifetime": "FILLING-token request waits for ready; READY request grants synchronous snapshot read port. Wrong token/source is error. ReadDone releases read port only; orderedRELEASE frees bank after all imports.",
+  "release_policy": "Only matching READY bank without same-bank GPU read/request is freed; stale/premature release sets stickyerror and leaves bank intact",
+  "reset": "Consumer reset discards banks/copier/readowner/claimresult/error but not raw DMA or raw generation; fabricreset additionally resetsgeneration",
+  "software": "Base on BRAM3 complete-batch publication; no GPU-idle admission. Pollcopybit9 before raw START, but neverwaitforbankfree. Readclaimresultbit0 after everyattempt.",
+  "trace_internals": [
+    "bank_valid[1:0]",
+    "bank_ready[1:0]",
+    "bank_token[0:1]",
+    "bank_count[0:1]",
+    "copy_bank",
+    "copy_state",
+    "copy_issue_addr",
+    "copy_capture_addr",
+    "gpu_read_bank",
+    "owner"
+  ]
+}

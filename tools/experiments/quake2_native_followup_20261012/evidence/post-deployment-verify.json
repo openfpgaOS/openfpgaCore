@@ -1,0 +1,15 @@
+{
+  "passed": true,
+  "checked_at_utc": "2026-10-12T23:41:36.599929+00:00",
+  "target": "/run/media/alberto/POCKETDEV",
+  "hashes": {
+    "Assets/quake2/common/quake2.elf": "13c8f43af0ca9ea84b84cf1cd9e824bd6f0c1d39eb2b65dc01337408102862a0",
+    "Cores/thinkelastic.quake2/os30.rbf_r": "542029e588e2a646f20fc98f1dbaf89a667ced48c75de9e89354df74da8622b6",
+    "Cores/thinkelastic.quake2/core.json": "c7760d1844cc3832db168d06be1a9d9e0d0035d3bf0f3fa1258d4200572a6cf3",
+    "Assets/quake2/common/os.bin": "054abd4b3d2c57d55b4ecec23f2fcaa3703206db3df14ebe7793c22941d34ef7",
+    "Cores/thinkelastic.quake2/loader.bin": "fc1f8d37eb0fb322006b4428f0b59d2801c9b74978bd3f24103f5f9bbfca3c99"
+  },
+  "core_version": "1.0.4-native4",
+  "profile": false,
+  "backup": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-native-followup-20261012/deployment-native-v4/backups/before-20261012T234053Z-c1v7e9d3"
+}

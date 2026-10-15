@@ -1,0 +1,206 @@
+{
+  "fit": "/tmp/quake2-gpu-draws-20261013-fit-particles-quake2-v1",
+  "phase_returncodes": {
+    "map": 0,
+    "fit": 0,
+    "asm": 0,
+    "sta": 0,
+    "corners": 3
+  },
+  "configured_clock_MHz": 100,
+  "seed": 2,
+  "constrained_timing_passed": false,
+  "source_recipe_sha256": "d9d483a5e43c62b977a52ac28f13080bdd8028c310ed403aec760b90de986c79",
+  "report_sha256": {
+    "build-receipt.json": "01f55ddd86020020c3c3b4a32c05101783917e869b06363a4a65f31c27e0477b",
+    "map.log": "8c95d85889ef4cf4fe4330d3a54f0a2574d60b090a7d740f2f9771c36589b4d5",
+    "fit.log": "9388c1d829c0e09414e555b4bfc7103c15b7072b00a8deb4628e29b34b4cd5a4",
+    "asm.log": "8aedd6685deafdbe1dbdcfe4b59d73b36998175dfe8dafc5053e9d4f656f5f2b",
+    "sta.log": "d533d1c7049e67ef8358d699944be7058bb834a79e5eaa111e95a4f876281bc8",
+    "corners.log": "152e148a6527e89bf561bb5a65a0f86a96b4694b7c5a6af82b431313a802fa19",
+    "src/fpga/targets/pocket/output_files/ap_core.map.summary": "9e8ef634db5c0bc5432f522e1558d873671906dfff76745b5b122f9d21ac699a",
+    "src/fpga/targets/pocket/output_files/ap_core.fit.summary": "831292b4ffb917a791788ef651a90051a67e0c34ff903c9e4de9ece3261ec33f",
+    "src/fpga/targets/pocket/output_files/ap_core.fit.rpt": "0088863a329d7e16867e40009d7de1567072913edcc6fc4f491e0ec3b68ac282",
+    "src/fpga/targets/pocket/output_files/ap_core.sta.summary": "79a375d82d4c4e7f9d53d37a606bc80d57971708b045b79ceddd94eaa3129f81",
+    "src/fpga/targets/pocket/output_files/ap_core.sta.rpt": "686cb15fbc0ff62fe08b9d3ae32aeb99d5c6905ad3d903bcc764f78bb6482952",
+    "timing/clocks.tsv": "5f3457c19739be801887fc3fe6fcd8101b11d8104c5b2b7dcb645dd4abab0004",
+    "timing/fast_0_hold.rpt": "cf9d60fe65dfea4871d68f85bbdd4d03968fbdcb017347fc04bcc9b8d01ab54a",
+    "timing/fast_0_pulse_width.rpt": "2abc1f2d38351a054f7eb829acf5db8164742601b5e8c63a463ae8ea0ccd2b19",
+    "timing/fast_0_recovery.rpt": "752ffddd945fadce804e45bd6ebf23460297ae45b0c5f76660b51a8dabf29a55",
+    "timing/fast_0_removal.rpt": "d9cd4713608b125b6df94b08557dfdc42f3418f3982404603112541db2e972bc",
+    "timing/fast_0_setup.rpt": "51f2f75ab5c2522bbacf879be3173de49a16f8139042c8a54fe4dbfe92013aa1",
+    "timing/fast_85_hold.rpt": "e9d736a5cc99c7038cb6439917b8e182ed88dd06c462723aec248e2fff83f228",
+    "timing/fast_85_pulse_width.rpt": "2abc1f2d38351a054f7eb829acf5db8164742601b5e8c63a463ae8ea0ccd2b19",
+    "timing/fast_85_recovery.rpt": "55055defafdad8bb3fa13f6d1f7a28682fc47133da31668994d18d3d5ff12134",
+    "timing/fast_85_removal.rpt": "20bf6e012f55a1f69038dfc99981482096803f67cebbb70a7ffb3f33a940119b",
+    "timing/fast_85_setup.rpt": "7a5f3d6aa7657ed1981b5967bc6719aff2103d8ca0cbec305e6f4091f69e3466",
+    "timing/slow_0_hold.rpt": "36026833033e347c36d8307536733e0cacc275cd29a02ed66a42928d9ffc8614",
+    "timing/slow_0_pulse_width.rpt": "2abc1f2d38351a054f7eb829acf5db8164742601b5e8c63a463ae8ea0ccd2b19",
+    "timing/slow_0_recovery.rpt": "e4e27442b60641cb3e11767d06294d141d1853778ed2959a615310f386fe94d3",
+    "timing/slow_0_removal.rpt": "a71d4a33e965fc7cf6b7003e42ff4a5a498b437daaccb3421f3013b148a4096f",
+    "timing/slow_0_setup.rpt": "fc08f9fefcb290adc053a6cc4df5653b6b26489d5e2c9ef9c31efbf24bf0f7d4",
+    "timing/slow_85_hold.rpt": "9f36437f5f1aa7f62ff3359ca5e0f4170c3b9829777da3294fe6dc9ad897402a",
+    "timing/slow_85_pulse_width.rpt": "2abc1f2d38351a054f7eb829acf5db8164742601b5e8c63a463ae8ea0ccd2b19",
+    "timing/slow_85_recovery.rpt": "63afbf3ddaeb71b5e2146e87c9d9fd3d4a22d511e13194753a74b5937c57e22e",
+    "timing/slow_85_removal.rpt": "efb1cd2c2fd30089a3cee49d602d1d626e3db26d3822eab617b857c0a11208fe",
+    "timing/slow_85_setup.rpt": "748423eb548b1a50c462ae4ce77d38c2f88917f9807550983a7b3b0b84e12cc3",
+    "timing/summary.tsv": "e6c0694fd61d58bc34a1099589df5e29e94927c8d75cbd967239cbb18a7d5ea1"
+  },
+  "deployed": false,
+  "fit_successful": true,
+  "ALMs": {
+    "used": 17948,
+    "available": 18480
+  },
+  "M10Ks": {
+    "used": 296,
+    "available": 308
+  },
+  "DSPs": {
+    "used": 32,
+    "available": 66
+  },
+  "main_clock_restricted_Fmax_MHz": {
+    "slow_85": 90.74,
+    "slow_0": 90.13
+  },
+  "all_corner_checks": [
+    {
+      "model": "slow",
+      "temperature": "85",
+      "check": "setup",
+      "slack": "-1.021"
+    },
+    {
+      "model": "slow",
+      "temperature": "85",
+      "check": "hold",
+      "slack": "0.293"
+    },
+    {
+      "model": "slow",
+      "temperature": "85",
+      "check": "recovery",
+      "slack": "4.010"
+    },
+    {
+      "model": "slow",
+      "temperature": "85",
+      "check": "removal",
+      "slack": "0.823"
+    },
+    {
+      "model": "slow",
+      "temperature": "85",
+      "check": "pulse_width",
+      "slack": "0.500"
+    },
+    {
+      "model": "slow",
+      "temperature": "0",
+      "check": "setup",
+      "slack": "-1.095"
+    },
+    {
+      "model": "slow",
+      "temperature": "0",
+      "check": "hold",
+      "slack": "0.286"
+    },
+    {
+      "model": "slow",
+      "temperature": "0",
+      "check": "recovery",
+      "slack": "4.210"
+    },
+    {
+      "model": "slow",
+      "temperature": "0",
+      "check": "removal",
+      "slack": "0.765"
+    },
+    {
+      "model": "slow",
+      "temperature": "0",
+      "check": "pulse_width",
+      "slack": "0.500"
+    },
+    {
+      "model": "fast",
+      "temperature": "85",
+      "check": "setup",
+      "slack": "0.946"
+    },
+    {
+      "model": "fast",
+      "temperature": "85",
+      "check": "hold",
+      "slack": "0.110"
+    },
+    {
+      "model": "fast",
+      "temperature": "85",
+      "check": "recovery",
+      "slack": "6.669"
+    },
+    {
+      "model": "fast",
+      "temperature": "85",
+      "check": "removal",
+      "slack": "0.302"
+    },
+    {
+      "model": "fast",
+      "temperature": "85",
+      "check": "pulse_width",
+      "slack": "0.500"
+    },
+    {
+      "model": "fast",
+      "temperature": "0",
+      "check": "setup",
+      "slack": "0.962"
+    },
+    {
+      "model": "fast",
+      "temperature": "0",
+      "check": "hold",
+      "slack": "0.043"
+    },
+    {
+      "model": "fast",
+      "temperature": "0",
+      "check": "recovery",
+      "slack": "7.048"
+    },
+    {
+      "model": "fast",
+      "temperature": "0",
+      "check": "removal",
+      "slack": "0.274"
+    },
+    {
+      "model": "fast",
+      "temperature": "0",
+      "check": "pulse_width",
+      "slack": "0.500"
+    }
+  ],
+  "worst_setup_ns": -1.095,
+  "worst_hold_ns": 0.043,
+  "worst_recovery_ns": 4.01,
+  "worst_removal_ns": 0.274,
+  "worst_pulse_width_ns": 0.5,
+  "LABs": {
+    "used": 1847,
+    "available": 1848
+  },
+  "worker": {
+    "ALMs": 2172.4,
+    "registers": 1925,
+    "M10Ks": 5,
+    "DSPs": 3
+  },
+  "bitstream_sha256": "a45744ecf2181ccce580eaf0f1afc45e18b94075c7cf62f3b19281209d8d7a7e",
+  "raw_rbf_sha256": "819caaac6b7639dfc319a30b3901d9ab1fd81382d2f0e7687294662d4d208b6a"
+}

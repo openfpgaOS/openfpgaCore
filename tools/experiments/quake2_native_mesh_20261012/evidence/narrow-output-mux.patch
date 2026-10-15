@@ -1,0 +1,15 @@
+--- a/src/fpga/common/gpu_geometry_worker.v
++++ b/src/fpga/common/gpu_geometry_worker.v
+@@ -248,7 +248,11 @@
+         SPACE: emit_data = header;
+         COPY: emit_data = input_data;
+         EMIT: begin
+-            case (index)
++            // The sole entry SY_CLAMP sets index=0; EMIT leaves at 6.
++            // Its upper bits are therefore always zero while writing this
++            // payload. Exclude the shared COPY/LOAD counter's upper decode
++            // from the queue data mux (the measured v2 timing bottleneck).
++            case (index[2:0])
+                 0: emit_data = 32'h5c000006;
+                 1: emit_data = {rgb, 11'd0, slot};
+                 2: emit_data = {sy, sx};

@@ -1,0 +1,9 @@
+{
+  "byte_identical": true,
+  "selected_elf_sha256": "c08bed78555f08252c9694c1f019db968e2ce79809ff41b909cfdd61b30e743b",
+  "rebuilt_elf_sha256": "c08bed78555f08252c9694c1f019db968e2ce79809ff41b909cfdd61b30e743b",
+  "source_bundle_manifest_sha256": "cea83c2374ea5dc6d4c20737f7761228d1f1d80373b148c8edb47eda969f5675",
+  "source_date_epoch": 1791806400,
+  "compiler": "riscv64-elf-gcc15.2.0",
+  "build_log_sha256": "5eb6af2996855889c87347e6da3f80910371654d954a7e29dd344899656bce10"
+}

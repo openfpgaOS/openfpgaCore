@@ -1,0 +1,67 @@
+{
+  "status": "PASS_PORTABLE_ACTUAL_RTL_FROM_FINAL_BUNDLE",
+  "command": [
+    "python3",
+    "/home/alberto/Repos/openfpgaCore/tools/experiments/os30_priority_mesh_20261012/run_tests.py",
+    "--output",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/package/final-tests-v1"
+  ],
+  "cases": {
+    "wrapper": {
+      "status": "PASS",
+      "cases": 77,
+      "checks": 16810,
+      "cycles": 81622,
+      "AXI_bursts": 650
+    },
+    "combined": {
+      "status": "PASS",
+      "cases": 8,
+      "checks": 54919,
+      "cycles": 29958,
+      "AXI_bursts": 14,
+      "ingress_full_cycles": 1734,
+      "output_full_cycles": 4582
+    }
+  },
+  "checks": 71729,
+  "bundle_source_sha256": {
+    "recipes/wrapper-sources.json": "c24d9b83d3686fd72e55bda476cc0c2604271b886e556bfd45546d8c28f73d44",
+    "rtl/GeometryFmaProbe.v": "348d11609de14326dc9408c11e39a385a85a4e0678eaaf5d69f39d6cfba38088",
+    "rtl/geometry_async_mesh.v": "a0dfbfb6b047c1be06dc2bff10df9071ecbebe73cbf355579cff3256098cf123",
+    "rtl/geometry_color_rtz.v": "27025e32c4c8f42168db8e49149d9ee7cd2255d606ddb7ed0f5c932bedd1a335",
+    "rtl/geometry_float_batch_recip.v": "c3cc22d4aa4559d0cfe087c6556361eec22e363fbff79072bb65a1028c3dfd9b",
+    "rtl/geometry_float_cull_mem.v": "53163df4519861d2ffa3d115b45656a90f03e6ef869a02188d1344710931f2ac",
+    "rtl/geometry_import_convert.v": "3beac876e469ec45ff3d3e81c9645671dcb92737d1f84dd188ca454fbbcf7526",
+    "rtl/geometry_mesh_command_fetch.v": "a740d2c2d961bcbe3421e7de594ca842b3c3caf2a38dff7de89ff067c9b93cf8",
+    "rtl/geometry_mesh_packet.v": "59781cee057d8fbeaec43f96ed9eb4cca8b44484be8dd125f0466a1080b694fc",
+    "rtl/geometry_mesh_queue.v": "a3ac412006c503332f4a6d8895155d869f367bb39924e8a6a4c4245d1ff230e4",
+    "rtl/geometry_mesh_raw_frontend.v": "cfe92bd326e9b8b60ce118f8d4cba0f734aec49d1eb8e1c270e82548f93f94b3",
+    "rtl/geometry_mesh_stream.v": "18947ec0aed3901031e03b536815cc6f6165617e7f52a036377e8ddbfa8fa7b7",
+    "rtl/geometry_mesh_task_ctrl.v": "49a70c3174f91d698916dd6eca0e826f00e91a6f641cfc015ed30c0848740133",
+    "rtl/geometry_mesh_task_engine.v": "26a0022220c1eba04b1df5b778e081a48895dfd370a8a39b61d36a043de39eef",
+    "rtl/geometry_raw_load.v": "9a7faaf2558b6fb394bc3d06a06cbf0607b024ea4cb2326b1c97651c5537831a",
+    "rtl/geometry_transform_light.v": "6987e27771c84173b31eb53e9f3bce4e7337437414548ef089f3adfe430c810f",
+    "rtl/gpu_core.v": "ed2be6785f168e7604fbaabad8361aad4c68e3d42101b43575947e9b59020027",
+    "rtl/gpu_mesh_bridge.v": "8c02f8dacee2e4ff57d568bc9b968bb8b4109aa622739e3bf33804d39dc9cad9",
+    "rtl/gpu_mesh_job_front.v": "8257e2cfe49d7d4186206fa539d7563de829cd63a695a0ebefefca0f631a3d99",
+    "rtl/phase10_float_recip2.v": "d68bc3fcdcb750f88cebf9aa8ed890a499d12210cbd50fe9d3a049c168bea5cc",
+    "rtl/phase10_load_alias.v": "2aedc1e5a1c3a3f2b2c7a535633e9bbd598494bcb9692a4f8269bb9d809e8ce0",
+    "rtl/phase10_raw_vtx_dma.v": "ce51296a880ef212cacffbe4bb4c1728fc1bc9976d3504dd91883882d4316f81",
+    "run_tests.py": "21e99595612595656a62e3449b564d730fa9ecae3290f94764b6aa1e7350b0f6",
+    "tests/combined/tb_async_combined.v": "22816ffc01a34e610f162ca7b900d87c66a1345a795658f8060210b76f8b12f7",
+    "tests/combined/test_async_combined.cpp": "397b46aed71e5dac0dc7617dd8ecf2e2b81606360c8f913566af14de76176584",
+    "tests/wrapper/test_async_wrapper.cpp": "8cdbc89052f5c0e2b744ba6446d9592d9df21b2a64d577081f7a7503957295cb"
+  },
+  "sanitizers": [
+    "address",
+    "undefined"
+  ],
+  "leak_sanitizer": "disabled by inherited portable runner; address/undefined checks active",
+  "external_logs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/package/final-tests-v1/wrapper/build.log": "b8bde43a8e5aa7becb629f8d0cdebb466711d23fbbd0589308538341fe7cd6db",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/package/final-tests-v1/wrapper/run.log": "e8332cf18a8140085d1662fdc247adc6e2c1ecb667444a79b6fec56033a88305",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/package/final-tests-v1/combined/build.log": "525a11c02418e8c996f82a48c2235c491cff294edbd020e309046682fc6ecd32",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/package/final-tests-v1/combined/run.log": "86d5490a88d2e1e747d8bd5b3e70ca83339677cb88b4d33e3c44e826acc8ace4"
+  }
+}

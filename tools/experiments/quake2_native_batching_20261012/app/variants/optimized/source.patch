@@ -1,0 +1,882 @@
+--- a/src/quake2/openfpga/of_gl1.c
++++ b/src/quake2/openfpga/of_gl1.c
+@@ -1400,8 +1400,9 @@
+ 	uint32_t hash = xyz[0] * 0x9e3779b1u;
+ 	hash = (hash ^ xyz[1]) * 0x85ebca6bu;
+ 	hash = (hash ^ xyz[2]) * 0xc2b2ae35u;
+-	hash ^= hash >> 16;
+-	ofgl_world_position_t *entry = &ofgl_world_positions[hash & 127u];
++	/* High product bits include float exponent/sign and all mantissa bits;
++	 * low product bits made opposite/regular grid coordinates collide. */
++	ofgl_world_position_t *entry = &ofgl_world_positions[hash >> 25];
+ 	if (entry->epoch != ofgl_world_epoch || entry->xyz[0] != xyz[0] ||
+ 		entry->xyz[1] != xyz[1] || entry->xyz[2] != xyz[2])
+ 	{
+--- a/src/quake2/openfpga/trig_of.c
++++ b/src/quake2/openfpga/trig_of.c
+@@ -12,7 +12,7 @@
+ 	uint32_t argument, valid;
+ 	float value[3];
+ } of_trig_entry_t;
+-static of_trig_entry_t of_trig_cache[128];
++static of_trig_entry_t of_trig_cache[512];
+ 
+ static inline of_trig_entry_t *of_trig_entry(float x, uint32_t *bits)
+ {
+@@ -20,7 +20,7 @@
+ 	/* Fold every exponent/sign bit before multiplication: opposite-sign
+ 	 * cull/draw angles and powers of two must not all collide. */
+ 	uint32_t hash = (*bits ^ (*bits >> 16)) * 0x9e3779b1u;
+-	unsigned slot = hash >> 25;
++	unsigned slot = hash >> 23;
+ 	of_trig_entry_t *entry = &of_trig_cache[slot];
+ 	if (entry->argument != *bits)
+ 	{
+--- a/src/quake2/src/client/cl_particles.c
++++ b/src/quake2/src/client/cl_particles.c
+@@ -55,6 +55,9 @@
+ 	int i, j;
+ 	cparticle_t *p;
+ 	float d;
++#ifdef YQ2_OPENFPGA
++	int random[9];
++#endif
+ 
+ 	for (i = 0; i < count; i++)
+ 	{
+@@ -68,21 +71,50 @@
+ 		p->next = active_particles;
+ 		active_particles = p;
+ 
++#ifdef YQ2_OPENFPGA
++		randk_batch(random, 9);
++#endif
+ 		p->time = cl.time;
++#ifdef YQ2_OPENFPGA
++		p->color = color + (random[0] & 7);
++		d = random[1] & 31;
++#else
+ 		p->color = color + (randk() & 7);
+ 		d = randk() & 31;
++#endif
+ 
+ 		for (j = 0; j < 3; j++)
+ 		{
++#ifdef YQ2_OPENFPGA
++			/* Match the deployed RV32 fast-math operation order. Removing
++			 * the RNG calls otherwise allows a different position FMA. */
++			float position = __builtin_fmaf(d, dir[j],
++			                                 (float)((random[2 + 2*j] & 7) - 4));
++#if defined(__riscv)
++			__asm__("" : "+f"(position));
++#endif
++			p->org[j] = org[j] + position;
++			float velocity = __builtin_fmaf((float)(random[3 + 2*j] & 32767),
++			                                 2.0f / 32767.0f, -1.0f);
++#if defined(__riscv)
++			__asm__("" : "+f"(velocity));
++#endif
++			p->vel[j] = velocity * 20;
++#else
+ 			p->org[j] = org[j] + ((randk() & 7) - 4) + d * dir[j];
+ 			p->vel[j] = crandk() * 20;
++#endif
+ 		}
+ 
+ 		p->accel[0] = p->accel[1] = 0;
+ 		p->accel[2] = -PARTICLE_GRAVITY + 0.2f;
+ 		p->alpha = 1.0;
+ 
++#ifdef YQ2_OPENFPGA
++		p->alphavel = -1.0 / (0.5 + ((random[8] & 32767) * (1.0 / 32767)) * 0.3);
++#else
+ 		p->alphavel = -1.0 / (0.5 + frandk() * 0.3);
++#endif
+ 	}
+ }
+ 
+--- a/src/quake2/src/client/refresh/gl1/gl1_model.c
++++ b/src/quake2/src/client/refresh/gl1/gl1_model.c
+@@ -636,6 +636,26 @@
+ 	}
+ }
+ 
++#ifdef YQ2_OPENFPGA
++static void
++Mod_BuildVisibilityLinks(model_t *model)
++{
++	int count = model->numnodes + model->numleafs;
++	of_vislink_t *links = Hunk_Alloc(count * sizeof(*links));
++	short *clusters = Hunk_Alloc(model->numleafs * sizeof(*clusters));
++	model->of_vislinks = links;
++	model->of_leafclusters = clusters;
++	for (int i = 0; i < count; i++)
++	{
++		mnode_t *node = i < model->numnodes ? model->nodes + i :
++			(mnode_t *)(model->leafs + i - model->numnodes);
++		links[i].stamp = &node->visframe;
++		links[i].parent = node->parent ? links + (node->parent - model->nodes) : NULL;
++	}
++	for (int i = 0; i < model->numleafs; i++) clusters[i] = model->leafs[i].cluster;
++}
++#endif
++
+ static void
+ Mod_LoadMarksurfaces(model_t *loadmodel, byte *mod_base, lump_t *l)
+ {
+@@ -716,6 +736,12 @@
+ 	hunkSize += Mod_CalcLumpHunkSize(&header->lumps[LUMP_VISIBILITY], 1, 1, 0);
+ 	hunkSize += Mod_CalcLumpHunkSize(&header->lumps[LUMP_LEAFS], sizeof(dleaf_t), sizeof(mleaf_t), 0);
+ 	hunkSize += Mod_CalcLumpHunkSize(&header->lumps[LUMP_NODES], sizeof(dnode_t), sizeof(mnode_t), 0);
++#ifdef YQ2_OPENFPGA
++	/* Two compact arrays owned and freed with this map's existing hunk. */
++	hunkSize += Mod_CalcLumpHunkSize(&header->lumps[LUMP_LEAFS], sizeof(dleaf_t), sizeof(short), 0);
++	hunkSize += Mod_CalcLumpHunkSize(&header->lumps[LUMP_LEAFS], sizeof(dleaf_t), sizeof(of_vislink_t), 0);
++	hunkSize += Mod_CalcLumpHunkSize(&header->lumps[LUMP_NODES], sizeof(dnode_t), sizeof(of_vislink_t), 0);
++#endif
+ 	hunkSize += Mod_CalcLumpHunkSize(&header->lumps[LUMP_MODELS], sizeof(dmodel_t), sizeof(model_t), 0);
+ 
+ 	mod->extradata = Hunk_Begin(hunkSize);
+@@ -741,6 +767,9 @@
+ 	Mod_LoadNodes(mod->name, mod->planes, mod->numplanes, mod->leafs,
+ 		mod->numleafs, &mod->nodes, &mod->numnodes, mod_base,
+ 		&header->lumps[LUMP_NODES]);
++#ifdef YQ2_OPENFPGA
++	Mod_BuildVisibilityLinks(mod);
++#endif
+ 	Mod_LoadSubmodels (mod, mod_base, &header->lumps[LUMP_MODELS]);
+ 	mod->numframes = 2; /* regular and alternate animation */
+ }
+--- a/src/quake2/src/client/refresh/gl1/gl1_surf.c
++++ b/src/quake2/src/client/refresh/gl1/gl1_surf.c
+@@ -809,6 +809,65 @@
+ #endif
+ }
+ 
++#ifdef YQ2_OPENFPGA
++/* Preserve the original image-index draw order without touching every image's
++ * cold registration/chain cache line on each pass.  Bits are cleared only when
++ * the corresponding chain is consumed; an unregistered image retains its chain
++ * exactly as in the original scan.  Image-slot reuse can leave a harmless bit. */
++static unsigned of_world_texture_bits[(MAX_GLTEXTURES + 31) / 32];
++
++static int
++R_WorldTextureChainNext(int previous)
++{
++	unsigned i = (unsigned)(previous + 1);
++	unsigned word = i >> 5;
++	unsigned bits;
++
++	if (i >= (unsigned)numgltextures)
++	{
++		return numgltextures;
++	}
++
++	bits = of_world_texture_bits[word] & (~0u << (i & 31));
++	for (;;)
++	{
++		if (bits)
++		{
++			i = (word << 5) + (unsigned)__builtin_ctz(bits);
++			return i < (unsigned)numgltextures ? (int)i : numgltextures;
++		}
++
++		if (++word >= ((unsigned)numgltextures + 31) / 32)
++		{
++			return numgltextures;
++		}
++		bits = of_world_texture_bits[word];
++	}
++}
++
++static void
++R_WorldTextureChainAdd(image_t *image, msurface_t *surf)
++{
++	if (!image->texturechain)
++	{
++		unsigned i = (unsigned)(image - gltextures);
++		of_world_texture_bits[i >> 5] |= 1u << (i & 31);
++	}
++	surf->texturechain = image->texturechain;
++	image->texturechain = surf;
++}
++
++static void
++R_WorldTextureChainClear(image_t *image, int i)
++{
++	image->texturechain = NULL;
++	of_world_texture_bits[(unsigned)i >> 5] &= ~(1u << (i & 31));
++}
++#else
++#define R_WorldTextureChainNext(previous) ((previous) + 1)
++#define R_WorldTextureChainClear(image, i) ((image)->texturechain = NULL)
++#endif
++
+ static void
+ R_DrawTextureChains(void)
+ {
+@@ -820,8 +879,10 @@
+ 
+ 	if (!gl_config.multitexture)	// classic path
+ 	{
+-		for (i = 0, image = gltextures; i < numgltextures; i++, image++)
+-		{
++		for (i = R_WorldTextureChainNext(-1); i < numgltextures;
++			i = R_WorldTextureChainNext(i))
++		{
++			image = &gltextures[i];
+ 			if (!image->registration_sequence)
+ 			{
+ 				continue;
+@@ -842,14 +903,16 @@
+ 				R_RenderBrushPoly(s);
+ 			}
+ 
+-			image->texturechain = NULL;
++			R_WorldTextureChainClear(image, i);
+ 		}
+ 		R_ApplyGLBuffer();	// Flush the last batched array
+ 	}
+ 	else	// multitexture
+ 	{
+-		for (i = 0, image = gltextures; i < numgltextures; i++, image++)
+-		{
++		for (i = R_WorldTextureChainNext(-1); i < numgltextures;
++			i = R_WorldTextureChainNext(i))
++		{
++			image = &gltextures[i];
+ 			if (!image->registration_sequence || !image->texturechain)
+ 			{
+ 				continue;
+@@ -870,8 +933,10 @@
+ 
+ 		R_EnableMultitexture(false);	// force disabling, SURF_DRAWTURB surfaces may not exist
+ 
+-		for (i = 0, image = gltextures; i < numgltextures; i++, image++)
+-		{
++		for (i = R_WorldTextureChainNext(-1); i < numgltextures;
++			i = R_WorldTextureChainNext(i))
++		{
++			image = &gltextures[i];
+ 			if (!image->registration_sequence || !image->texturechain)
+ 			{
+ 				continue;
+@@ -886,7 +951,7 @@
+ 				}
+ 			}
+ 
+-			image->texturechain = NULL;
++			R_WorldTextureChainClear(image, i);
+ 		}
+ 		R_ApplyGLBuffer();
+ 	}
+@@ -1225,8 +1290,12 @@
+ 		{
+ 			/* the polygon is visible, so add it to the texture sorted chain */
+ 			image = R_TextureAnimation(currententity, surf->texinfo);
++#ifdef YQ2_OPENFPGA
++			R_WorldTextureChainAdd(image, surf);
++#else
+ 			surf->texturechain = image->texturechain;
+ 			image->texturechain = surf;
++#endif
+ 
+ 			if (gl_config.multitexture && !(surf->texinfo->flags & SURF_WARP))	// needed for R_RegenAllLightmaps()
+ 			{
+@@ -1439,6 +1508,28 @@
+ 		vis = fatvis;
+ 	}
+ 
++#ifdef YQ2_OPENFPGA
++	if (r_worldmodel->of_vislinks && r_worldmodel->of_leafclusters)
++	{
++		/* Preserve leaf order, exact live stamp checks and parent stopping.
++		 * Cold invisible leaves no longer pull a complete leaf cache line;
++		 * neighboring topology entries share a line while walking parents. */
++		for (i = 0; i < r_worldmodel->numleafs; i++)
++		{
++			cluster = r_worldmodel->of_leafclusters[i];
++			if (cluster == -1 || !(vis[cluster >> 3] & (1 << (cluster & 7)))) continue;
++			of_vislink_t *link = r_worldmodel->of_vislinks + r_worldmodel->numnodes + i;
++			do
++			{
++				if (*link->stamp == r_visframecount) break;
++				*link->stamp = r_visframecount;
++				link = link->parent;
++			} while (link);
++		}
++		return;
++	}
++#endif
++
+ 	for (i = 0, leaf = r_worldmodel->leafs;
+ 		 i < r_worldmodel->numleafs;
+ 		 i++, leaf++)
+--- a/src/quake2/src/client/refresh/gl1/header/model.h
++++ b/src/quake2/src/client/refresh/gl1/header/model.h
+@@ -95,6 +95,16 @@
+ 
+ /* Whole model */
+ 
++#ifdef YQ2_OPENFPGA
++/* Immutable map topology kept together for PVS marking. The stamp still lives
++ * in the original node/leaf, so traversal and other consumers are unchanged. */
++typedef struct of_vislink_s
++{
++	int *stamp;
++	struct of_vislink_s *parent;
++} of_vislink_t;
++#endif
++
+ typedef struct model_s
+ {
+ #ifdef YQ2_OPENFPGA
+@@ -129,6 +139,10 @@
+ 
+ 	int numleafs; /* number of visible leafs, not counting 0 */
+ 	mleaf_t *leafs;
++#ifdef YQ2_OPENFPGA
++	short *of_leafclusters;
++	of_vislink_t *of_vislinks; /* nodes first, then leaves */
++#endif
+ 
+ 	int numvertexes;
+ 	mvertex_t *vertexes;
+--- a/src/quake2/src/common/header/shared.h
++++ b/src/quake2/src/common/header/shared.h
+@@ -422,6 +422,7 @@
+ 
+ /* Random number generator */
+ int randk(void);
++void randk_batch(int *out, unsigned count);
+ float frandk(void);
+ float crandk(void);
+ void randk_seed(void);
+--- a/src/quake2/src/common/shared/rand.c
++++ b/src/quake2/src/common/shared/rand.c
+@@ -25,13 +25,15 @@
+ #define QSIZE 0x200000
+ #endif
+ #define CNG (cng = 6906969069ULL * cng + 13579)
+-#define XS (xs ^= (xs << 13), xs ^= (xs >> 17), xs ^= (xs << 43))
+-#define KISS (B64MWC() + CNG + XS)
++/* xs was static-zero-initialized and was never assigned a nonzero seed.
++ * Its xorshift recurrence therefore returned zero on every call, including
++ * every reseed. Omit that dead component while preserving the complete MWC
++ * and CNG state (and thus the exact sequence across future randk_seed calls). */
++#define KISS (B64MWC() + CNG)
+ 
+ static uint64_t QARY[QSIZE];
+ static int j;
+ static uint64_t carry;
+-static uint64_t xs;
+ static uint64_t cng;
+ 
+ static uint64_t
+@@ -46,19 +48,52 @@
+ 	return QARY[j] = t - x;
+ }
+ 
++/* Preserve the original RV32 two's-complement result for INT32_MIN
++ * without invoking signed-negation overflow. The bit copy also avoids an
++ * implementation-defined out-of-range unsigned-to-signed conversion. */
++static inline int
++randk_abs(uint32_t value)
++{
++    uint32_t magnitude = (value >> 31) ? 0u - value : value;
++    int32_t result;
++    __builtin_memcpy(&result, &magnitude, sizeof result);
++    return result;
++}
++
+ /*
+  * Generate a pseudorandom
+  * integer >0.
+  */
+-int
++/* Preserve the existing call boundary: inlining the smaller generator under
++ * fast-math can unroll particle loops and change their float reassociation. */
++int __attribute__((noinline))
+ randk(void)
+ {
+-	int r;
++	return randk_abs((uint32_t)KISS);
++}
+ 
+-	r = (int)KISS;
+-	r = (r < 0) ? (r * -1) : r;
+-
+-	return r;
++/* Consume exactly count outputs while retaining generator state in registers.
++ * Callers must reserve their output work before calling: unused values cannot
++ * be discarded without changing the global gameplay random stream. */
++void __attribute__((noinline))
++randk_batch(int *out, unsigned count)
++{
++    int index = j;
++    uint64_t local_carry = carry;
++    uint64_t local_cng = cng;
++    for (unsigned n = 0; n < count; ++n)
++    {
++        index = (index + 1) & (QSIZE - 1);
++        uint64_t x = QARY[index];
++        uint64_t t = (x << 28) + local_carry;
++        local_carry = (x >> 36) - (t < x);
++        QARY[index] = t - x;
++        local_cng = 6906969069ULL * local_cng + 13579;
++        out[n] = randk_abs((uint32_t)(QARY[index] + local_cng));
++    }
++    j = index;
++    carry = local_carry;
++    cng = local_cng;
+ }
+ 
+ /*
+@@ -89,10 +124,10 @@
+ {
+ 	uint64_t i;
+ 
+-	/* Seed QARY[] with CNG+XS: */
++	/* Seed QARY[] with CNG (the original XS component was always zero): */
+ 	for (i = 0; i < QSIZE; i++)
+ 	{
+-		QARY[i] = CNG + XS;
++		QARY[i] = CNG;
+ 	}
+ 
+ 	/* Run through several rounds
+--- a/tools/check_quake2_renderer.py
++++ b/tools/check_quake2_renderer.py
+@@ -20,6 +20,8 @@
+     env = dict(os.environ, ASAN_OPTIONS="detect_leaks=0", UBSAN_OPTIONS="halt_on_error=1")
+     for name, extra in (
+         ("renderer", []),
++        ("texturebits", []),
++        ("visibility", []),
+         ("particledirect", []),
+         ("worldgeometry", []),
+         ("worldposition", []),
+@@ -38,6 +40,8 @@
+         ("sound", []),
+         ("soundbackend", []),
+         ("trigcache", []),
++        ("rng", []),
++        ("rngparticles", ["-fsingle-precision-constant"]),
+         ("network", []),
+         ("videomenu", []),
+         ("input", []),
+--- /dev/null
++++ b/tools/tests/quake2_rng_reference.inc
+@@ -0,0 +1,105 @@
++/*
++ * KISS PRNG (c) 2011 Shinobu
++ *
++ * This file was optained from zuttobenkyou.wordpress.com
++ * and modified by the Yamagi Quake II developers.
++ *
++ * LICENSE: Public domain
++ *
++ * =======================================================================
++ *
++ * KISS PRNG, as devised by Dr. George Marsaglia
++ *
++ * =======================================================================
++ */
++
++#include <stdint.h>
++
++#ifdef YQ2_OPENFPGA
++/* The upstream 2M-entry (16 MB!) lag table eats a third of the app's
++ * SDRAM window. 128K entries (1 MB) still gives an astronomically long
++ * MWC period — far beyond anything gameplay can consume — and seeds
++ * 16x faster at boot. */
++#define QSIZE 0x20000
++#else
++#define QSIZE 0x200000
++#endif
++#define CNG (cng = 6906969069ULL * cng + 13579)
++#define XS (xs ^= (xs << 13), xs ^= (xs >> 17), xs ^= (xs << 43))
++#define KISS (B64MWC() + CNG + XS)
++
++static uint64_t QARY[QSIZE];
++static int j;
++static uint64_t carry;
++static uint64_t xs;
++static uint64_t cng;
++
++static uint64_t
++B64MWC(void)
++{
++	uint64_t t, x;
++
++	j = (j + 1) & (QSIZE - 1);
++	x = QARY[j];
++	t = (x << 28) + carry;
++	carry = (x >> 36) - (t < x);
++	return QARY[j] = t - x;
++}
++
++/*
++ * Generate a pseudorandom
++ * integer >0.
++ */
++int
++randk(void)
++{
++	int r;
++
++	r = (int)KISS;
++	r = (r < 0) ? (r * -1) : r;
++
++	return r;
++}
++
++/*
++ * Generate a pseudorandom
++ * signed float between
++ * 0 and 1.
++ */
++float
++frandk(void)
++{
++	return (randk()&32767)* (1.0/32767);
++}
++
++/* Generate a pseudorandom
++ * float between -1 and 1.
++ */
++float
++crandk(void)
++{
++	return (randk()&32767)* (2.0/32767) - 1;
++}
++
++/*
++ * Seeds the PRNG
++ */
++void
++randk_seed(void)
++{
++	uint64_t i;
++
++	/* Seed QARY[] with CNG+XS: */
++	for (i = 0; i < QSIZE; i++)
++	{
++		QARY[i] = CNG + XS;
++	}
++
++	/* Run through several rounds
++	   to warm up the state */
++	for (i = 0; i < 256; i++)
++	{
++		randk();
++	}
++}
++
+--- /dev/null
++++ b/tools/tests/quake2_rng_test.c
+@@ -0,0 +1,88 @@
++/* Compare public calls and every retained state byte with the frozen original,
++ * including use before seeding, lag-table wraps and repeated seed calls. */
++#include <assert.h>
++#include <stdio.h>
++#include <string.h>
++#define randk ref_randk
++#define frandk ref_frandk
++#define crandk ref_crandk
++#define randk_seed ref_randk_seed
++#define QARY ref_QARY
++#define j ref_j
++#define carry ref_carry
++#define xs ref_xs
++#define cng ref_cng
++#define B64MWC ref_B64MWC
++#include "quake2_rng_reference.inc"
++#undef randk
++#undef frandk
++#undef crandk
++#undef randk_seed
++#undef QARY
++#undef j
++#undef carry
++#undef xs
++#undef cng
++#undef B64MWC
++#undef CNG
++#undef XS
++#undef KISS
++#undef QSIZE
++#include "../../src/quake2/src/common/shared/rand.c"
++
++static void state_exact(void)
++{
++    assert(j == ref_j && carry == ref_carry && cng == ref_cng);
++    assert(ref_xs == 0);
++    assert(!memcmp(QARY, ref_QARY, sizeof(QARY)));
++}
++int main(void)
++{
++    const uint32_t values[] = {0, 1, 0x7fffffffu, 0x80000000u, 0xffffffffu};
++    const uint32_t magnitudes[] = {0, 1, 0x7fffffffu, 0x80000000u, 1};
++    for (unsigned k = 0; k < sizeof(values) / sizeof(values[0]); ++k)
++    {
++        int32_t value = randk_abs(values[k]);
++        uint32_t bits;
++        memcpy(&bits, &value, sizeof bits);
++        assert(bits == magnitudes[k]);
++    }
++    unsigned calls = 0;
++    static int block[131073];
++    const unsigned sizes[] = {0, 1, 9, 1024, 131073};
++    for (unsigned k = 0; k < sizeof(sizes) / sizeof(sizes[0]); ++k)
++    {
++        randk_batch(block, sizes[k]);
++        for (unsigned n = 0; n < sizes[k]; ++n)
++            assert(block[n] == ref_randk());
++        calls += sizes[k];
++        state_exact();
++    }
++    for (unsigned round = 0; round < 16; ++round)
++    {
++        if (round) { randk_seed(); ref_randk_seed(); }
++        state_exact();
++        for (unsigned i = 0; i < 200000 + round * 317; ++i)
++        {
++            if (i % 11 == 0)
++            {
++                int values[9];
++                randk_batch(values, 0);
++                randk_batch(values, 9);
++                for (unsigned n = 0; n < 9; ++n)
++                    assert(values[n] == ref_randk());
++                calls += 8;
++            }
++            else if (i % 5 == 1 || i % 5 == 3)
++            {
++                float a = i % 5 == 1 ? frandk() : crandk();
++                float b = i % 5 == 1 ? ref_frandk() : ref_crandk();
++                assert(!memcmp(&a, &b, sizeof(a)));
++            }
++            else assert(randk() == ref_randk());
++            ++calls;
++        }
++        state_exact();
++    }
++    printf("PASS: %u exact mixed RNG outputs, initial state, full lag-state equality, wraps and15 reseeds\n", calls);
++}
+--- /dev/null
++++ b/tools/tests/quake2_rngparticles_test.c
+@@ -0,0 +1,69 @@
++/* Verify the actual particle caller consumes exactly its allocated particles'
++ * nine outputs, preserves the deployed FP operation order, and leaves global
++ * generator state identical across exhausted pools and reseeds. */
++#define main rng_sequence_test_main
++#include "quake2_rng_test.c"
++#undef main
++#include <stddef.h>
++#include "../../src/quake2/src/client/cl_particles.c"
++client_state_t cl;
++
++static void exact_float(float a, float b)
++{
++    assert(!memcmp(&a, &b, sizeof a));
++}
++
++int main(void)
++{
++    unsigned produced = 0;
++    for (unsigned pass = 0; pass < 2000; ++pass)
++    {
++        if (pass % 251 == 0) { randk_seed(); ref_randk_seed(); }
++        unsigned capacity = pass % 17;
++        int count = (int)(pass * 13 % 31) - 3;
++        unsigned expected = count < 0 ? 0 : (unsigned)count;
++        if (expected > capacity) expected = capacity;
++        cl_numparticles = capacity;
++        memset(particles, 0, sizeof(particles));
++        active_particles = free_particles = NULL;
++        CL_ClearParticles();
++        cl.time = (int)pass * 17;
++        vec3_t org = {pass * .13f - 140, pass * -.21f + 50, pass * .017f};
++        vec3_t dir = {pass * .011f - 10, 13 - pass * .013f, pass * -.005f};
++        CL_ParticleEffect(org, dir, 100, count);
++        for (unsigned i = 0; i < expected; ++i)
++        {
++            int r[9];
++            for (unsigned n = 0; n < 9; ++n) r[n] = ref_randk();
++            cparticle_t *p = particles + i;
++            exact_float(p->time, (float)cl.time);
++            exact_float(p->color, (float)(100 + (r[0] & 7)));
++            float d = r[1] & 31;
++            for (unsigned n = 0; n < 3; ++n)
++            {
++                float position = __builtin_fmaf(d, dir[n], (float)((r[2+2*n] & 7)-4));
++                exact_float(p->org[n], org[n] + position);
++                float velocity = __builtin_fmaf((float)(r[3+2*n] & 32767), 2.0f/32767.0f, -1.0f);
++                exact_float(p->vel[n], velocity * 20);
++            }
++            exact_float(p->accel[0], 0);
++            exact_float(p->accel[1], 0);
++            exact_float(p->accel[2], -PARTICLE_GRAVITY + .2f);
++            exact_float(p->alpha, 1);
++            exact_float(p->alphavel, -1.0 / (0.5 + ((r[8] & 32767) * (1.0 / 32767)) * 0.3));
++        }
++        assert(active_particles == (expected ? particles + expected - 1 : NULL));
++        assert(free_particles == (expected < capacity ? particles + expected : NULL));
++        cparticle_t *link = active_particles;
++        for (unsigned n = expected; n; --n)
++        {
++            assert(link == particles + n - 1);
++            link = link->next;
++        }
++        assert(link == NULL);
++        state_exact();
++        produced += expected;
++    }
++    printf("PASS: %u exact batched particles; 2000 full/partial/exhausted pools, zero/negative counts, reseeds and complete PRNG state equality\n", produced);
++    return 0;
++}
+--- /dev/null
++++ b/tools/tests/quake2_texturebits_test.c
+@@ -0,0 +1,76 @@
++/* Sparse world texture enumeration must preserve the original image order,
++ * chains and consumption rules across registration changes and slot reuse. */
++#include "../../src/quake2/src/client/refresh/gl1/gl1_surf.c"
++#include <assert.h>
++#include <stdlib.h>
++
++image_t gltextures[MAX_GLTEXTURES];
++int numgltextures;
++static unsigned rng = 983171;
++static unsigned Random(void) { rng = rng * 1664525u + 1013904223u; return rng; }
++
++int main(void)
++{
++    enum {FRAMES = 4000, INSERTS = 16};
++    msurface_t *pool = calloc(FRAMES * INSERTS, sizeof(*pool));
++    msurface_t *heads[MAX_GLTEXTURES] = {0};
++    assert(pool);
++    for (int frame = 0; frame < FRAMES; ++frame)
++    {
++        /* Include 0/1/31/32/33/full counts and arbitrary word boundaries. */
++        static const int sizes[] = {0, 1, 31, 32, 33, 63, 64, 65, 1023, 1024};
++        numgltextures = frame % 3 ? (int)(Random() % 1025) : sizes[frame % 10];
++        for (int k = 0; k < 24; ++k)
++        {
++            unsigned i = Random() % MAX_GLTEXTURES;
++            if (Random() & 1)
++            {
++                /* Free or reuse a slot. A stale sparse bit is harmless. */
++                memset(&gltextures[i], 0, sizeof(gltextures[i]));
++                heads[i] = NULL;
++            }
++            gltextures[i].registration_sequence = (Random() % 3 != 0);
++        }
++        for (int k = 0; k < INSERTS && numgltextures; ++k)
++        {
++            unsigned i = Random() % (unsigned)numgltextures;
++            msurface_t *s = pool + frame * INSERTS + k;
++            R_WorldTextureChainAdd(&gltextures[i], s);
++            assert(s->texturechain == heads[i]);
++            heads[i] = s;
++        }
++        /* The first multitexture pass must leave chains intact. Classic mode
++         * consumes in its sole pass; multitexture consumes in its second. */
++        int passes = 1 + (frame & 1);
++        for (int pass = 0; pass < passes; ++pass)
++        {
++            int reference = 0;
++            for (int i = R_WorldTextureChainNext(-1); i < numgltextures;
++                 i = R_WorldTextureChainNext(i))
++            {
++                if (!gltextures[i].registration_sequence || !gltextures[i].texturechain)
++                    continue;
++                while (reference < numgltextures &&
++                       (!gltextures[reference].registration_sequence || !heads[reference]))
++                    ++reference;
++                assert(reference == i);
++                assert(heads[i] == gltextures[i].texturechain);
++                ++reference;
++                if (pass == passes - 1)
++                {
++                    R_WorldTextureChainClear(&gltextures[i], i);
++                    heads[i] = NULL;
++                }
++            }
++            while (reference < numgltextures &&
++                   (!gltextures[reference].registration_sequence || !heads[reference]))
++                ++reference;
++            assert(reference == numgltextures);
++        }
++        for (int i = 0; i < MAX_GLTEXTURES; ++i)
++            assert(gltextures[i].texturechain == heads[i]);
++    }
++    free(pool);
++    puts("PASS: 4000 sparse texture-chain histories; image order, chains, registration and slot reuse exact");
++    return 0;
++}
+--- /dev/null
++++ b/tools/tests/quake2_visibility_test.c
+@@ -0,0 +1,62 @@
++/* Exact live-stamp and parent-walk comparison, including cache-disabled fallback. */
++#define Mod_ClusterPVS OriginalModClusterPVS
++#include "../../src/quake2/src/client/refresh/gl1/gl1_model.c"
++#undef Mod_ClusterPVS
++const byte *Mod_ClusterPVS(int cluster, const model_t *model);
++#include "../../src/quake2/src/client/refresh/gl1/gl1_surf.c"
++#include <assert.h>
++#include <stdlib.h>
++
++model_t *r_worldmodel;
++int r_framecount, r_visframecount, r_viewcluster, r_viewcluster2;
++int r_oldviewcluster, r_oldviewcluster2;
++static cvar_t novis, lockpvs;
++cvar_t *r_novis=&novis, *r_lockpvs=&lockpvs;
++static unsigned random_state=72391;
++static unsigned Random(void) {random_state=random_state*1664525u+1013904223u;return random_state;}
++static byte pvs[8][MAX_MAP_LEAFS/8];
++const byte *Mod_ClusterPVS(int cluster, const model_t *model)
++{
++    (void)model;assert(cluster>=0&&cluster<8);return pvs[cluster];
++}
++static void *allocations[8];static int allocation_count;
++void *Hunk_Alloc(int size)
++{
++    void *p=calloc(1,size);assert(p);assert(allocation_count<8);allocations[allocation_count++]=p;return p;
++}
++int main(void)
++{
++    enum {NN=63, NL=64};
++    mnode_t nodes[NN]={0};mleaf_t leafs[NL]={0};model_t model={0};dvis_t vis={0};
++    model.nodes=nodes;model.numnodes=NN;model.leafs=leafs;model.numleafs=NL;model.vis=&vis;
++    r_worldmodel=&model;
++    for(int n=0;n<NN;n++)nodes[n].parent=n?nodes+(n-1)/2:NULL;
++    for(int l=0;l<NL;l++) {leafs[l].parent=nodes+31+l/2;leafs[l].cluster=l%9?l%8:-1;}
++    Mod_BuildVisibilityLinks(&model);
++    for(int trial=0;trial<12000;trial++)
++    {
++        int initial_nodes[NN],initial_leafs[NL],expected_nodes[NN],expected_leafs[NL];
++        for(int n=0;n<NN;n++)initial_nodes[n]=nodes[n].visframe=(Random()%9==0)?402:Random()%402;
++        for(int l=0;l<NL;l++)initial_leafs[l]=leafs[l].visframe=(Random()%9==0)?402:Random()%402;
++        for(int c=0;c<8;c++)for(int b=0;b<(NL+31)/32*4;b++)pvs[c][b]=Random();
++        int vc=trial%13?Random()%8:-1,vc2=vc<0?-1:Random()%8;
++        int oldc=trial%7? -1:vc,oldc2=trial%7?-1:vc2;
++        novis.value=trial%19==0;lockpvs.value=trial%23==0;
++        model.vis=trial%29?&vis:NULL;
++        of_vislink_t *links=model.of_vislinks;model.of_vislinks=NULL;
++        r_visframecount=401;r_oldviewcluster=oldc;r_oldviewcluster2=oldc2;r_viewcluster=vc;r_viewcluster2=vc2;
++        R_MarkLeaves();
++        int expected_frame=r_visframecount,expected_old1=r_oldviewcluster,expected_old2=r_oldviewcluster2;
++        for(int n=0;n<NN;n++){expected_nodes[n]=nodes[n].visframe;nodes[n].visframe=initial_nodes[n];}
++        for(int l=0;l<NL;l++){expected_leafs[l]=leafs[l].visframe;leafs[l].visframe=initial_leafs[l];}
++        model.of_vislinks=links;
++        r_visframecount=401;r_oldviewcluster=oldc;r_oldviewcluster2=oldc2;
++        R_MarkLeaves();
++        assert(expected_frame==r_visframecount&&expected_old1==r_oldviewcluster&&expected_old2==r_oldviewcluster2);
++        for(int n=0;n<NN;n++)assert(expected_nodes[n]==nodes[n].visframe);
++        for(int l=0;l<NL;l++)assert(expected_leafs[l]==leafs[l].visframe);
++    }
++    for(int i=0;i<allocation_count;i++)free(allocations[i]);
++    puts("PASS: 12000 compact topology vs original PVS marking, all stamps and state exact");
++    return 0;
++}

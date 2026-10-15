@@ -1,0 +1,45 @@
+{
+  "name": "F19 MESH4 adaptive feed",
+  "path": "additions/app-v4",
+  "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4",
+  "elf_sha256": "883e2b4cfcd105bddc032d89c4379cd72702621cd1923cacbd0b6596ad02ce9e",
+  "exact_base": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3",
+  "native_revision_unchanged": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7",
+  "status": "NATIVE_CORRECT_NO_NET_SPEEDUP_UNQUALIFIED_NOT_DEPLOYED",
+  "changes": [
+    "Publish small CPU-ring batches when published occupancy is below 128 words",
+    "Keep 512-word/sync override and force publication on DMA backend",
+    "V3 ownership-wait helper unchanged",
+    "F19 MESH4 label"
+  ],
+  "not_deployed": true,
+  "results": "../../results.txt",
+  "strict_candidate_receipt": "../../receipts/native/appv4-candidate-strict.json",
+  "strict_control_receipt": "../../receipts/native/appv4-control-strict.json",
+  "patch": {
+    "base": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3",
+    "files": {
+      "src/sm64/pocket/perf_pocket.c": {
+        "before_sha256": "903abc613eb371923c281ad09155625b4805e2f4fb0c0f7efdd84b8941c0f3e1",
+        "after_sha256": "908c61b1c845e17d8e100228c11cc3198c920d781404c801b504684201046504",
+        "postimage_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/src/sm64/pocket/perf_pocket.c"
+      },
+      "src/sm64/sm64/src/pc/gfx/gfx_gpu.c": {
+        "before_sha256": "36ff1e0e20da4c6eab7112e67fa4bf565aae69c9f41f41d1b5dfc8d3910c3b83",
+        "after_sha256": "5944f0d2b983418eddc1711a1b39ae6be6ebc0ea4cfcc4c954402d23d805492d",
+        "postimage_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/src/sm64/sm64/src/pc/gfx/gfx_gpu.c"
+      }
+    }
+  },
+  "files_sha256": {
+    "README.txt": "15903bbfd148d37dee2ad2f9c5c753ea9e48918cb3d7c516edf98105d44c997d",
+    "actual_feed_test.c": "fced40751818036a3902eba8e079d0f7054dd455d63657285e0c03d27cdbd17a",
+    "build-result.json": "e824fc71374638930c9b128ebdfeb084e1a25c65af0db001da04853970fcf63d",
+    "build_app.py": "466eef221dc50240bca802dc330b442b4c6981bf65426f71e9608d0d8d68fc2a",
+    "independent-review.json": "25cfa14414f6d453e1b260f854eea88a5e9d703bd0c8d0ad12b32fa723be108b",
+    "mesh3_lifetime_appv4.py": "0f1c3ad91fb036bad30d68f1bced0ab0453afd941d1d9369f55ef0f85391a03f",
+    "sm64-v3-to-v4.patch": "3412ce16a266b2ccfe8c51e30ea580f23afbd541bdcbaa0c70cc0cf6481898f2",
+    "test-result.json": "824ed53498bd441dfcacc39bffd1871155ed03898a259aafdfea63a73b592d6a",
+    "test_feed.py": "6755708f584848f7e4549bdd957267b247daf6aa25218a7e6e1f4b50898f1685"
+  }
+}

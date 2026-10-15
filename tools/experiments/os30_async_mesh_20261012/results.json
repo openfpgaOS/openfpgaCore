@@ -1,0 +1,172 @@
+{
+  "schema": 1,
+  "decision": "RETAIN_QUALIFIED_BASELINE_NO_PHYSICAL_FIT_OR_DEPLOYMENT",
+  "scope": "AJ01 asynchronous raw/triangle jobs in os30/SM64; two prepared full native render/game/audio intervals per app revision.",
+  "revisions": [
+    {
+      "label": "F20 JOB1",
+      "control_cycles": [
+        4229803,
+        4585990
+      ],
+      "candidate_cycles": [
+        4957877,
+        5226083
+      ],
+      "total_change_percent": 15.519500060856695,
+      "warm_change_percent": 13.957575136448174,
+      "qualified_prior_cycles": [
+        3980965,
+        4366717
+      ],
+      "different_ELF_prior_total_change_percent": 21.99745989365671,
+      "async_stats": [
+        640,
+        348,
+        96,
+        0,
+        196,
+        1544,
+        1176,
+        44,
+        5990,
+        0,
+        44,
+        8126,
+        0,
+        0,
+        0,
+        1
+      ],
+      "hint_stats": null,
+      "strict_candidate": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/candidate-v2-witness/check-independent-v1.json",
+      "strict_control": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/control-v1-witness/check-independent-v1.json"
+    },
+    {
+      "label": "F21 JOB2",
+      "control_cycles": [
+        4229803,
+        4608537
+      ],
+      "candidate_cycles": [
+        4885465,
+        5163570
+      ],
+      "total_change_percent": 13.698217086013887,
+      "warm_change_percent": 12.043583462604301,
+      "qualified_prior_cycles": [
+        3980965,
+        4366717
+      ],
+      "different_ELF_prior_total_change_percent": 20.38114293285249,
+      "async_stats": [
+        640,
+        348,
+        96,
+        0,
+        196,
+        1544,
+        1176,
+        44,
+        5990,
+        0,
+        44,
+        20356,
+        0,
+        0,
+        0,
+        1
+      ],
+      "hint_stats": null,
+      "strict_candidate": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/candidate-appv2/check-independent-v1.json",
+      "strict_control": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/control-appv2/check-independent-v1.json"
+    },
+    {
+      "label": "F22 JOB3",
+      "control_cycles": [
+        4267043,
+        4633123
+      ],
+      "candidate_cycles": [
+        4876661,
+        5105025
+      ],
+      "total_change_percent": 12.15168346298261,
+      "warm_change_percent": 10.185397624884995,
+      "qualified_prior_cycles": [
+        3980965,
+        4366717
+      ],
+      "different_ELF_prior_total_change_percent": 19.57434411133534,
+      "async_stats": [
+        640,
+        348,
+        96,
+        0,
+        174,
+        1343,
+        1344,
+        22,
+        2995,
+        0,
+        50,
+        23954,
+        0,
+        0,
+        0,
+        1
+      ],
+      "hint_stats": [
+        22,
+        22,
+        22,
+        22
+      ],
+      "strict_candidate": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/candidate-appv3/check-independent-v1.json",
+      "strict_control": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/control-appv3/check-independent-v1.json"
+    }
+  ],
+  "observations": {
+    "v3_warm_queued_jobs": 76,
+    "v3_warm_cpu_repairs": 0,
+    "v3_warm_total_cycles": 5105025,
+    "v3_warm_lease_pending_cycles": 599773,
+    "v3_warm_lease_pending_with_GPU_fragment_cycles": 524552,
+    "v3_warm_output_full_cycles": 580588,
+    "v3_warm_output_full_with_GPU_fragment_cycles": 539898,
+    "v3_warm_raw_transform_cycles": 202210,
+    "v3_warm_GPU_fragment_cycles": 1439517,
+    "counts_are_overlapping_not_additive": true
+  },
+  "conclusion": "The asynchronous stream works correctly and overlaps CPU work, but it does not reduce frame time. Repeated clipping repair is not the remaining primary explanation: v3 has zero warm repairs and still takes 10.19% more cycles than its same-ELF control. Shared raw ownership plus ordered output backpressure serializes later legacy LOADs behind queued raster work. A larger PSRAM bandwidth claim cannot be inferred from these counters.",
+  "next_hypothesis": "Decouple the legacy raw lease from draining all earlier GPU packets. Priority at safe raw-engine boundaries would require immutable/restored contexts and a tested release/materialization path before ingress-full waits. This is a proposed structural change, not implemented or credited as a speedup.",
+  "physical": "Prepared source integration only. No Quartus fit, timing claim, sweep, sibling deployment or SD update.",
+  "limits": [
+    "Native simulation uses fixed synthetic display/audio arrivals and bounded guest services; no sustained Pocket FPS claim.",
+    "Same-ELF controls isolate hardware/capability effects. The prior qualified app uses a different ELF and is an additional adoption baseline.",
+    "Function-profile gaps are diagnostic attribution; no instruction-count or estimated-latency subtraction is counted as performance."
+  ],
+  "evidence_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/candidate-v2-witness/check-independent-v1.json": "7c6a3fa5a1ea7f96e4cd35f9f35122d636e9764c9a0d319c342e7599599810b6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/control-v1-witness/check-independent-v1.json": "b0d0a392ac18b2c4ecf339e13cc9d1a1e2533137f76a526179c25d8a84359dec",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/analysis/native-v1.json": "7a5eb0de907402e221a87f1c25fa8fa6fb3447777e5aaacd31d6eea002c4c121",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/candidate-v2-witness/run/async-stats.bin": "b170e897adc55f0da586d7b352cd5b9f0e3024c96910fc75c081da6c468f831a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/candidate-appv2/check-independent-v1.json": "50c22e52e32a742f6370e145e2ea0db86d326bc290fdce9dc64e5a7158a1192f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/control-appv2/check-independent-v1.json": "8945b7da82b04f5da8cd847afd54ccbc331840ddedeed3275ac008c9f434ad89",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/analysis/native-appv2.json": "a11c45f0beae61c53555edb76c400825fdc49725c324d1d973724e7f663538db",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/candidate-appv2/run/async-stats.bin": "a2c43b5840bd498a7183f696dbe00e2764bd9373fdec04836b6ae328c8cbf688",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/candidate-appv3/check-independent-v1.json": "4c7e8bf482991795b00afe37007572717552753292d30976ae54291b402ed958",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/control-appv3/check-independent-v1.json": "81a82b7fb625f77ecc679be5f109b27e37de8e056da3b181b595378fcbea6f93",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/analysis/native-appv3.json": "46860c0166765a4a8480a094c5487186cc8119ba4a9c905e3a94ff8814066b5b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/candidate-appv3/run/async-stats.bin": "828cfdfdee47d1f585727de9e6be4f61065e6746b3008196cbbcc805280f01c6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/candidate-appv3/run/async-hint-stats.bin": "ed48f2386a4fc3a53ed89e1bc6a6ab82487d2b4d46bad9619f8cff8a358a57b4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-core/rtl-ready-v2.json": "ff5969123dc2970f8a4eca772615bc7d5378d85fa0b70c9ce06d103cb75ef591",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/front-v2/result.json": "e47bc7b1692c93da4131c0e9d13605988926d721f6469a91eee027ef543e593b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/qualification-v1.json": "6f536f26c737cfec7db54da76ab19ee60109b5cbf9f2fbd049184265e78779d0",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/passive-witness-equivalence-v1.json": "52bc11e028300bde46c3862ef85e2a236c694d10113490099758bb1845920596",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/lifetime-negative-v1/result.json": "7f4873e49b57635ad299b93de09cfa9e70c768917c37ae57948253722412d67a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app-v2/evidence/repair-fastpath-v1/result.json": "dbb0a4ada0f5d20e92dd3c29352f8d2e43dd9673f9aa5b07abf0665bedc93411",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app-v3/evidence/hint-tests-v1/result.json": "232de96395ef2c8ac7c460d2d4814c5cb7ab1c204dee2dd860ba938090cfe46a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/analysis/adaptive-v4-conclusion.json": "9992b828e79b81a11040f916819e78e7284d66aa72ace2d4fdcc135780c48406"
+  }
+}

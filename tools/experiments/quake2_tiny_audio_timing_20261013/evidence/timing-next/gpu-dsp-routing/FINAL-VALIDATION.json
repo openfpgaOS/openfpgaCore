@@ -1,0 +1,31 @@
+{
+  "passed": true,
+  "candidate_sha256": "57258b3a4a76c75f3619661dd052fdc5c3ae5716f455c8830eafe00234a1f72e",
+  "parent_sha256": "87c75d462db6bbb08635f10ccc8fdf021a7a68cfcb12358bffa594c2d533f6d3",
+  "rtl_cycles_added": 0,
+  "rtl_registers_added": 0,
+  "features_removed": [],
+  "quartus_run": false,
+  "full_gpu_runs": 16,
+  "control_vectors": 33554432,
+  "actual_product_invariant_clocks": 74153842,
+  "actual_nonzero_b_checks": 3773736,
+  "changed_idle_zero_b_operands": 7836,
+  "gates": {
+    "gpu_core.v": "57258b3a4a76c75f3619661dd052fdc5c3ae5716f455c8830eafe00234a1f72e",
+    "routing.patch": "65687f984fe69ff9a4b1d069f13ef47875ed0aa501e86b2798212faa629a712a",
+    "source-pins.json": "a7605266752c73dc55b28ed88df4ec60478481f3ed4a698257473a807d8fd28b",
+    "PROOF.txt": "6ea3a66c5da080b236a177260b3de51dfd66ff1fc7757a425cc6b413ad116407",
+    "check_operands.py": "f5d5a945cb1110a1520cd7643adf5bb5b3e7d4854b965d8e050bd399eb83f277",
+    "gpu_core_operand_shadow.v": "08fb1f0a4604f58f15155c108d48c07e5e157b7641e13c9fe8e54958f865fc21",
+    "operand-shadow-pins.json": "aba3750c2abfe9968ad9f5b7243f24aefad3f587c8009f8a95309946eae32215",
+    "operand-shadow-summary.json": "58487d891b42f69baca20e9d6860d435189e83bec16ef0b8a71b760b1e2c1d7a",
+    "operand-control-v1/receipt.json": "c9eb4d31dd47fe9341da47c9452ed02bafcba7f812d61d3732d42e5ec551a3f9",
+    "full-gpu-v1/receipt.json": "5f43d08786fc128ce75392cd9731b2fe5903cc4f06993a10b372816e9d4de050",
+    "operand-shadow-gpu-v1/receipt.json": "9c0d303d94db7a0a7790321a900a25ae8ca4ef111c357537d3c433bc4940e475",
+    "run_gpu_replay.py": "50b7440e0e739a95495c9d362f550309c0a37ff0861dc41905e1757f53a1c649",
+    "legacy-preprocess-receipt.json": "2465f07206e1f511b0b1ae9a2302a556b36a6a9e1737d9463363be33154f21c4"
+  },
+  "limitation": "Behavioral/source-algebra and finite dynamic validation; not a formal-tool proof or physical timing result. New audio scheduling is tested separately.",
+  "legacy_preprocessor_cases": 4
+}

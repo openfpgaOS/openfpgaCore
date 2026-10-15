@@ -1,0 +1,52 @@
+{
+  "source_sha256": {
+    "gpu_geometry_worker.v": "56b3f89d26ef2ffa3588c5679cfb9806d3859071f27fe6e30bdabcd06bcabfab",
+    "geometry_worker_tb.v": "69744a77df5ec6eb98a921bcba4f7cce68ff6bb431673acedfd483e53ba3410b",
+    "geometry_worker.cpp": "1e19d21c43b6d964ea2c0691802d1f0bf5bece4eb1efe9155478ef75ad3f1267",
+    "legacy-disabled/geometry_worker_tb.v": "f0077c5b29445a57b1bed821682d9ee3d4e01636715b065d68f9e7190cba60d7",
+    "legacy-disabled/geometry_worker.cpp": "97832457de13eb3cd40c667ee82ae6ccac8096c72394fd03c9ad738329aeeebd"
+  },
+  "version": "Verilator 5.052 2026-09-05 rev v5.052",
+  "commands": [
+    [
+      "verilator",
+      "--cc",
+      "--exe",
+      "--build",
+      "-j",
+      "4",
+      "-Wno-fatal",
+      "--top-module",
+      "geometry_worker_tb",
+      "--Mdir",
+      "/tmp/q2-native-followup-20261012/native-mac-stream-v1-focused/native/obj",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-native-followup-20261012/gpu-candidates/native-mac-stream-v1/source/geometry_worker_tb.v",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-native-followup-20261012/gpu-candidates/native-mac-stream-v1/source/gpu_geometry_worker.v",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-native-followup-20261012/gpu-candidates/native-mac-stream-v1/source/geometry_worker.cpp"
+    ],
+    [
+      "/tmp/q2-native-followup-20261012/native-mac-stream-v1-focused/native/obj/Vgeometry_worker_tb"
+    ],
+    [
+      "verilator",
+      "--cc",
+      "--exe",
+      "--build",
+      "-j",
+      "4",
+      "-Wno-fatal",
+      "--top-module",
+      "geometry_worker_tb",
+      "--Mdir",
+      "/tmp/q2-native-followup-20261012/native-mac-stream-v1-focused/legacy-disabled/obj",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-native-followup-20261012/gpu-candidates/native-mac-stream-v1/source/legacy-disabled/geometry_worker_tb.v",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-native-followup-20261012/gpu-candidates/native-mac-stream-v1/source/gpu_geometry_worker.v",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-native-followup-20261012/gpu-candidates/native-mac-stream-v1/source/legacy-disabled/geometry_worker.cpp"
+    ],
+    [
+      "/tmp/q2-native-followup-20261012/native-mac-stream-v1-focused/legacy-disabled/obj/Vgeometry_worker_tb"
+    ]
+  ],
+  "scope": "Synthetic exact-output reference: native MD2 transform/projection/palette/indices; mixed legacy; malformed descriptors; queue stalls/wrap; paused compute; soft/ring/media reset while request/response outstanding. Does not establish full-game parity, physical timing, or FPS.",
+  "passed": true
+}

@@ -1,0 +1,12 @@
+{
+  "files": {
+    "algebra-result.txt": "7f002351596177cd781c582e4c284b9b35c652022ff70733ce7564e05f648485",
+    "algebra.cpp": "584056e4e23c5c614da012110433a4510657b13cf2df400cd71cbb44dc1977ab",
+    "comparison.json": "d6098b21132e7eb208766fc7c82ca167f7d1abde18781ca551a88dea2ad7167a",
+    "input-address.patch": "458d59ff6079f5f1e6af707fe6db97f4f9ffd45b1279573153be01dac08c081f"
+  },
+  "core_manifest_sha256": "d4ecc0992d596542f2193a95c6aac94b6594c2a1228fc0d3b3644c912818e5f9",
+  "source_proof_only": true,
+  "previously_executed": true,
+  "physical_timing_selected": false
+}

@@ -1,0 +1,8 @@
+{
+  "historical_v3_verification": "../verification.json",
+  "historical_v3_manifest_sha256": "8d0aa6a17dd8b0dc90ebd170e03d24e49fef82bbad6ffd0b302af3612fc054fa",
+  "historical_v3_manifest_retained": false,
+  "note": "The v3 verification receipt remains unchanged. Its original whole-bundle inventory was superseded during the v4 addition; this history does not reconstruct or claim to contain that old inventory. Exact v3 source and test receipt copies remain unchanged and are reverified by the final manifest.",
+  "prefinal_v4_manifest_sha256": "cfe46bf118b66ba7e264373fd0feac5833f92e55bf6d7caee62edd386b4bb85c",
+  "prefinal_inventory_caveat": "This intermediate inventory excluded nested manifest.json files by basename; final packaging corrects this to root-relative path and verifies the app-v4 manifest too."
+}

@@ -1,0 +1,40 @@
+{
+  "status": "pass",
+  "tests": {
+    "command": [
+      "python3",
+      "-B",
+      "-m",
+      "unittest",
+      "-v",
+      "test_sweep.py"
+    ],
+    "working_directory": "docs/measurements/quake2-tiny-audio-20261013/sweep-tooling",
+    "count": 35,
+    "elapsed_seconds": 7.58,
+    "exit_code": 0
+  },
+  "policy": {
+    "maximum_global_fit_processes": 4,
+    "maximum_processors_per_process": 4,
+    "minimum_available_memory_gib": 20,
+    "default_seed_jobs": 4,
+    "accounting": "All active seed jobs reserve slots; external quartus_fit processes consume global slots without double-counting owned fitters."
+  },
+  "new_tests": [
+    "four-slot admission and lower requested concurrency",
+    "external fitter accounting including reserved pre-fit job and own PID deduplication",
+    "20 GiB exact memory admission boundary",
+    "reject >4 jobs or >4 processors; fake-Quartus map-once/30-seed integration with four workers"
+  ],
+  "recipe_sha256": {
+    "README.txt": "f198e484e43e0a21d7d27017800a098425ae5f5286cdced6cc14ae310939170c",
+    "report_sweep_timing.tcl": "2c66004df7b54c2e62a0c47ae976cf7c61da684ec034a169cb077ca00cdca34e",
+    "results.py": "192828cad6b134c0f6cacfd484611e1ec9db5ab27cf379974bd737296d4f110b",
+    "sweep.py": "570a77c4d8aec800c2e90e9241721ec27cfa479f1638ddd91561c0fd834b46f2",
+    "test_sweep.py": "a5a846d51c56baf1bc3e17a4f317ad67808ccc9cf7d39782812063710de691c3"
+  },
+  "collector_and_parser_unchanged": true,
+  "quartus_launched": false,
+  "full_sweep_launched": false
+}

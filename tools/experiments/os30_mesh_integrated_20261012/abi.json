@@ -1,0 +1,57 @@
+{
+  "name": "MTF2",
+  "capability": "0x4d544632",
+  "macro": "INCLUDE_GPU_MESH_FRONT",
+  "word_registers": {
+    "0x20": "capability",
+    "0x21": "status",
+    "0x22": "serial",
+    "0x23": "original VTX w0; destination must be 0",
+    "0x24": "TRI command source physical PSRAM offset",
+    "0x25": "commandcount[6:0],cull[9:8],unsupported_features[23:16]",
+    "0x26": "control START=1 ACK=2 CANCEL=4 VALIDATE=8 ARM=16; exactly one action",
+    "0x27": "usedmask",
+    "0x28": "ownedmask",
+    "0x29": "cliprejectcount",
+    "0x2a": "cullrejectcount",
+    "0x2b": "flagsRGB",
+    "0x2c": "uoffset",
+    "0x2d": "voffset",
+    "0x2e": "checked triangle count",
+    "0x2f": "completedserial"
+  },
+  "status_bits": {
+    "owner": 0,
+    "preflight_ready": 1,
+    "geometry_fallback": 2,
+    "protocol_error": 3,
+    "raw_success": 4,
+    "packet_validated": 5,
+    "packet_error": 6,
+    "live_count": "14:8",
+    "raw_done": 15,
+    "fallback_reason": "19:16",
+    "raw_copy_started": 7,
+    "raw_copy_done": 20
+  },
+  "marker": [
+    "0x62000004",
+    "serial",
+    "flagsRGB",
+    "uoffset",
+    "voffset"
+  ],
+  "rules": [
+    "Legacy LOD5 register/context/alias remains available through same shared raw engine.",
+    "CPU waits accepted preflight, prepares material, writes uniforms, issues VALIDATE, and waits validated+owner.",
+    "ARM=16 follows successful validation. Legal ARM is latched even while previous privatepacket queue is occupied. CPU then publishes marker from localserial/uniforms without rereadingowner.",
+    "One rawtask and onepreparedpacket cancoexist. Reserved512wordpacketFIFO has its own immutable serial/uniforms; maxpayload416words.",
+    "ARM starts raw-to-privatepacketcopy once queue is reserved and accepted CPU aliases drain. Rawowner autoACKs onfinalstoredword, independentlyofGPUmarkerposition.",
+    "Actual marker matching a FILLING queue waits; matching READY queue starts drain; wrong token/uniforms fault visibly without partialpublication.",
+    "Queue frees after lastword accepted by GPUbridge. GPU mesh_packet_done is this consumercompletion, distinctfromraw_copy_done.",
+    "Next rawLOAD/cull may proceed while olderpacket waits/rasterizes. NextARM waits queueempty.",
+    "GPUbusy excludes unpublishedraw/preflight/validated/privateprefill ownership so material helpers canfinisholderpublishedwork.",
+    "Zero-live/fallback ACK retainsrawview untilnextLOAD. Ordinary cancel beforeARM allowed; afterARM discardrequirescoupledGPUconsumerreset.",
+    "Consumerreset discardsprivatequeue withGPUconsumer anddrainscurrentmeshtask acceptedDMA; legacyrawLOAD remainsindependent."
+  ]
+}

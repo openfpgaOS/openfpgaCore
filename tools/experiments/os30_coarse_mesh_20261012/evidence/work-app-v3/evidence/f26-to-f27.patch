@@ -1,0 +1,22 @@
+--- a/src/sm64/sm64/src/pc/gfx/gfx_gpu.c
++++ b/src/sm64/sm64/src/pc/gfx/gfx_gpu.c
+@@ -2429,7 +2429,7 @@
+     *packet++=(uint32_t)material->u_offset;*packet++=(uint32_t)material->v_offset;
+     *packet++=alpha;
+     _gpu_ring_commit(38u);g_vc_words+=38u;gfx_async_stats[6]+=28u;
+-    of_gpu_kick();
++    of_gpu_kick_now();
+ #else
+     (void)descriptor_offset;(void)members;(void)transform;(void)material;
+ #endif
+--- a/src/sm64/pocket/perf_pocket.c
++++ b/src/sm64/pocket/perf_pocket.c
+@@ -381,7 +381,7 @@
+ #if SM64_PERF_DETAILS
+     print_text(12,210,"PERF P3 VERT");
+ #else
+-    print_text(12,210,"PERF F26 GROUP");
++    print_text(12,210,"PERF F27 GROUP");
+ #endif
+     if(!s->valid) {
+         print_text(12,178,"WAIT 5 SECONDS IN LEVEL");

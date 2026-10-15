@@ -1,0 +1,24 @@
+{
+  "checked_at_utc": "2026-10-12T23:40:53.865583+00:00",
+  "target": "/run/media/alberto/POCKETDEV",
+  "profile": false,
+  "deployed": true,
+  "timing_qualified": false,
+  "changed_files": [
+    "Assets/quake2/common/quake2.elf",
+    "Cores/thinkelastic.quake2/os30.rbf_r",
+    "Cores/thinkelastic.quake2/core.json"
+  ],
+  "intended": {
+    "Assets/quake2/common/quake2.elf": "13c8f43af0ca9ea84b84cf1cd9e824bd6f0c1d39eb2b65dc01337408102862a0",
+    "Cores/thinkelastic.quake2/os30.rbf_r": "542029e588e2a646f20fc98f1dbaf89a667ced48c75de9e89354df74da8622b6",
+    "Cores/thinkelastic.quake2/core.json": "c7760d1844cc3832db168d06be1a9d9e0d0035d3bf0f3fa1258d4200572a6cf3"
+  },
+  "session_mount_readonly": false,
+  "backup": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-native-followup-20261012/deployment-native-v4/backups/before-20261012T234053Z-c1v7e9d3",
+  "before": {
+    "Assets/quake2/common/quake2.elf": "44f668ef55af64b579f3800d57567b7da7a2b3f9e16c325976d021d9237595b4",
+    "Cores/thinkelastic.quake2/os30.rbf_r": "a74fd5479299e9cb6d3c3121becb7e936ff6c09498b38887822e44ea5db1dbb1",
+    "Cores/thinkelastic.quake2/core.json": "6760fc8eb91c4d4b3992ea7c3ad125cde76cec0f71d37479e64553de89b415c4"
+  }
+}

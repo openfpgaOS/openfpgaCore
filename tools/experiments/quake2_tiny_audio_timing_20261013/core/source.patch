@@ -1,0 +1,253 @@
+--- a/src/fpga/common/gpu_geometry_worker.v
++++ b/src/fpga/common/gpu_geometry_worker.v
+@@ -85,6 +85,7 @@
+ (* ramstyle = "M10K" *) reg [31:0] points [0:31];
+ reg [4:0] point_addr;
+ reg signed [16:0] dx1, dy1;
++reg cull_zero, cull_negative;
+ wire signed [16:0] dx2 = $signed({point_q[15],point_q[15:0]})
+                              - $signed({point0[15],point0[15:0]});
+ wire signed [16:0] dy2 = $signed({point_q[31],point_q[31:16]})
+@@ -296,13 +297,19 @@
+ endfunction
+ function signed [15:0] particle_screen;
+     input signed [63:0] value;
+-    reg signed [32:0] rounded;
++    reg [15:0] floor_value, incremented;
++    reg round_up, outside;
+     begin
+-        rounded = $signed({value[63],value[63:32]});
+-        if ((value[31:0] > 32'h80000000) || (value[31:0] == 32'h80000000 && value[32]))
+-            rounded = rounded + 33'sd1;
+-        particle_screen = rounded[32:15] == {18{rounded[15]}} ? rounded[15:0]
+-                        : rounded[32] ? -16'sd32768 : 16'sd32767;
++        floor_value = value[47:32];
++        // Form the increment independently of the fractional/tie decision.
++        // Saturate from the unrounded floor: any floor outside signed16
++        // stays at the same saturated endpoint after adding zero or one.
++        incremented = floor_value + 16'd1;
++        round_up = value[31] && ((|value[30:0]) || value[32]);
++        outside = value[63:47] != {17{value[47]}};
++        particle_screen = outside ? (value[63] ? -16'sd32768 : 16'sd32767)
++                        : floor_value == 16'h7fff ? 16'sd32767
++                        : round_up ? incremented : floor_value;
+     end
+ endfunction
+ 
+@@ -387,10 +394,10 @@
+     end
+     if (take_input && state == COPY && mode == OBJECT && index < 12)
+         matrix[index[3:0]] <= input_data;
+-    // A native MAC has several products in flight; its pipeline freezes with
+-    // the native issue counter. Legacy scheduling remains unchanged.
+-    if (((!INCLUDE_NATIVE_MESH || mode != NATIVE) && (!INCLUDE_PARTICLES || mode != PARTICLE)) || enable)
+-        product <= mul_a * mul_b;
++    // Every consumer is scheduled in enabled FSM cycles. Freeze the DSP
++    // with that schedule, including the two interleaved cull products, so
++    // a pause cannot replace product1 before CULL_H captures it.
++    if (enable) product <= mul_a * mul_b;
+ end
+ always @(posedge clk) begin
+     if (!reset_n || soft_reset || ring_reset) begin
+@@ -449,7 +456,9 @@
+                 state <= remaining == 0 ? COMMIT
+                        : (INCLUDE_PARTICLES && mode == PARTICLE) ? P_CONTEXT_ADDR
+                        : (mode == RAW || mode == CLIP || mode == CULL) ? LOAD : COPY;
+-            COPY: if (take_input) begin
++            // The enclosing case and enable gate already select COPY.
++            // Keep HEADER/LOAD availability out of this state-local enable.
++            COPY: if (!input_empty && (mode != PASS || queue_has_space)) begin
+                 if (INCLUDE_NATIVE_MESH && mode == NATIVE) begin
+                     native_load_index <= native_load_index + 1'b1;
+                     case (native_load_index)
+@@ -511,7 +520,14 @@
+                     default: ;
+                 endcase
+                 remaining <= remaining - 1'b1; index <= index + 1'b1;
+-                if (remaining == 1) state <= COMMIT;
++                if (remaining == 1) begin
++                    // Descriptor fields used by native_job_valid were loaded
++                    // by word35; the final COPY word only supplies palette data.
++                    // Reuse the idle header-valid FF across COMMIT/N_START.
++                    if (INCLUDE_NATIVE_MESH && mode == NATIVE)
++                        native_header_valid <= native_job_valid;
++                    state <= COMMIT;
++                end
+             end
+             LOAD: if (!input_empty) begin
+                 remaining <= remaining - 1'b1; index <= index + 1'b1;
+@@ -656,12 +672,18 @@
+             CULL_D: begin dx1 <= dx2; dy1 <= dy2; point_addr <= triangle[14:10]; state <= CULL_E; end
+             CULL_E: state <= CULL_F;
+             CULL_F: begin mul_a <= dx1; mul_b <= dy2; vx <= dx2; state <= CULL_G; end
+-            CULL_G: state <= CULL_H;
+-            CULL_H: begin accumulator <= product; mul_a <= vx; mul_b <= dy1; state <= CULL_I; end
+-            CULL_I: state <= CULL_J;
+-            CULL_J: state <= (determinant == 0
+-                            || (triangle[15] && determinant[34])
+-                            || (triangle[16] && !determinant[34])) ? COMMIT : TRI_HEADER;
++            // Issue product2 while product1 is entering the DSP output.
++            // CULL_H still captures product1; CULL_I sees both products.
++            CULL_G: begin mul_a <= vx; mul_b <= dy1; state <= CULL_H; end
++            CULL_H: begin accumulator <= product; state <= CULL_I; end
++            CULL_I: begin
++                cull_zero <= accumulator[34:0] == product[34:0];
++                cull_negative <= determinant[34];
++                state <= CULL_J;
++            end
++            CULL_J: state <= (cull_zero
++                            || (triangle[15] && cull_negative)
++                            || (triangle[16] && !cull_negative)) ? COMMIT : TRI_HEADER;
+             TRI_HEADER: state <= TRI_WORD;
+             TRI_WORD: state <= COMMIT;
+             COMMIT: begin
+@@ -736,7 +758,7 @@
+                 end
+             P_FINISH: begin index <= 0; state <= remaining != 0 ? LOAD : HEADER; end
+             N_START: if (INCLUDE_NATIVE_MESH) begin
+-                if (native_job_valid) begin
++                if (native_header_valid) begin
+                     native_read_addr <= native_stream; native_read_bank <= 0;
+                     native_purpose <= NP_HEADER; state <= N_READ;
+                 end else state <= HEADER;
+--- a/src/fpga/common/os30/audio_mixer.v
++++ b/src/fpga/common/os30/audio_mixer.v
+@@ -732,10 +732,6 @@
+     position_b = {1'b0,cur_length};
+     position_sub = 1'b1;
+     case (state)
+-        S_RD_LSTART_W: begin
+-            position_a = {1'b0,cur_loop_end};
+-            position_b = {1'b0,vtbl_cpu_q[21:0]};
+-        end
+         S_STREAM_WPTR_W: begin
+             position_a = {1'b0,vtbl_cpu_q[21:0]};
+             position_b = {1'b0,cur_pos_int};
+@@ -885,7 +881,6 @@
+     // is a single adder off the RAM read.
+     S_RD_LSTART_W: begin
+         cur_loop_start <= vtbl_cpu_q[21:0];
+-        cur_loop_valid <= !position_alu[22] && (position_alu[21:0] != 22'd0);
+         if (cur_stream) begin
+             vtbl_a_addr <= {cur_voice, VTBL_WPTR};
+             state       <= S_STREAM_WPTR_W;
+@@ -962,6 +957,10 @@
+     // TAP0_AR / TAP0_R / TAP1_R: drive AR with chosen ARLEN, receive
+     //                            beat 0, optionally receive beat 1.
+     S_FETCH_TAP0_CALC: begin
++        // LOOP_START and LOOP_END are already captured. The first consumer
++        // is two states later; stream starvation skips every consumer.
++        // Keep RAM bypass and shared-ALU selection out of this comparison.
++        cur_loop_valid <= cur_loop_end > cur_loop_start;
+         // Terminating voices do not consume this speculative read. Avoid
+         // length-comparison feedback into the inferred RAM read enable.
+         vtbl_a_addr <= {cur_voice, VTBL_ADDR};
+--- a/src/fpga/common/os30/gpu_color_depth_cache.sv
++++ b/src/fpga/common/os30/gpu_color_depth_cache.sv
+@@ -336,9 +336,12 @@
+ always @* begin
+     data_we=0; data_wa={slot,word_index}; data_w=data_q;
+     data_ra={slot,word_index};
+-    meta_we=0; meta_wa=slot; meta_w=0;
++    // Payload is meaningful only with meta_we. Keep acceptance/state/strobe
++    // qualification on WE, off the tag-RAM data cone. Clear/allocation writes
++    // below override this normal dirty-line payload without adding a cycle.
++    meta_we=0; meta_wa=slot; meta_w={tag,new_last,new_first,2'b11};
+     case(state)
+-        INIT: begin meta_we=reset_n; meta_wa=walk; end
++        INIT: begin meta_we=reset_n; meta_wa=walk; meta_w=0; end
+         IDLE: data_ra={(SPECULATE_WRITE_HOT0 && (REGISTER_READ_LOOKUP || s_awvalid))
+                        ? hot0_slot : hot_slot,lookup_addr[2+:WORD_BITS]};
+         // R_ACCEPT owns addr. Do not route the live IDLE address mux
+@@ -356,7 +359,7 @@
+                 data_w[35:32]=word_valid|s_wstrb;
+                 for(integer b=0;b<4;b=b+1) if(s_wstrb[b])
+                     data_w[b*8+:8]=s_wdata[b*8+:8];
+-                if(s_wstrb!=0) begin meta_we=1; meta_w={tag,new_last,new_first,2'b11}; end
++                if(s_wstrb!=0) begin meta_we=1; end
+                 if(left!=1 && same_line) data_ra={slot,word_index+WORD_BITS'(1)};
+             end
+         end
+@@ -381,14 +384,18 @@
+         WB_FIRST: data_ra={slot,dirty_first};
+         WB_AW: data_ra={slot,wb_pos};
+         WB_DATA: begin
++            meta_w=0; // The only metadata write here invalidates a drained line.
+             data_ra={slot,wb_pos};
+             if(m_wready && wb_pos!=wb_last) data_ra={slot,wb_pos+WORD_BITS'(1)};
+         end
+-        MAINT: if(!walk_meta[1] || !walk_meta[0]) begin meta_we=1; meta_wa=walk; end
++        MAINT: begin
++            meta_w=0;
++            if(!walk_meta[1] || !walk_meta[0]) begin meta_we=1; meta_wa=walk; end
++        end
+         default: ;
+     endcase
+     if(state==WB_DATA && m_wready && wb_pos==wb_last && wb_last==dirty_last && maintenance) begin
+-        meta_we=1; meta_wa=walk; meta_w=0;
++        meta_we=1; meta_wa=walk;
+     end
+ end
+ 
+--- a/src/fpga/common/os30/gpu_core.v
++++ b/src/fpga/common/os30/gpu_core.v
+@@ -602,7 +602,7 @@
+         ring_reset      <= 0;
+         dma_src_latched <= {GPU_ADDR_W{1'b0}};
+         dma_len_latched <= 13'd0;
+-        palookup_base   <= PALOOKUP_BASE_DEFAULT;
++        palookup_base   <= (INCLUDE_PALETTE != 0) ? PALOOKUP_BASE_DEFAULT : 26'd0;
+         gpu_tex_mem_route        <= 1'b0;
+         gpu_tex_mem_up_wr        <= 1'b0;
+         gpu_tex_mem_up_addr      <= 22'd0;
+@@ -677,8 +677,9 @@
+                 4'd11: begin // GPU_DMA_KICK — fire pull
+                     // Handled by the DMA descriptor queue FSM below.
+                 end
+-                4'd12: begin // GPU_PALOOKUP_BASE
+-                    palookup_base <= reg_wdata[25:0];
++                4'd12: begin // GPU_PALOOKUP_BASE; absent palettes have no shadow state
++                    if (INCLUDE_PALETTE != 0)
++                        palookup_base <= reg_wdata[25:0];
+                 end
+                 4'd14: begin // GPU_TEX_MEM_ROUTE: bit0 routes tex fills to fast tex
+                     // No-op when INCLUDE_TEX_MEM == 0 (route stays constant 0,
+@@ -762,7 +763,7 @@
+                               dma_desc_full, dma_state, transluc_upload_busy,
+                               dma_busy, ring_empty, busy};
+         4'd6:    reg_rdata = fence_reached;
+-        4'd12:   reg_rdata = {6'b0, palookup_base};
++        4'd12:   reg_rdata = (INCLUDE_PALETTE != 0) ? {6'b0, palookup_base} : 32'd0;
+         // Compact current-inflight readback for the write-balance test.
+         4'd13:   reg_rdata = {28'b0, m_wr_inflight};
+         // reg14 reads the route bit (0 when INCLUDE_TEX_MEM == 0);
+@@ -6815,7 +6816,18 @@
+             dsp2_a <= 32'sd0;
+ `endif
+             dsp2_b <= 32'sd0;
++`ifdef INCLUDE_SPAN_DEDICATED_MULT
++            // Dedicated span multipliers leave this shared A input free
++            // outside PSS. Every other nonzero-B launch below overwrites
++            // A and B together; otherwise B defaults to zero. Selecting
++            // PSS A speculatively therefore preserves every DSP product
++            // while removing the late main-FSM/perspective ownership gate.
++            if (pss_dsp_a_write)
++`else
++            // Legacy shared span schedules can intentionally retain the
++            // coordinate default for A when launching a new B operand.
+             if (state == S_FRAG_PIPE && persp_active && pss_dsp_a_write)
++`endif
+                 dsp_a <= pss_dsp_a_data;
+             // m_wr inflight counter for CMD_FENCE / CMD_FLIP drain.
+             // Increment when an AW handshake fires; decrement when a B
+@@ -8085,7 +8097,9 @@
+                 // exactly 0x4F's contract; the derive multiplies s/t by zi at
+                 // 0x54 draw time for every path.  Needs the 0x50 sticky viewport
+                 // (xc/yc/scales/nearclip -- matrix words are don't-care) + 0x4A.
+-                if ((INCLUDE_VTX_CACHE != 0) && tri_state_valid) begin
++                // Match decode: worker builds consume 0x56 upstream and emit 0x5C.
++                // Spell the constant here so FSM extraction sees no legacy projection entry.
++                if (!GEOMETRY_WORKER && (INCLUDE_VTX_CACHE != 0) && tri_state_valid) begin
+                     xf_vtx      <= 2'd0;
+                     xf_row      <= 2'd0;
+                     xf_idx      <= 2'd0;

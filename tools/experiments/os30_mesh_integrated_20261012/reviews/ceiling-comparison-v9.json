@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "same_ELF_control": [
+    4028163,
+    4409880
+  ],
+  "ceiling": [
+    3887424,
+    4181382
+  ],
+  "prior_qualified_app": [
+    3980965,
+    4366717
+  ],
+  "same_ELF_cycle_change_percent": -4.375860611281546,
+  "different_app_prior_cycle_change_percent": -3.340759746238542,
+  "caveat": "Only same-ELF comparison isolates architecture. The older qualified build comparison includes new frontend software overhead even when capability is disabled. This is a native capacity ceiling, not a feasible placed-and-routed core.",
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/analysis/paired-v9.json": "5bcea867e6ecc504db57759c1e6df5f62936b17a6b535c6ac869e3a44ae93eb8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/performance-v2.json": "3261b4d4638703a98cbcba7e9fa4c6a6a706409fff4f46074a7e7a815b551982"
+  }
+}

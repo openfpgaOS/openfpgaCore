@@ -1,0 +1,214 @@
+{
+  "status": "DEPLOYED_FOR_POCKET_COMPARISON",
+  "deployed": true,
+  "physical_fps_measured": false,
+  "baseline_app_sha256": "44f668ef55af64b579f3800d57567b7da7a2b3f9e16c325976d021d9237595b4",
+  "app_sha256": "13c8f43af0ca9ea84b84cf1cd9e824bd6f0c1d39eb2b65dc01337408102862a0",
+  "profile_sha256": "2867680f64f2714e702dab45563b8f2a7a0aeae1d3e223042c9ca7e70bee9d8e",
+  "core_sha256": "542029e588e2a646f20fc98f1dbaf89a667ced48c75de9e89354df74da8622b6",
+  "app_package_manifest_sha256": "395655573897194f0f4662b1b476310448ad33b9ce76d57fa1c2ddf639132e0e",
+  "core_package_manifest_sha256": "a80a8107274831ed4c8d3fbf3ba9c84a7809d4e91b77d252f31d3a750694ee68",
+  "configured_mhz": 100,
+  "timing_qualified": false,
+  "physical": {
+    "fit": "/tmp/q2-native-followup-20261012/fit-mac-cb4",
+    "phase_returncodes": {
+      "map": 0,
+      "fit": 0,
+      "asm": 0,
+      "sta": 0,
+      "corners": 3
+    },
+    "configured_clock_MHz": 100,
+    "seed": 2,
+    "constrained_timing_passed": false,
+    "source_recipe_sha256": "8afff493ec4c0f812166aa9e54a68e30c0b77130747ce155cc1065aa244dcd81",
+    "report_sha256": {
+      "build-receipt.json": "5b1b6f8073b74bce63c23384ce83559a9c1f8c6afec72724db94dd9267897db2",
+      "fit.log": "29aae1d1ecd142066bfc0791356cbada5eb898bba280224ad3e26866f4873418",
+      "corners.log": "5d077eb38cbc9080c7e0dc805ba8ba16eb5004c837247b8465615a2c6070bb2b",
+      "src/fpga/targets/pocket/output_files/ap_core.map.summary": "3bb3dcdd3f9c3fca993176d2e5be9a5fe3b48d56c01b9f5ffc8fb35139cb6b54",
+      "src/fpga/targets/pocket/output_files/ap_core.fit.summary": "2f920d6baf58186c7480ac6f61bab6e3cabdf3afdbaf8ba1fffea3eea24bceab",
+      "src/fpga/targets/pocket/output_files/ap_core.sta.summary": "c1cf94a548fe7eddb40090daf393ccc651b948aafc0829f8be662ce956543da5",
+      "src/fpga/targets/pocket/output_files/ap_core.sta.rpt": "def684d2478762b72df4a1e210a1def87a2b2207a88392995c22ff666a7344be",
+      "timing/clocks.tsv": "c1e5fb1bf11dceb1ccd418bf1acea665c69df7667987cd4279d8cc2ed9f9e4e1",
+      "timing/fast_0_hold.rpt": "8ce8c49cc6db1e8ab2aebae96cd63ec80e3f9f8bf4c709c16ad5625f873a2a0b",
+      "timing/fast_0_pulse_width.rpt": "2abc1f2d38351a054f7eb829acf5db8164742601b5e8c63a463ae8ea0ccd2b19",
+      "timing/fast_0_recovery.rpt": "0d49d940a408f07cd2245c5c2cb6b782a95b97c33dd88d31a880b3a95e62c619",
+      "timing/fast_0_removal.rpt": "300ec9c385a0220052ff40912a1fe0f953270fe0982a9fc73b9bb544bb793340",
+      "timing/fast_0_setup.rpt": "deeefc20ef5deb6950dfa38f0b3997c071e0d6ab9f9a5a579be301340dbd654d",
+      "timing/fast_85_hold.rpt": "4851328d894e0f8582e258999a773bb1c346201405b21a8afa21d4696a1dc69e",
+      "timing/fast_85_pulse_width.rpt": "2abc1f2d38351a054f7eb829acf5db8164742601b5e8c63a463ae8ea0ccd2b19",
+      "timing/fast_85_recovery.rpt": "a802f783ae45c14f2180f39dd178d2492295990b43f7fd69cc832eb6ee2caeae",
+      "timing/fast_85_removal.rpt": "0eb4e5449b31951548d0e260c966ee0c404bce40f2d53834b2b09b8d87b6ff80",
+      "timing/fast_85_setup.rpt": "a1824172d6dd0f3e35b2ed1487559aae10bce34cf06205a2db50eda15994bf5c",
+      "timing/slow_0_hold.rpt": "474489d6be41f6dfa619149df0dd6fa23715331f24f203f0de66a02549741743",
+      "timing/slow_0_pulse_width.rpt": "2abc1f2d38351a054f7eb829acf5db8164742601b5e8c63a463ae8ea0ccd2b19",
+      "timing/slow_0_recovery.rpt": "dca2498fe7342590ed99d8c66b8c0d2818c39a236007ccdf1fb7626668b467f4",
+      "timing/slow_0_removal.rpt": "98ceecbdbbb62c45fa3f5731c068ff3a4f7e17333c439f8a2e6653a0972007e1",
+      "timing/slow_0_setup.rpt": "705f1b5d0634e5caef94eab2998d64d0985b0e1938960ec802a844ed05fa8764",
+      "timing/slow_85_hold.rpt": "6d6abe7e20ca581ac564d0b2281e35be2e47af4827bb270ffa182f3e5f55bd8d",
+      "timing/slow_85_pulse_width.rpt": "2abc1f2d38351a054f7eb829acf5db8164742601b5e8c63a463ae8ea0ccd2b19",
+      "timing/slow_85_recovery.rpt": "23cf086eef077fe9dc5eb6a467cc217c0090524dcb1623770555773396908cc3",
+      "timing/slow_85_removal.rpt": "4db574d388698bc7d019cb2e4e296bcaa03a7c1f14295d692a0774474c27c80f",
+      "timing/slow_85_setup.rpt": "b50d6c11885aed8148f3dd6d217f2077cf49d4692ae37d9c6ce07e6d918f61c7",
+      "timing/summary.tsv": "2b01a60947d9f1281b4ca2563a7b926b10c700430d30570167dd138726b6bbcd"
+    },
+    "deployed": false,
+    "fit_successful": true,
+    "ALMs": {
+      "used": 17067,
+      "available": 18480
+    },
+    "M10Ks": {
+      "used": 296,
+      "available": 308
+    },
+    "DSPs": {
+      "used": 35,
+      "available": 66
+    },
+    "main_clock_restricted_Fmax_MHz": {
+      "slow_85": 95.44,
+      "slow_0": 93.67
+    },
+    "all_corner_checks": [
+      {
+        "model": "slow",
+        "temperature": "85",
+        "check": "setup",
+        "slack": "-0.802"
+      },
+      {
+        "model": "slow",
+        "temperature": "85",
+        "check": "hold",
+        "slack": "0.299"
+      },
+      {
+        "model": "slow",
+        "temperature": "85",
+        "check": "recovery",
+        "slack": "4.415"
+      },
+      {
+        "model": "slow",
+        "temperature": "85",
+        "check": "removal",
+        "slack": "1.182"
+      },
+      {
+        "model": "slow",
+        "temperature": "85",
+        "check": "pulse_width",
+        "slack": "0.500"
+      },
+      {
+        "model": "slow",
+        "temperature": "0",
+        "check": "setup",
+        "slack": "-0.777"
+      },
+      {
+        "model": "slow",
+        "temperature": "0",
+        "check": "hold",
+        "slack": "0.225"
+      },
+      {
+        "model": "slow",
+        "temperature": "0",
+        "check": "recovery",
+        "slack": "4.575"
+      },
+      {
+        "model": "slow",
+        "temperature": "0",
+        "check": "removal",
+        "slack": "1.100"
+      },
+      {
+        "model": "slow",
+        "temperature": "0",
+        "check": "pulse_width",
+        "slack": "0.500"
+      },
+      {
+        "model": "fast",
+        "temperature": "85",
+        "check": "setup",
+        "slack": "0.948"
+      },
+      {
+        "model": "fast",
+        "temperature": "85",
+        "check": "hold",
+        "slack": "0.133"
+      },
+      {
+        "model": "fast",
+        "temperature": "85",
+        "check": "recovery",
+        "slack": "7.322"
+      },
+      {
+        "model": "fast",
+        "temperature": "85",
+        "check": "removal",
+        "slack": "0.477"
+      },
+      {
+        "model": "fast",
+        "temperature": "85",
+        "check": "pulse_width",
+        "slack": "0.500"
+      },
+      {
+        "model": "fast",
+        "temperature": "0",
+        "check": "setup",
+        "slack": "0.964"
+      },
+      {
+        "model": "fast",
+        "temperature": "0",
+        "check": "hold",
+        "slack": "0.089"
+      },
+      {
+        "model": "fast",
+        "temperature": "0",
+        "check": "recovery",
+        "slack": "7.678"
+      },
+      {
+        "model": "fast",
+        "temperature": "0",
+        "check": "removal",
+        "slack": "0.426"
+      },
+      {
+        "model": "fast",
+        "temperature": "0",
+        "check": "pulse_width",
+        "slack": "0.500"
+      }
+    ],
+    "worst_setup_ns": -0.802,
+    "worst_hold_ns": 0.089,
+    "worst_recovery_ns": 4.415,
+    "worst_removal_ns": 0.426,
+    "worst_pulse_width_ns": 0.5,
+    "bitstream_sha256": "542029e588e2a646f20fc98f1dbaf89a667ced48c75de9e89354df74da8622b6",
+    "raw_rbf_sha256": "99c51201e7516081cbca04173871a90065bcb8d18c51befdb3d8b14638d364a3"
+  },
+  "app_exact_frames": 1920,
+  "paced_exact_frames": 8,
+  "twenty_percent_met_in_samples": 2,
+  "universal_twenty_percent_gain_established": false,
+  "deployment_package": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-native-followup-20261012/deployment-native-v4",
+  "deployment_manifest_sha256": "2a1a9a564ff8c1ad0a6f378af41e92dbdb6e0bd2ef6a8c3166d82874fab1e6a7",
+  "deployment_receipt_sha256": "e025e4201060191a6c283429f389e4c2a42ded9082ef933645824ec4d86f26db",
+  "post_deployment_verification_sha256": "b8b071e41ac20888d968decc962fd26bdc88b45f802e34fd3a7f7bbfe03c1629",
+  "sd_safely_unmounted": true
+}

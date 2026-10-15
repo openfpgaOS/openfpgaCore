@@ -1,0 +1,94 @@
+Quake2-only feature audit (2026-10-13 experiment)
+
+Scope: app-candidate/src/quake2 with its current GL1 renderer and the frozen
+rtl-compact-candidate os30 source. No production or SM64 feature was removed.
+Paths below are relative to these two snapshots unless prefixed otherwise.
+
+Keep the worker's 0x50/0x59/0x5B matrix/raw/indexed modes. They are the actual
+BSP world offload, not obsolete setup. openfpga/of_gl1.c:2240 builds cached
+0x59 uploads and 0x5B fan commands; :2289 constructs their matrix; :2646 uses
+OFQ2_SetObjectState and submits the packets. Unsupported coordinates, large
+UV spans, transparency, near/viewport crossings and precision limits retain
+the CPU projection/clip fallback. Removing these modes would send world work
+back to the CPU and defeat the performance objective. The native MD2/particle
+paths also share their multiplier, reciprocal, projection, winding, cache and
+queue resources. There is no separate legacy geometry core to reclaim.
+
+The older inline GPU 0x51/0x52/0x53 matrix transforms, 0x4F clip triangles and
+0x55/0x57 lighting are already disabled. ap_core.qsf retains INCLUDE_XFORM for
+the cache but sets EXCLUDE_GPU_XFORM_MAC, EXCLUDE_CLIP_TRI, EXCLUDE_GPU_LIGHT.
+gpu_core.v:8762 gates its old S_XFORM entirely with !GEOMETRY_WORKER. Matrix
+MAC and lighting capability bits are already clear in os30/core_top.v:2726.
+Further switches here are unlikely to recover meaningful synthesized logic.
+
+Worker 0x56 clip-cache input is unused by this GL1 app: ofgl_indexed_geometry
+is initialized/set to zero at of_gl1.c:2075 and :2655, never set to one, and
+guards the sole caller of OFQ2_DrawClipIndexed. However, nearly all 0x56
+arithmetic/storage is shared with needed raw/native/particle modes. Removing
+it would primarily remove a small load/decode/divider-select path. It would
+also require clearing OF_HW_GPU_CLIP_LOAD, which currently gates the app's
+geometry, worker, native and particle capabilities in of_emit_q2.c:248-263.
+SM64 has real 0x56 callers in ../SM64/src/sm64/sm64/src/pc/gfx/gfx_gpu.c:1517
+and :1617. Keeping that advertised compatibility is better than this small,
+unmeasured saving. INCLUDE_XFORM/INCLUDE_VTX_CACHE cannot simply be disabled:
+native and particle jobs emit 0x5C cached vertices followed by 0x54 draws.
+
+The useful Quake2-only cut is the additive color combiner, INCLUDE_COMBINE.
+This is texel*C+D (specular/additive D color), not normal texture modulation,
+not transparency, and not the unrelated GPU_WRITE_COMBINE memory queue.
+
+All current GL1 3D state comes from ofgl_setup_tri_state (of_gl1.c:1893): it
+zeros the whole state, then sets texture/RGB modulation, blend/depth/clip and
+subpixel-Y. It never sets cd_combine. The source-wide remaining mentions of
+OFQ2_CAP_COMBINE assign the capability in OFQ2_Init and print the startup
+diagnostic at of_gl1.c:4154; no render path branches on that capability.
+
+Material and fallback coverage:
+* Textured worlds use base texels multiplied by vertex RGB. Lightmap samples
+  become that RGB via ofgl_fetch_attrs:1488 or ofgl_world_material:2548.
+  Dynamic lightmap updates change these samples, not an additive D plane.
+* Native alias jobs and CPU alias fallbacks use the same state and RGB565
+  modulation. Native failure/near crossings return to the ordinary CPU
+  clipped triangle emitter, never a different additive-color emitter.
+* Translucency, glass/water, sky, dynamic-light flashes and particles use
+  ofgl_setup_tri_state's normal source-over alpha flag and const_alpha.
+  These remain compiled in. Native particle alpha patches preserve all
+  other state; particle precision/near/unsupported fallbacks use the same
+  CPU 17-word 0x4E emitter and original order.
+* CPU clipped/unclipped fallback emission (ofgl_emit_ctri around :1790-1889)
+  always supplies 17 words with RGB565 and independent depth, not the
+  19-word form carrying D colors. The GPU geometry worker likewise emits
+  cached RGB vertices without D colors.
+* The current 2D frontend uses its CPU blitters and existing clear/flip
+  services; it never constructs additive-D triangle state. GL_COMBINE in
+  this port's GL texture-env adapter explicitly means texel*vertex-color
+  (of_gl1.c:411), and does not imply the hardware texel*C+D feature.
+* The historical software renderer sources remain in the checkout, but
+  Makefile:168-170 selects only REF_GL1_SRCS. They are not hidden runtime
+  fallbacks in this app build. No source-wide CAP_COMBINE render use exists.
+
+The sole macro removal propagates consistently to gpu_core INCLUDE_COMBINE
+and axi_periph_slave's advertised OF_HW_GPU_COMBINE bit27 through
+os30/core_top.v:2732 and :3798. INCLUDE_DIRECT_COLOR remains explicitly on;
+geometry/cache flags and status bits10-13 are unchanged. A diagnostic line
+will print COMBINE=0 rather than1. The Quake2 app needs no wire-format change.
+
+Independent capture evidence: validation/v5-feature-command-audit.json
+covers all720 existing frames across main/sound/live/demo2, including startup
+and tail. Every SET_TRI_STATE has additive-combine bit30 clear; there are no
+19-word0x4E commands. 0x50/0x59/0x5B are heavily used, whereas 0x56 and the
+already-disabled inline transform/lighting opcodes are absent. Command
+absence alone is not the justification; it supports the full source audit.
+
+Frozen candidates (no production edits):
+* rtl-quake2-compact-candidate: compact worker a6464604, only INCLUDE_COMBINE
+  removed from the QSF. A map-only run isolates this macro's area effect.
+* rtl-quake2-compact-descriptor-candidate: descriptor worker164d5ce2, same
+  single macro removal. Root owns its selected-seed2 physical fit; validator
+  owns new eight-frame paced/unpaced full color/depth comparisons.
+Both QSF hashes are3fc898b5110f1a47c73c93ddbfd903f46274de2ea1863328bffd2fb0dd76b4e8.
+
+These images are Quake2-only experiments. They are not replacements for the
+separate SM64 image, which uses the additive combiner for some materials.
+No claim of synthesis savings or timing closure is made by this source audit;
+read the recorded map/fit and full-GPU validation results separately.

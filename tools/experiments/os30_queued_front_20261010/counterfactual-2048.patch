@@ -1,0 +1,11 @@
+--- a/frozen/src/fpga/common/gpu_core.v
++++ b/frozen/src/fpga/common/gpu_core.v
+@@ -583,7 +583,7 @@
+     wire [RING_ADDR_BITS-1:0] address;
+     reg [31:0] data;
+     always @(posedge clk) data <= ring_bram[address];
+-    gpu_queued_front #(.ADDR_BITS(RING_ADDR_BITS), .QUEUE_BITS(9)) worker (
++    gpu_queued_front #(.ADDR_BITS(RING_ADDR_BITS), .QUEUE_BITS(11)) worker (
+         .clk(clk), .reset_n(reset_n), .enable(active),
+         .soft_reset(soft_reset), .ring_reset(ring_reset),
+         .input_wrptr(ring_wrptr), .input_rdptr(upload_rdptr), .input_addr(address), .input_data(data),

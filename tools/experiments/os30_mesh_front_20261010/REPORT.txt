@@ -1,0 +1,117 @@
+os30 mesh-task front end — component experiment
+Started 2026-10-10; packaged 2026-10-11
+
+Result
+
+The prototype moves the geometry handoff ahead of raw vertex LOAD. A bounded
+hardware worker decodes original VTX/TRI1/TRI2 commands, performs the existing
+transform/light/reciprocal work, culls with the qualified floating-point order,
+retains results in the raw BRAM and emits ordinary GPU vertex/index packets.
+The packet consumer reads that BRAM directly; CPU vertex readback and per-triangle
+packet construction are absent from this component path.
+
+This is a functional component experiment, not an installed game optimization.
+It has no new full-frame speed result, bitstream, physical fit or clock guarantee.
+The production os30 build and SD card have not been changed by this experiment.
+
+Why this boundary is useful
+
+The earlier queued geometry front end accepted work after substantial CPU
+preparation and tied or regressed full-frame timing. This experiment gives the
+worker the LOAD and the original triangle stream. A separately tested producer
+mechanism caches immutable topology and publishes task/context handles without
+rescanning every triangle on a steady hit. Its host implementation is a mechanism
+test, not production RV32 code or a measured submission cost.
+
+Coverage and measured CPU work
+
+One captured display list has 2,553 triangles. Of those, 2,459 (96.32%) are in
+319 tight raw-eligible LOAD/TRI spans, all using their own LOAD's slots. This is
+structural coverage, not final shader or geometry acceptance.
+
+In the warm native interval, the conservative pre-cull check accepts 228 spans
+covering 1,879 input triangles. Requiring an already ready, nonzero material memo
+leaves 141 spans / 1,098 triangles. Neither test resolves the complete material,
+alpha or LOD restrictions. Some pre-cull exclusions can disappear after culling.
+
+The exact CPU-order cull oracle improves geometry coverage to 244 spans / 2,008
+input triangles (78.65% of all frame triangles), including 79 fully rejected
+tasks. Of these spans, 152 have a ready/nonzero material memo and 92 do not.
+
+For those 152 spans, five distinct CPU routine ranges account for 609,377 charged
+cycles and 404,056 retired instructions. The routines cover indexed preparation,
+canonical vertex copying, packet construction, source validation and the vertex
+wrapper. That charge is 13.96% of the 4,366,717-cycle warm replay interval.
+The 92 additional cold/ineligible-material spans cover another 256,297 charged
+cycles / 170,471 retired instructions in the same routine ranges. Together these
+routine charges cover 19.82% of the interval, not 19.82% guaranteed savings.
+
+These are measurements of covered work, not predicted savings. The entire raw
+LOAD driver is excluded from those totals. Raw hardware service still takes
+102,022 cycles for the 152 spans and 58,572 for the additional 92, overlaps other
+submission work, and must not be subtracted twice. Charged retirement gaps also
+contain memory/FIFO waits; some pending packet submission belongs to an older
+batch. Actual speed depends on scheduling, memory contention and raster progress.
+
+Validation
+
+The passive V3 observer preserves all 38 original measured outputs byte for byte,
+including frame/depth state, command stream and cycle counts. It records complete
+24-byte source vertices and task contexts. Source rows and matrices were checked
+independently against the exact app ELF/runtime state.
+
+Clocked tests exercise actual raw DMA, transform/light, reciprocal, shared FMA,
+cull and packet conversion. The packet tests compare 370,859 emitted words with
+an independent host numeric oracle in 1,227 cases, with 277,901 stalled cycles.
+Late invalid vertices and invalid survivor lists emit no partial commands.
+The standalone two-word command prefetcher passes 83 cases and drains all 2,093
+accepted reads, including cancellation and malformed/error response cases.
+The exact current RV32 CPU cull oracle checks all 4,918 captured triangles from
+two intervals. The real-context chain passes all 638 captured tasks, comparing
+64,544 raw result words exactly. It accepts 488 geometry tasks, requests fallback
+for 150, and compares 26,377 ordinary packet words for 1,511 surviving triangles.
+The shared AXI wrapper also fetches the original TRI commands in hardware; there
+is no CPU command-feeding loop in that tested path. Directed tests cover stalled
+address cancellation, accepted-prefetch drain, late RLAST/error recovery, matching
+completion, packet ownership, repeated starts and cancellation after publication.
+Those packet checks use controlled material flags; they do not qualify the real
+shader/material or raster path. Source-bound receipts in evidence/ identify the
+final chain tests.
+
+The initial producer tests use real command topology with bounded queue credits,
+immutable context/source copies, ordered completion and drain-before-recycle.
+No host execution time is used to estimate Pocket performance.
+
+Resource intent
+
+There is one shared geometry FMA; this is not a second general-purpose CPU.
+The design reuses the existing raw vertex memories and arithmetic. The bounded
+survivor list requests one M10K. Packet conversion and the two-word command
+reader add no BRAM. A complete path would still need its output queue and
+descriptor/context storage; the proposed 512-word output FIFO costs two M10Ks.
+
+The qualified baseline has only 311 ALMs and four M10Ks spare. Replacing the old
+snapshot banks and ownership logic may make room, but no final ALM/M10K fit or
+timing result has been established. Component register/RAM declarations are not
+a substitute for a complete Quartus build.
+
+Required integration before an FPS claim
+
+1. Capture and publish material/viewport state in draw order, including cold
+   materials whose preparation is currently deferred until the first live draw.
+2. Provide ordered task-local repair for clipping, equal-W and unsupported
+   arithmetic/material cases. A CPU that has advanced cannot restore old global
+   renderer state to repair an earlier task.
+3. Bind real PSRAM offsets, queue credits and source/context leases. Drain the
+   worker before recycling the raw source arena; retain final raw slots for any
+   subsequent CPU or mixed-generation vertex consumer.
+4. Connect the command fetcher, geometry owner and packet output to the real
+   application/ingress. Never release a task with outstanding prefetched DMA or
+   a partially published packet. Consumer-only resets cannot abandon AXI reads.
+5. Run paired full-frame simulation with the actual application, worker service,
+   material/repair costs and bounded queues. Only a demonstrated net gain should
+   proceed to physical fitting and a hardware trial.
+
+The frozen report, recipes and source hashes make this stage reviewable. The
+remaining work is application integration and measurement, not another FIFO-size
+experiment or a claim that the CPU has already been unblocked in the deployed core.

@@ -1,0 +1,522 @@
+[
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/test-v2/report.json",
+    "package": "evidence/packet.json",
+    "sha256": "1c6bca7704cc78342181dd5f6b5cf5e544cad6fed3033c21d92e12e2ab414dc1"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/geometry_mesh_packet.v",
+    "package": "rtl/geometry_mesh_packet.v",
+    "sha256": "7514026cf2b23e8f219aa193e24c922bacac05e04079bd6f3edd772cbb97e493"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/model/frozen/src/fpga/common/geometry_import_convert.v",
+    "package": "rtl/geometry_import_convert.v",
+    "sha256": "3beac876e469ec45ff3d3e81c9645671dcb92737d1f84dd188ca454fbbcf7526"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/test_packet.cpp",
+    "package": "tests/test_packet.cpp",
+    "sha256": "d59ea78d3cda5f3f21b328ef6406836721dc8d25683169a8bf1c38fb42c5bd2a"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/fetch-v2/report.json",
+    "package": "evidence/fetch.json",
+    "sha256": "7f7426bb59485918e60e16efd428123d688a3db0e4bcd7a7ad5ca9829850def2"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/geometry_mesh_command_fetch.v",
+    "package": "rtl/geometry_mesh_command_fetch.v",
+    "sha256": "a740d2c2d961bcbe3421e7de594ca842b3c3caf2a38dff7de89ff067c9b93cf8"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/test_fetch.cpp",
+    "package": "tests/test_fetch.cpp",
+    "sha256": "92140b00a9c8b5e829d6a0d3506bb909b31307bacf0913f99452222bd8d951bd"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/engine-v4/manifest.json",
+    "package": "evidence/engine.json",
+    "sha256": "d16dd0a269fb7f52020981f10e717d814cbb071423bf99884a69fadbb2c2b995"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/rtl/geometry_mesh_task_ctrl.v",
+    "package": "rtl/geometry_mesh_task_ctrl.v",
+    "sha256": "b2efc5506e55bec2bc3fd2c99532e33b88f6e1270cc55ffc3d28370d21da980d"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/rtl/geometry_mesh_raw_frontend.v",
+    "package": "rtl/geometry_mesh_raw_frontend.v",
+    "sha256": "61854f2d9949339c9b4c123d1b174da3828601cbf1edcbc0c410fbf854fac764"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/rtl/geometry_mesh_task_engine.v",
+    "package": "rtl/geometry_mesh_task_engine.v",
+    "sha256": "89ffb46cdcc2366fefc9b4334d5f0d3f1a66667f072078c69281226f8f4f81e5"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/native-v1/frozen/src/fpga/common/geometry_float_cull_mem.v",
+    "package": "rtl/geometry_float_cull_mem.v",
+    "sha256": "53163df4519861d2ffa3d115b45656a90f03e6ef869a02188d1344710931f2ac"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/geometry_raw_load.v",
+    "package": "rtl/geometry_raw_load.v",
+    "sha256": "ade3041bfd27ab6200c5d6356775adac778a34eb0d81c1f253ff83367627c144"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/geometry_transform_light.v",
+    "package": "rtl/geometry_transform_light.v",
+    "sha256": "6987e27771c84173b31eb53e9f3bce4e7337437414548ef089f3adfe430c810f"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/GeometryFmaProbe.v",
+    "package": "rtl/GeometryFmaProbe.v",
+    "sha256": "348d11609de14326dc9408c11e39a385a85a4e0678eaaf5d69f39d6cfba38088"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/phase10_raw_vtx_dma.v",
+    "package": "rtl/phase10_raw_vtx_dma.v",
+    "sha256": "ce51296a880ef212cacffbe4bb4c1728fc1bc9976d3504dd91883882d4316f81"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/geometry_float_batch_recip.v",
+    "package": "rtl/geometry_float_batch_recip.v",
+    "sha256": "c3cc22d4aa4559d0cfe087c6556361eec22e363fbff79072bb65a1028c3dfd9b"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/phase10_float_recip2.v",
+    "package": "rtl/phase10_float_recip2.v",
+    "sha256": "d68bc3fcdcb750f88cebf9aa8ed890a499d12210cbd50fe9d3a049c168bea5cc"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/geometry_color_rtz.v",
+    "package": "rtl/geometry_color_rtz.v",
+    "sha256": "27025e32c4c8f42168db8e49149d9ee7cd2255d606ddb7ed0f5c932bedd1a335"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/test_engine.cpp",
+    "package": "tests/test_engine.cpp",
+    "sha256": "7c7123375ecb3f66a8a5435e1451556d9307568fd9e4bcbd82797aa4aa99a3cb"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/chain-v1/manifest.json",
+    "package": "evidence/chain.json",
+    "sha256": "94ce9356d2ae33e6333c005d8682d3720f13896747c9a9d239266c4921c85028"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/rtl/geometry_mesh_task_ctrl.v",
+    "package": "rtl/geometry_mesh_task_ctrl.v",
+    "sha256": "b2efc5506e55bec2bc3fd2c99532e33b88f6e1270cc55ffc3d28370d21da980d"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/rtl/geometry_mesh_raw_frontend.v",
+    "package": "rtl/geometry_mesh_raw_frontend.v",
+    "sha256": "61854f2d9949339c9b4c123d1b174da3828601cbf1edcbc0c410fbf854fac764"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/rtl/geometry_mesh_task_engine.v",
+    "package": "rtl/geometry_mesh_task_engine.v",
+    "sha256": "89ffb46cdcc2366fefc9b4334d5f0d3f1a66667f072078c69281226f8f4f81e5"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/native-v1/frozen/src/fpga/common/geometry_float_cull_mem.v",
+    "package": "rtl/geometry_float_cull_mem.v",
+    "sha256": "53163df4519861d2ffa3d115b45656a90f03e6ef869a02188d1344710931f2ac"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/geometry_raw_load.v",
+    "package": "rtl/geometry_raw_load.v",
+    "sha256": "ade3041bfd27ab6200c5d6356775adac778a34eb0d81c1f253ff83367627c144"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/geometry_transform_light.v",
+    "package": "rtl/geometry_transform_light.v",
+    "sha256": "6987e27771c84173b31eb53e9f3bce4e7337437414548ef089f3adfe430c810f"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/GeometryFmaProbe.v",
+    "package": "rtl/GeometryFmaProbe.v",
+    "sha256": "348d11609de14326dc9408c11e39a385a85a4e0678eaaf5d69f39d6cfba38088"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/phase10_raw_vtx_dma.v",
+    "package": "rtl/phase10_raw_vtx_dma.v",
+    "sha256": "ce51296a880ef212cacffbe4bb4c1728fc1bc9976d3504dd91883882d4316f81"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/geometry_float_batch_recip.v",
+    "package": "rtl/geometry_float_batch_recip.v",
+    "sha256": "c3cc22d4aa4559d0cfe087c6556361eec22e363fbff79072bb65a1028c3dfd9b"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/phase10_float_recip2.v",
+    "package": "rtl/phase10_float_recip2.v",
+    "sha256": "d68bc3fcdcb750f88cebf9aa8ed890a499d12210cbd50fe9d3a049c168bea5cc"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/geometry_color_rtz.v",
+    "package": "rtl/geometry_color_rtz.v",
+    "sha256": "27025e32c4c8f42168db8e49149d9ee7cd2255d606ddb7ed0f5c932bedd1a335"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/geometry_mesh_chain.v",
+    "package": "tests/geometry_mesh_chain.v",
+    "sha256": "d5b5b6097143bcd0910c77825562e06c18b3f65bdcba76fee2b1bdc1274d32f8"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/geometry_mesh_packet.v",
+    "package": "rtl/geometry_mesh_packet.v",
+    "sha256": "7514026cf2b23e8f219aa193e24c922bacac05e04079bd6f3edd772cbb97e493"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/native-v1/frozen/src/fpga/common/geometry_import_convert.v",
+    "package": "rtl/geometry_import_convert.v",
+    "sha256": "3beac876e469ec45ff3d3e81c9645671dcb92737d1f84dd188ca454fbbcf7526"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/test_chain.cpp",
+    "package": "tests/test_chain.cpp",
+    "sha256": "4bce3ea275d5bfd5377d208949d5e2aadac759f39e6785956adf360c79692808"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/stream-control-v3/manifest.json",
+    "package": "evidence/stream-control.json",
+    "sha256": "a3f3e19b2fdfecf6d2d0f3ef75bb43180091b5710177f8689f95e0d9f9b25224"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/rtl/geometry_mesh_task_ctrl.v",
+    "package": "rtl/geometry_mesh_task_ctrl.v",
+    "sha256": "b2efc5506e55bec2bc3fd2c99532e33b88f6e1270cc55ffc3d28370d21da980d"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/rtl/geometry_mesh_raw_frontend.v",
+    "package": "rtl/geometry_mesh_raw_frontend.v",
+    "sha256": "61854f2d9949339c9b4c123d1b174da3828601cbf1edcbc0c410fbf854fac764"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/rtl/geometry_mesh_task_engine.v",
+    "package": "rtl/geometry_mesh_task_engine.v",
+    "sha256": "89ffb46cdcc2366fefc9b4334d5f0d3f1a66667f072078c69281226f8f4f81e5"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/native-v1/frozen/src/fpga/common/geometry_float_cull_mem.v",
+    "package": "rtl/geometry_float_cull_mem.v",
+    "sha256": "53163df4519861d2ffa3d115b45656a90f03e6ef869a02188d1344710931f2ac"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/geometry_raw_load.v",
+    "package": "rtl/geometry_raw_load.v",
+    "sha256": "ade3041bfd27ab6200c5d6356775adac778a34eb0d81c1f253ff83367627c144"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/geometry_transform_light.v",
+    "package": "rtl/geometry_transform_light.v",
+    "sha256": "6987e27771c84173b31eb53e9f3bce4e7337437414548ef089f3adfe430c810f"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/GeometryFmaProbe.v",
+    "package": "rtl/GeometryFmaProbe.v",
+    "sha256": "348d11609de14326dc9408c11e39a385a85a4e0678eaaf5d69f39d6cfba38088"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/phase10_raw_vtx_dma.v",
+    "package": "rtl/phase10_raw_vtx_dma.v",
+    "sha256": "ce51296a880ef212cacffbe4bb4c1728fc1bc9976d3504dd91883882d4316f81"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/geometry_float_batch_recip.v",
+    "package": "rtl/geometry_float_batch_recip.v",
+    "sha256": "c3cc22d4aa4559d0cfe087c6556361eec22e363fbff79072bb65a1028c3dfd9b"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/phase10_float_recip2.v",
+    "package": "rtl/phase10_float_recip2.v",
+    "sha256": "d68bc3fcdcb750f88cebf9aa8ed890a499d12210cbd50fe9d3a049c168bea5cc"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/geometry_color_rtz.v",
+    "package": "rtl/geometry_color_rtz.v",
+    "sha256": "27025e32c4c8f42168db8e49149d9ee7cd2255d606ddb7ed0f5c932bedd1a335"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/rtl/geometry_mesh_stream.v",
+    "package": "rtl/geometry_mesh_stream.v",
+    "sha256": "3305e56087a718d675c0141f8c723ab61e7ad3df81d246ec5db6913ab8ef17c3"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/geometry_mesh_command_fetch.v",
+    "package": "rtl/geometry_mesh_command_fetch.v",
+    "sha256": "a740d2c2d961bcbe3421e7de594ca842b3c3caf2a38dff7de89ff067c9b93cf8"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/geometry_mesh_packet.v",
+    "package": "rtl/geometry_mesh_packet.v",
+    "sha256": "7514026cf2b23e8f219aa193e24c922bacac05e04079bd6f3edd772cbb97e493"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/native-v1/frozen/src/fpga/common/geometry_import_convert.v",
+    "package": "rtl/geometry_import_convert.v",
+    "sha256": "3beac876e469ec45ff3d3e81c9645671dcb92737d1f84dd188ca454fbbcf7526"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/test_stream_control.cpp",
+    "package": "tests/test_stream_control.cpp",
+    "sha256": "c4841821323d0a5d9f0bd0bb05b6a1af5a6bae29e587caf29bf59986c741155f"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/package_runner.py",
+    "package": "run_tests.py",
+    "sha256": "ef1070773acb72ea080e9e8933cbdf47d710852fda9f6ff017fda54b84518ac9"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/package_verify.py",
+    "package": "verify.py",
+    "sha256": "0f2891bee8d9975b348a54c9bde7cbb6c6ad68a3be5e591a79ad82e0f9bfbb15"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/README.txt",
+    "package": "README.txt",
+    "sha256": "fefce8e2b00ec20ade3454c4d634805b2fb2de9231912cc2380d51d880cb0e98"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/REPORT.txt",
+    "package": "REPORT.txt",
+    "sha256": "a63d9b1842b6dde05e860c3c96055066d29270a3875769fcea791dfdb536ed15"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native-task-v3/passivity.json",
+    "package": "evidence/passivity.json",
+    "sha256": "9eb7f01aae829ab5e77ac30f51b6cbe7d43a0711cd3b7659254a6c9fc6bb2f1c"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native-task-v3/classification.json",
+    "package": "evidence/classification.json",
+    "sha256": "3f840addcf5644d8ad6199c56f60a7be9b1124c71a1a3868e69a0a20927afe81"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native-task-v3/cost-ledger.json",
+    "package": "evidence/cost-ledger.json",
+    "sha256": "890396c3de00a69f0698855b44e451455c168800b4ca05e81bac6ffd0a877506"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/final-review-v2.json",
+    "package": "evidence/review.json",
+    "sha256": "41d8cf09d7dd8469096fe3847522c381008a93469a3d1e66c2c474be8b710bdc"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/controller-v3/manifest.json",
+    "package": "evidence/controller.json",
+    "sha256": "a708d6b386316d2ae6952732bb7a9e25ff708b5277d5ea1136660485829d643d"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/scene-chain-v1/manifest.json",
+    "package": "evidence/scene-chain.json",
+    "sha256": "d582790692c975938d523b1d1bb607e08532972a5088be46c834b3e36d120031"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/scene-cull-oracle-v1/manifest.json",
+    "package": "evidence/cpu-cull-oracle.json",
+    "sha256": "b40fcea95b94252aa0187ba8ded612a31933969e67a094fe249d066ffb3311f0"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/architecture-v2.json",
+    "package": "evidence/architecture.json",
+    "sha256": "cbbdc2d376d92e1821fd8654620c505476c41c2daf89eca824f4c0023c001d54"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/coverage-frame360.json",
+    "package": "evidence/static-coverage.json",
+    "sha256": "bc3a0a459ded372738b1bfff544cd2dccf992d919b2246d486948323be4cff0e"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/task-packet-proof.json",
+    "package": "evidence/static-packets.json",
+    "sha256": "a1661ced9efe9b44a52572076c4656edddad1590f340f14ddbb88e4a2855a876"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/source-traversal-proof.json",
+    "package": "evidence/source-traversal.json",
+    "sha256": "3110ef7fe3437b661e9e10e1c46bf36ac43232141b0bc36946bba490922d5fea"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/native-vectors-v3/manifest.json",
+    "package": "evidence/native-vectors.json",
+    "sha256": "934b27dd8a16c0e0ebaac3989f347576a8e85e6ee2deaaefbac555ba6a400cc0"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native_tasks_v3.py",
+    "package": "analysis/native_tasks_v3.py",
+    "sha256": "fec7e5e4b213aa0a37621b5c1e9e29fcb135bdd868bd30c54fb84c6e0de2a575"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/task_observer_v3.hpp",
+    "package": "analysis/task_observer_v3.hpp",
+    "sha256": "32b4fc2d0d59295022a171f7662791d85f93ae46f488460d492201465650fd8a"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/classify_tasks_v1.py",
+    "package": "analysis/classify_tasks_v1.py",
+    "sha256": "550dcbb88834f25b89961ee75b7019f7a9a4f716b573351b5496cbc8cde82309"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/measure_snapshot.py",
+    "package": "analysis/measure_snapshot.py",
+    "sha256": "14350b7f2987c592c9afd80cc0244b6c4bc9a1d667a28bff181c554cf5a476cd"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/compile_tasks.py",
+    "package": "analysis/compile_tasks.py",
+    "sha256": "737e9c8fea7ed4ab8823d37de35a8fd3ae6567613459182c122bf47016c3b0e5"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/check_source_traversal.py",
+    "package": "analysis/check_source_traversal.py",
+    "sha256": "cdc5147be23efa402ee5a8ae43450c7cdb755932dc1c37bdbdfa8081039025c2"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/verify_layout.py",
+    "package": "analysis/verify_layout.py",
+    "sha256": "7e2fbd727b1d1e70075cb8190078628313bb43920450904ff765b74ec8b5cf2f"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/summarize_task_costs_v2.py",
+    "package": "analysis/summarize_task_costs_v2.py",
+    "sha256": "807190c0069ae4ab415e6b6e441439eec376ae565d926c2c89f9438aa568185e"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/join_native_vectors.py",
+    "package": "analysis/join_native_vectors.py",
+    "sha256": "7ce2cb0ad626bfc77e4a6ef0b9e115a5f0c50be7aff4cc557833852515e04990"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/run_scene_chain.py",
+    "package": "analysis/run_scene_chain.py",
+    "sha256": "32290433604aff7c92d5be2a6277d63d6efde6d8828cb17e04016d89e48fbd66"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/run_scene_cull_oracle.py",
+    "package": "analysis/run_scene_cull_oracle.py",
+    "sha256": "30ddf8f2bb81d07c5d560d634541125587a484de67e5fe5eade56c83e348a501"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/producer-v1/task_producer.hpp",
+    "package": "producer/task_producer.hpp",
+    "sha256": "0c56f89b71a53b8e055ad1ce51215a037afc884d08f1d2226a19539488ddb698"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/producer-v1/test_producer.cpp",
+    "package": "producer/test_producer.cpp",
+    "sha256": "afbcbfe51b4538bd84b23eafb6dd2db9ae28be6814c4f12eb7a6e033547230da"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/producer-v1/run.py",
+    "package": "producer/run.py",
+    "sha256": "2639d217a8dce82a87d02338ffd903ac9579376acc2e5d5e0f662a9c30c3c1be"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/producer-v1/result.json",
+    "package": "evidence/producer.json",
+    "sha256": "c365dfb86d96c8f7fe802ed4d7402a85ea4459b41b0a98bcaafc8c813dcbf02f"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/source-manifest.json",
+    "package": "evidence/app-source-manifest.json",
+    "sha256": "9abf1247004b9869712692dc53b3bae514d4ef7badb72eb2c188ec78bcaab9a2"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/scene-outcomes-v1.json",
+    "package": "evidence/scene-outcomes.json",
+    "sha256": "687ebd8382252fbcc68c43f7cf06ebf0a29efb2e52039279b25139a1060227de"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/exact-geometry-ledger.json",
+    "package": "evidence/exact-geometry-ledger.json",
+    "sha256": "dddced4bbe92f1779582b3bc8245b9d710dd8c3561045da238b259669ac171e0"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/exact_geometry_ledger.py",
+    "package": "analysis/exact_geometry_ledger.py",
+    "sha256": "a3e0d4c2c13344c84aaef4bcbd61d2f8e531990c0bcbe02c10e930caed08039a"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/scene-stream-v2/manifest.json",
+    "package": "evidence/scene-stream.json",
+    "sha256": "6cd54b0bef07f7af91bb557840a947fd3f99cc2cae1200153a044a2b9d18a8c1"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native-task-v3/source-layout-proof.json",
+    "package": "evidence/raw-source-layout.json",
+    "sha256": "bd63241edc6cb075728124128ea7bdca52110c64648be73ff4ec59f9c59eabb7"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native-task-v3/build.json",
+    "package": "evidence/passive-build.json",
+    "sha256": "b73d2a97ad2e50785d18b5ea0ece508ddecc8629d57cd8667429df4206c20f55"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/results.json",
+    "package": "results.json",
+    "sha256": "60eb2fbab2e4121d0e66f5e1b8c86a184e8cab92fddc82043f806ec80659226e"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/source-manifest.json",
+    "package": "evidence/core-source-manifest.json",
+    "sha256": "850b97a041c2b94693f0e017596f3bb5ba1cc1b415056962b846434ac6fb10df"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/REPORT.txt",
+    "package": "evidence/core-report.txt",
+    "sha256": "dcbf7bc85d95936e2d80dca666f6f4e51292750f1906db67e4a3bf05d9d26a6d"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/run_scene_stream.py",
+    "package": "analysis/run_scene_stream.py",
+    "sha256": "2d5f9cdc4e2466346506690808ebccbef5150e27b812a2fb6eef06b5e8221adc"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/test_scene_stream.cpp",
+    "package": "analysis/test_scene_stream.cpp",
+    "sha256": "dc0d60077553acb965cb78e4eeb35f3dc091c095bc5e117c7e2d6adcf1a3d458"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/test_scene_chain.cpp",
+    "package": "analysis/test_scene_chain.cpp",
+    "sha256": "1844255138d6c3c6a07b7fe560a6e426ba2a2e046e0a1bd5f1c0138217b76d91"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/analyze_scene.py",
+    "package": "analysis/analyze_scene.py",
+    "sha256": "3daf220423ca3af49a7eee0431ddd73eff947c7c133b50538c467bff8d9d6fc1"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/task_outcomes.py",
+    "package": "analysis/task_outcomes.py",
+    "sha256": "268c9d27416b9de0681e5f435a95834f29731a6b39019bd24f537733964d5e9f"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/verify_layout_v2.py",
+    "package": "analysis/verify_layout_v2.py",
+    "sha256": "5293d7c28f420577562bb458797842e6ecf418f91c39ca2b447b6d04fb4ea3d3"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/producer-scene-audit-v1.json",
+    "package": "evidence/independent-accounting-audit.json",
+    "sha256": "548d90318bc9715d2f6ce75ddd2a1aa3a1ffd44347e11dce5984901807a4951c"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/verify_producer_scene_v1.py",
+    "package": "analysis/verify_producer_scene_v1.py",
+    "sha256": "b5405e7bb77a0b4970051c02acb423519ed06f843f0e6b005994dc87cecde34d"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/build_source_package.py",
+    "package": "recipes/build_source_package.py",
+    "sha256": "51c89a0e684b0381ecbaea2e61d04af2dd10c398a773da91e37b95926a9be0e9"
+  },
+  {
+    "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/package-spec.json",
+    "package": "package-spec.json",
+    "sha256": "137cb81a8f7726f9a66bbe738c64b03fa9d5aa9a19aaa351ebeba08cc165d540"
+  }
+]

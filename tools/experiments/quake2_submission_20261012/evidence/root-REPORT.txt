@@ -1,0 +1,83 @@
+Quake2 submission batching experiment — 2026-10-12
+
+Decision: reject both candidates as performance changes. Neither produces a
+meaningful modeled frame-time improvement. Production renderer source and
+Pocket files are unchanged. No FPGA compilation or seed sweep was performed.
+
+Two independent app-only candidates were built against a fresh control from
+the current Quake2 checkout, including its existing uncommitted work. The
+baseline inventory pins 715 inputs. All three use GCC 15.2.0 and the same
+Quake2 worker ABI and selected experimental core. SM64 AJ03 was not installed:
+it has different geometry descriptors and memory topology.
+
+World v1 caches the complete 0x59 vertex upload and individual 0x5b fan
+packets, then copies up to 512 words from compatible polygons under one
+reservation. Inline geometry and CPU fallback retain their original packets.
+Aliases v2 groups up to eight opaque CPU-prepared 0x4e triangles under one
+reservation, using only capacity already known free. It keeps the original
+triangle math and payload copy and closes the scope before publication.
+Blended and diagnostic draws retain the ordinary path.
+
+Modeled CPU cycles per steady frame (negative change is better):
+                     Control       World v1     Change       Alias v2    Change
+Main demo         5,520,031.33   5,513,142.64   -0.1248%     5,516,053.91   -0.0721%
+Sound demo        6,597,557.29   6,590,626.61   -0.1050%     6,599,092.04   +0.0233%
+Live movement     5,881,152.93   5,871,016.52   -0.1724%     5,880,310.52   -0.0143%
+
+Main/sound/live run 360/120/120 frames, excluding the first 20 from timing.
+These are scalar OS25-derived CPU/cache estimates, not Vexii or Pocket FPS.
+The source/ELF pairs, commands, inputs and tool versions are recorded in the
+validation receipts. Older v6 results are not used as the performance control.
+
+World reservations fall from 149.58 to 42.78 per steady main frame, 158.41 to
+41.33 sound, and 119.29 to 38.17 live: 68.00–73.91% fewer admissions. A passive
+observer of existing instruction counters reproduces candidate execution,
+all instruction/cycle totals, profiles and output bytes exactly. The extra
+world cache costs 275,392 / 318,016 / 322,240 bytes in demo1/2/3 respectively,
+including hunk allocation alignment. Model size estimation accounts for it.
+
+This does not remove an equivalent number of physical submissions. The SDK
+already caches ring capacity and combines packets in large staged buffers.
+Alias batching leaves actual publication counts and read-pointer observation
+counts unchanged. World publication count changes by only +32 / +16 / -9 over
+the entire main/sound/live runs. Both candidates transmit precisely the same
+GPU words. Per-triangle arithmetic and payload production/copy still happen.
+The control profile assigns 12.6–13.8% of demo CPU time to ofgl_emit_ctri,
+including triangle preparation and its inlined emitter, plus substantial
+alias vertex processing. Reducing admission bookkeeping does not remove that
+work. A useful coarse mesh job would need to avoid that preparation and
+payload traffic; simply grouping existing packets does not establish this.
+
+Correctness and compatibility:
+- Both candidates retain every command byte, command order and frame tag,
+  including trailing records, across all three workloads. All full-width
+  CPU framebuffer captures and sound service counts match.
+- Four selected actual RTL replays (frames 20/80/180/300) retain every color
+  and depth pixel for each candidate. Full 320x240 output is compared.
+- World passes 15 renderer sanitizer groups plus geometry tests; alias
+  passes 14 groups plus scope/clipping and bounded ring-capacity tests.
+- Original strict worker comparison for world reports failure solely for
+  gpu_barriers diagnostic counts: packet grouping changes when status reads
+  observe work. That original result is retained. A separate semantic gate
+  proves exact fence packets and zero hazards; it does not relabel the
+  original comparison as passing. Alias passes the original strict checks.
+- CPU-only and inline-capability main comparisons preserve exact outputs.
+  World CPU-time changes are -0.251% / -0.108%; alias +0.325% / -0.114%.
+
+The command-recording CPU simulator does not rasterize 3D. RTL replay is a
+separate maximal-rate producer model with resident textures, not a coupled
+CPU/GPU/audio/scanout model. These results do not establish on-device FPS or
+stability. The existing experimental core's known timing limitation remains
+unchanged (configured 100 MHz, 90.60 MHz same-clock restricted Fmax, -1.038 ns setup slack).
+
+Preserved artifacts:
+- baseline-source.json: full baseline input hashes and checkout identity.
+- world/evidence/: frozen source/build, tests, map growth and passive counts.
+- alias/evidence/: frozen source/build, scope/capacity tests and source patch.
+- validation/: baseline and candidate CPU runs, exact comparisons, full
+  sampled RTL comparisons, pinned simulator inputs and source/build receipts.
+- tools/experiments/quake2_submission_20261012 in the openfpgaCore checkout:
+  compact baseline source archive, exact variant overlays/patches, validation
+  receipts and verifier/stager. Game PAKs and large traces are not included.
+
+No candidate has been promoted to ../Quake2/src or deployed to the SD card.

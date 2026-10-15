@@ -1,0 +1,1675 @@
+--- a/build/ap_core.qsf
++++ b/build/ap_core.qsf
+@@ -782,14 +782,14 @@
+ 
+ 
+ set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top
+-set_global_assignment -name QIP_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/third_party/analogizer/analogizer.qip
+-set_global_assignment -name QIP_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/apf/apf.qip
+-set_global_assignment -name QIP_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/apf/mf_ddio_bidir_12.qip
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/os30/core_top.v
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/core_bridge_cmd.v
+-set_global_assignment -name MIF_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/firmware.mif
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/os30/io_sdram.v
+-set_global_assignment -name QIP_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/megafunctions/mf_pllbase.qip
++set_global_assignment -name QIP_FILE ../frozen/src/fpga/targets/pocket/third_party/analogizer/analogizer.qip
++set_global_assignment -name QIP_FILE ../frozen/src/fpga/targets/pocket/apf/apf.qip
++set_global_assignment -name QIP_FILE ../frozen/src/fpga/targets/pocket/apf/mf_ddio_bidir_12.qip
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/os30/core_top.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/core_bridge_cmd.v
++set_global_assignment -name MIF_FILE ../frozen/src/fpga/targets/pocket/firmware.mif
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/os30/io_sdram.v
++set_global_assignment -name QIP_FILE ../frozen/src/fpga/targets/pocket/megafunctions/mf_pllbase.qip
+ 
+ # PSRAM sync burst: IOB input registers for fast data capture
+ set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram0_dq[0]
+@@ -891,50 +891,50 @@
+ # Source files added after initial commit
+ # audio_mixer.v v2 - hardware voice mixer, SDRAM sample fetch (resurrected post-f11811c).
+ # audio_dma.v retired (v1 pre-mixed ring DMA); HW mixer now drives the FIFO directly.
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/../../common/os30/audio_mixer.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/../../common/os30/audio_mixer.v
+ # cram1_controller.v / cram1_phy.sv / axi_cram1_slave.v / bridge_to_cram1.v /
+ # cram1_burst_mmio.v retired in memory-arch v2.
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/audio_output.v
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/../../common/os30/gpu_core.v
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/../../common/gpu_geometry_worker.v
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/../../common/gpu_edge_walker.v
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/../../common/os30/gpu_tex_cache.v
+-set_global_assignment -name SYSTEMVERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/../../common/os30/gpu_color_depth_cache.sv
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/../../common/os30/axi_periph_slave.v
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/../../common/sync_fifo.v
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/snac_shifter.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/audio_output.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/../../common/os30/gpu_core.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/../../common/gpu_geometry_worker.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/../../common/gpu_edge_walker.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/../../common/os30/gpu_tex_cache.v
++set_global_assignment -name SYSTEMVERILOG_FILE ../frozen/src/fpga/targets/pocket/../../common/os30/gpu_color_depth_cache.sv
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/../../common/os30/axi_periph_slave.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/../../common/sync_fifo.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/snac_shifter.v
+ # PSX SNAC: upstream Analogizer DualShock decoder (instantiated in axi_periph_slave.v)
+-set_global_assignment -name SYSTEMVERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/third_party/analogizer/analogizer_psx.sv
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/third_party/analogizer/dualshock_controller.v
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/../../common/axi_register_slice.v
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/../../common/axi_sdram_arbiter.v
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/../../common/axi_sdram_slave.v
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/../../common/os30/cpu_system.v
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/../../common/cpu_target_port.v
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/../../common/cpu_target_port_per.v
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/frac_cen.v
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/link_lite.v
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/cram0_controller.v
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/cram0_cdc.v
+-set_global_assignment -name SYSTEMVERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/third_party/cram0_phy.sv
++set_global_assignment -name SYSTEMVERILOG_FILE ../frozen/src/fpga/targets/pocket/third_party/analogizer/analogizer_psx.sv
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/third_party/analogizer/dualshock_controller.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/../../common/axi_register_slice.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/../../common/axi_sdram_arbiter.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/../../common/axi_sdram_slave.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/../../common/os30/cpu_system.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/../../common/cpu_target_port.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/../../common/cpu_target_port_per.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/frac_cen.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/link_lite.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/cram0_controller.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/cram0_cdc.v
++set_global_assignment -name SYSTEMVERILOG_FILE ../frozen/src/fpga/targets/pocket/third_party/cram0_phy.sv
+ # CRAM1: dedicated GPU sync-burst texture memory (Pocket-only fast texture
+ # memory).  Pocket-specific, so these live in targets/pocket/ (not common/).
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/cram1_controller.v
+-set_global_assignment -name SYSTEMVERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/cram1_phy.sv
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/gpu_cram1_tex_adapter.v
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/sram_controller.v
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/uart_rx.v
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/uart_tx.v
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/../../common/video_CRT_scanout_indexed_BRAM.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/cram1_controller.v
++set_global_assignment -name SYSTEMVERILOG_FILE ../frozen/src/fpga/targets/pocket/cram1_phy.sv
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/gpu_cram1_tex_adapter.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/sram_controller.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/uart_rx.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/uart_tx.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/../../common/video_CRT_scanout_indexed_BRAM.v
+ # Per-variant CPU netlist (VexiiRiscv_<variant>.v) is injected into the
+ # generated bld/<job>/ap_core.qsf by the pocket Makefile (see VEXII_OUT).
+ # Not added here in the master qsf so a raw `quartus_sh --flow` doesn't
+ # accidentally link an arbitrary variant — the Makefile is the source of
+ # truth for which CPU to fit.
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/megafunctions/mf_pllram_133.v
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/megafunctions/mf_pllram_96.v
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/megafunctions/mf_pllram_90.v
+-set_global_assignment -name SDC_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/core_constraints.sdc
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/megafunctions/mf_pllram_133.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/megafunctions/mf_pllram_96.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/megafunctions/mf_pllram_90.v
++set_global_assignment -name SDC_FILE ../frozen/src/fpga/targets/pocket/core_constraints.sdc
+ # Fallback seed for raw quartus_sh runs.  `make build` overrides this per
+ # variant with --seed from the repo-stored seeds/<variant>.seed (the source
+ # of truth); `make sweep` writes the winner there.
+@@ -958,29 +958,29 @@
+ # bridge pin bank (pins at X54_Y20 / X42_Y45).
+ 
+ # Opt-in os30 83/83/166 clock experiment (unused modules prune in normal builds).
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/../../common/axi_sdram_clock_bridge.v
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/megafunctions/mf_pllram_166.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/../../common/axi_sdram_clock_bridge.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/megafunctions/mf_pllram_166.v
+ # os30-only candidate sources/settings. Common files and other variants are unchanged.
+ 
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/../../common/os30/phase10_load_alias.v
+-
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/../../common/os30/phase10_bram_alias.v
+-
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/../../common/os30/phase10_float_recip2.v
+-
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/../../common/os30/phase10_raw_vtx_dma.v
+-
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/../../common/os30/GeometryFmaProbe.v
+-
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/../../common/os30/geometry_lighting_batch.v
+-
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/../../common/os30/geometry_color_rtz.v
+-
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/../../common/os30/geometry_float_batch_recip.v
+-
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/../../common/os30/geometry_transform_light.v
+-
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/../../common/os30/geometry_raw_load.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/../../common/os30/phase10_load_alias.v
++
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/../../common/os30/phase10_bram_alias.v
++
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/../../common/os30/phase10_float_recip2.v
++
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/../../common/os30/phase10_raw_vtx_dma.v
++
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/../../common/os30/GeometryFmaProbe.v
++
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/../../common/os30/geometry_lighting_batch.v
++
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/../../common/os30/geometry_color_rtz.v
++
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/../../common/os30/geometry_float_batch_recip.v
++
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/../../common/os30/geometry_transform_light.v
++
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/../../common/os30/geometry_raw_load.v
+ 
+ # Exact selected compact-v7 settings; no timing-constraint changes.
+ set_global_assignment -name OPTIMIZATION_MODE BALANCED
+@@ -989,8 +989,8 @@
+ set_instance_assignment -name OPTIMIZATION_TECHNIQUE SPEED -to ic|cpu|cpu
+ 
+ # LOD5 shares the full-capacity CRAM texture bus.
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket/../../common/os30/phase10_cram1_read_arbiter.v
+-set_global_assignment -name VERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/vendor/vexriscv/VexiiRiscv/VexiiRiscv_os30.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/targets/pocket/../../common/os30/phase10_cram1_read_arbiter.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/vendor/vexriscv/VexiiRiscv/VexiiRiscv_os30.v
+ set_global_assignment -name VERILOG_MACRO INCLUDE_VERT_TRI
+ set_global_assignment -name VERILOG_MACRO INCLUDE_DIRECT_COLOR
+ set_global_assignment -name VERILOG_MACRO INCLUDE_COMBINE
+@@ -1029,16 +1029,24 @@
+ set_global_assignment -name VERILOG_MACRO INCLUDE_SPAN_LOOKAHEAD
+ set_global_assignment -name SEED 3
+ set_global_assignment -name NUM_PARALLEL_PROCESSORS 4
+-set_global_assignment -name SEARCH_PATH /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/targets/pocket
++set_global_assignment -name SEARCH_PATH ../frozen/src/fpga/targets/pocket
+ 
+ set_global_assignment -name VERILOG_MACRO OF_EXPERIMENT_SDRAM_STAGING
+ set_global_assignment -name VERILOG_MACRO INCLUDE_CLK90
+-set_global_assignment -name SEARCH_PATH /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/experimental/psram32
++set_global_assignment -name SEARCH_PATH ../frozen/src/fpga/experimental/psram32
+ set_global_assignment -name VERILOG_MACRO OF_EXPERIMENT_PSRAM32
+-set_global_assignment -name SYSTEMVERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/experimental/psram32/psram32_pll.v
+-set_global_assignment -name SYSTEMVERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/experimental/psram32/bridge_sdram_apf.sv
+-set_global_assignment -name SYSTEMVERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/experimental/psram32/bridge_sdram_command_gate.sv
+-set_global_assignment -name SYSTEMVERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/experimental/psram32/psram32_axi_error.sv
+-set_global_assignment -name SYSTEMVERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/experimental/psram32/psram32_controller.sv
+-set_global_assignment -name SYSTEMVERILOG_FILE /home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen/src/fpga/experimental/psram32/psram32_axi_adapter.sv
++set_global_assignment -name SYSTEMVERILOG_FILE ../frozen/src/fpga/experimental/psram32/psram32_pll.v
++set_global_assignment -name SYSTEMVERILOG_FILE ../frozen/src/fpga/experimental/psram32/bridge_sdram_apf.sv
++set_global_assignment -name SYSTEMVERILOG_FILE ../frozen/src/fpga/experimental/psram32/bridge_sdram_command_gate.sv
++set_global_assignment -name SYSTEMVERILOG_FILE ../frozen/src/fpga/experimental/psram32/psram32_axi_error.sv
++set_global_assignment -name SYSTEMVERILOG_FILE ../frozen/src/fpga/experimental/psram32/psram32_controller.sv
++set_global_assignment -name SYSTEMVERILOG_FILE ../frozen/src/fpga/experimental/psram32/psram32_axi_adapter.sv
+ set_global_assignment -name PLACEMENT_EFFORT_MULTIPLIER 3.0
++
++# Isolated os30 QGF1 queued triangle front experiment.
++set_global_assignment -name VERILOG_MACRO INCLUDE_GPU_BRAM_IMPORT
++set_global_assignment -name VERILOG_MACRO INCLUDE_GPU_QUEUED_FRONT
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/common/os30/geometry_import_convert.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/common/os30/geometry_import_view.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/common/os30/geometry_float_cull_mem.v
++set_global_assignment -name VERILOG_FILE ../frozen/src/fpga/common/os30/gpu_queued_front.v
+--- /dev/null
++++ b/frozen/src/fpga/common/os30/geometry_float_cull_mem.v
+@@ -0,0 +1,121 @@
++// Compact exact-F11 cull controller. Vertex and six-word scratch storage are
++// supplied by the caller; reads have one-cycle synchronous latency. Reserved
++// scratch words0/1 hold center/products,2/3 hold vertex1differences,4/5 vertex3.
++// The exclusive FMA port has the frozen primitive's6cycle result latency.
++// Vertex fields:0X,1Y,2reciprocalW. negative_w holds exact W<0 predicates.
++module geometry_float_cull_mem(
++ input wire clk,reset,input wire in_valid,output wire in_ready,
++ input wire [14:0] vertex_indices,input wire [17:0] clip_bits,
++ input wire [2:0] negative_w,input wire [1:0] cull_mode,
++ output reg out_valid,input wire out_ready,output reg [1:0] reject_class,
++ output reg [5:0] clip_or,output reg [31:0] cross_bits,output reg unsupported,
++ output reg vertex_read_valid,output reg [4:0] vertex_read_index,
++ output reg [1:0] vertex_read_field,input wire [31:0] vertex_data,
++ output reg scratch_read_valid,output reg [2:0] scratch_read_index,
++ input wire [31:0] scratch_data,output wire scratch_write,
++ output wire [2:0] scratch_write_index,output wire [31:0] scratch_write_data,
++ output wire fma_valid,output reg [31:0] fma_a,fma_b,fma_c,
++ output reg fma_multiply_only,input wire fma_result_valid,
++ input wire [31:0] fma_result,input wire fma_unsupported
++);
++ localparam NONE=0,VERTEX_HOLD=1,VERTEX_MUL=2,VERTEX_MAC=3,
++            SCRATCH_HOLD=4,SCRATCH_MUL=5,SCRATCH_ADD=6;
++ reg busy,bad,parity;
++ reg [14:0] indices;
++ reg [1:0] mode;
++ reg [4:0] pc;
++ reg [31:0] held_operand;
++ reg [2:0] request_kind,read_kind,request_target,read_target;
++ reg [2:0] tags[0:6];
++ reg [2:0] outstanding;
++ assign in_ready=!busy && (!out_valid || out_ready);
++ assign fma_valid=busy && (read_kind==VERTEX_MUL || read_kind==VERTEX_MAC
++                                       || read_kind==SCRATCH_MUL || read_kind==SCRATCH_ADD);
++ assign scratch_write=busy&&fma_result_valid&&tags[6]!=7;
++ assign scratch_write_index=tags[6];
++ assign scratch_write_data=fma_result;
++ always @*begin
++  vertex_read_valid=0;vertex_read_index=0;vertex_read_field=0;
++  scratch_read_valid=0;scratch_read_index=0;request_kind=NONE;request_target=0;
++  if(busy)case(pc)
++   0,5,9:begin
++    vertex_read_valid=1;vertex_read_field=2;request_kind=VERTEX_HOLD;
++    vertex_read_index=pc==0?indices[9:5]:pc==5?indices[4:0]:indices[14:10];
++   end
++   2,3:begin
++    vertex_read_valid=1;vertex_read_index=indices[9:5];vertex_read_field=pc==2?0:1;
++    request_kind=VERTEX_MUL;request_target=pc==2?0:1;
++   end
++   7,8,11,12:begin
++    vertex_read_valid=1;vertex_read_index=pc<9?indices[4:0]:indices[14:10];
++    vertex_read_field=(pc==7||pc==11)?0:1;
++    scratch_read_valid=1;scratch_read_index=(pc==7||pc==11)?0:1;
++    request_kind=VERTEX_MAC;
++    case(pc)7:request_target=2;8:request_target=3;11:request_target=4;default:request_target=5;endcase
++   end
++   14,17,21:begin
++    scratch_read_valid=1;request_kind=SCRATCH_HOLD;
++    scratch_read_index=pc==14?5:pc==17?4:parity?0:1;
++   end
++   16,19:begin
++    scratch_read_valid=1;scratch_read_index=pc==16?2:3;
++    request_kind=SCRATCH_MUL;request_target=pc==16?0:1;
++   end
++   23:begin
++    scratch_read_valid=1;scratch_read_index=parity?1:0;
++    request_kind=SCRATCH_ADD;request_target=7;
++   end
++   default:;
++  endcase
++  fma_a=0;fma_b=held_operand;fma_c=0;fma_multiply_only=0;
++  case(read_kind)
++   VERTEX_MUL:begin fma_a=vertex_data;fma_multiply_only=1;end
++   VERTEX_MAC:begin fma_a=vertex_data;fma_c={~scratch_data[31],scratch_data[30:0]};end
++   SCRATCH_MUL:begin fma_a=scratch_data;fma_multiply_only=1;end
++   SCRATCH_ADD:begin fma_a=32'h3f800000;fma_b=scratch_data;fma_c={~held_operand[31],held_operand[30:0]};end
++   default:;
++  endcase
++ end
++ integer i;
++ always @(posedge clk)begin
++  if(reset)begin
++   busy<=0;out_valid<=0;bad<=0;unsupported<=0;pc<=0;outstanding<=0;
++   read_kind<=NONE;read_target<=0;
++   for(i=0;i<7;i=i+1)tags[i]<=0;
++  end else begin
++   read_kind<=request_kind;read_target<=request_target;
++   tags[0]<=read_target;for(i=1;i<7;i=i+1)tags[i]<=tags[i-1];
++   if(out_valid&&out_ready)out_valid<=0;
++   if(busy&&read_kind==VERTEX_HOLD)held_operand<=vertex_data;
++   if(busy&&read_kind==SCRATCH_HOLD)held_operand<=scratch_data;
++   case({fma_valid,busy&&fma_result_valid})
++    2'b10:outstanding<=outstanding+1'b1;
++    2'b01:outstanding<=outstanding-1'b1;
++    default:;
++   endcase
++   if(busy)begin
++    case(pc)
++     4,13,20:if(outstanding==0&&!fma_valid)pc<=pc+1'b1;
++     24:;
++     default:pc<=pc+1'b1;
++    endcase
++    if(fma_result_valid)begin
++     bad<=bad|fma_unsupported;
++     if(tags[6]==7)begin
++      cross_bits<=fma_result;unsupported<=bad|fma_unsupported;
++      reject_class<=((fma_result[30:0]==0)||(mode==1?fma_result[31]:!fma_result[31]))?2:0;
++      busy<=0;out_valid<=1;
++     end
++    end
++   end else if(in_valid&&in_ready)begin
++    indices<=vertex_indices;mode<=cull_mode;parity<=^negative_w;
++    clip_or<=clip_bits[5:0]|clip_bits[11:6]|clip_bits[17:12];
++    cross_bits<=0;bad<=0;unsupported<=0;pc<=0;outstanding<=0;read_kind<=NONE;
++    if(|(clip_bits[5:0]&clip_bits[11:6]&clip_bits[17:12]))begin reject_class<=1;out_valid<=1;end
++    else if(cull_mode==3)begin reject_class<=2;out_valid<=1;end
++    else if(cull_mode==0)begin reject_class<=0;out_valid<=1;end
++    else busy<=1;
++   end
++  end
++ end
++endmodule
+--- /dev/null
++++ b/frozen/src/fpga/common/os30/geometry_import_convert.v
+@@ -0,0 +1,50 @@
++// Direct LOAD-result import: binary32 power-of-two scale and signed RNE.
++// This is the existing app's FE_TONEAREST contract, not a general FPU.
++// Unsupported nonfinite and nonzero subnormal inputs fail before cache writes.
++module geometry_import_convert (
++    input wire [31:0] value,
++    input wire depth_mode,
++    output reg [31:0] result,
++    output reg error
++);
++    reg [23:0] mantissa;
++    reg [32:0] magnitude, remainder, half;
++    integer shift_count, right_count;
++    always @* begin
++        result = 0;
++        error = 0;
++        mantissa = {1'b1, value[22:0]};
++        magnitude = 0;
++        remainder = 0;
++        half = 0;
++        shift_count = 0;
++        right_count = 0;
++        if (value[30:23] == 8'hff ||
++            (value[30:23] == 0 && value[22:0] != 0)) begin
++            error = 1;
++        end else if (depth_mode && (value[31] || value[30:0] <= 31'h30800000)) begin
++            result = 32'd1;
++        end else if (depth_mode && value[30:0] >= 31'h3fffffff) begin
++            result = 32'h7fffff80;
++        end else if (value[30:23] != 0) begin
++            // value = mantissa * 2^(exponent - 150).
++            shift_count = {24'd0, value[30:23]} + (depth_mode ? 30 : 8) - 150;
++            if (shift_count >= 0) begin
++                if (shift_count > 8) error = 1;
++                else magnitude = {9'd0, mantissa} << shift_count;
++            end else begin
++                right_count = -shift_count;
++                if (right_count <= 24) begin
++                    magnitude = {9'd0, mantissa} >> right_count;
++                    remainder = {9'd0, mantissa} & ((33'd1 << right_count) - 1'b1);
++                    half = 33'd1 << (right_count - 1);
++                    if (remainder > half || (remainder == half && magnitude[0]))
++                        magnitude = magnitude + 1'b1;
++                end
++            end
++            if ((!value[31] && magnitude > 33'h07fffffff) ||
++                (value[31] && magnitude > 33'h080000000)) error = 1;
++            result = value[31] ? -magnitude[31:0] : magnitude[31:0];
++        end
++    end
++endmodule
+--- /dev/null
++++ b/frozen/src/fpga/common/os30/geometry_import_view.v
+@@ -0,0 +1,147 @@
++// BIM2: two immutable snapshots decouple the raw LOAD producer from GPU work.
++// One synchronous raw-result port fills bank A; an independent RAM port feeds
++// the GPU. The source lease ends after copying, not after ordered GPU release.
++module geometry_import_view (
++ input wire clk, reset, consumer_reset,
++ input wire result_success, result_valid, producer_active,
++ input wire [5:0] result_count,
++ input wire claim, clear_error, producer_rejected,
++ input wire [31:0] claim_token,
++ output reg [31:0] generation,
++ output wire leased,
++ output reg error,
++ output reg [31:0] claim_result,
++ output wire [1:0] free_banks,
++ input wire cpu_view_active,
++ input wire [7:0] cpu_view_addr,
++ output wire cpu_view_block,
++ output wire [7:0] result_addr,
++ input wire [31:0] result_data,
++ input wire gpu_req,
++ input wire [31:0] gpu_token,
++ input wire [4:0] gpu_src,
++ input wire [7:0] gpu_addr,
++ output wire gpu_grant, gpu_error,
++ output wire [31:0] gpu_data,
++ input wire gpu_read_done, gpu_release, gpu_fault,
++ input wire [31:0] gpu_release_token,
++ output reg owner
++);
++ localparam COPY_IDLE=2'd0, COPY_WAIT_CPU=2'd1, COPY_PRIME=2'd2, COPY_RUN=2'd3;
++ reg [1:0] copy_state;
++ reg copy_bank, gpu_read_bank;
++ reg [7:0] copy_issue_addr, copy_capture_addr;
++ reg [1:0] bank_valid, bank_ready;
++ reg [31:0] bank_token [0:1];
++ reg [5:0] bank_count [0:1];
++ // 512x32 uses two Cyclone V M10Ks. Port A writes snapshots; port B is
++ // synchronous and independent of the producer/canonical CPU result view.
++ (* ramstyle = "M10K, no_rw_check" *) reg [31:0] snapshot_mem [0:511];
++ reg [31:0] snapshot_q;
++ assign gpu_data = snapshot_q;
++ assign leased = copy_state != COPY_IDLE;
++ assign free_banks = ~bank_valid;
++ assign cpu_view_block = leased;
++ wire copy_owns_raw_port = copy_state == COPY_PRIME || copy_state == COPY_RUN;
++ assign result_addr = copy_owns_raw_port ? copy_issue_addr : cpu_view_addr;
++
++ wire gpu_match0 = bank_valid[0] && bank_token[0] == gpu_token;
++ wire gpu_match1 = bank_valid[1] && bank_token[1] == gpu_token;
++ wire gpu_match = gpu_match0 || gpu_match1;
++ wire gpu_bank = gpu_match1;
++ wire gpu_source_valid = {1'b0,gpu_src} < bank_count[gpu_bank];
++ wire reject_request = gpu_req && !owner && (!gpu_match || !gpu_source_valid);
++ wire accept_request = gpu_req && !owner && gpu_match && gpu_source_valid && bank_ready[gpu_bank];
++ assign gpu_grant = !reset && !consumer_reset && (owner || accept_request);
++ assign gpu_error = !reset && !consumer_reset && reject_request;
++
++ wire duplicate_claim = (bank_valid[0] && bank_token[0] == claim_token) ||
++                        (bank_valid[1] && bank_token[1] == claim_token);
++ wire invalid_claim = !result_valid || producer_active || result_success ||
++                      claim_token != generation || result_count == 0 || result_count > 32;
++ wire no_free_bank = &bank_valid;
++ wire claim_bank = bank_valid[0]; // Prefer bank0; called only when one is free.
++ wire accept_claim = claim && !leased && !invalid_claim && !duplicate_claim && !no_free_bank;
++ wire release_match0 = bank_valid[0] && bank_token[0] == gpu_release_token;
++ wire release_match1 = bank_valid[1] && bank_token[1] == gpu_release_token;
++ wire release_match = release_match0 || release_match1;
++ wire release_bank = release_match1;
++ wire release_safe = release_match && bank_ready[release_bank] &&
++                     !(owner && gpu_read_bank == release_bank) &&
++                     !(gpu_req && gpu_token == gpu_release_token);
++
++ always @(posedge clk) begin
++  if (!reset && !consumer_reset && copy_state == COPY_RUN)
++   snapshot_mem[{copy_bank,copy_capture_addr}] <= result_data;
++  // Ownership changes after the grant edge. The existing GPU importer PRIME
++  // state supplies the extra edge before consuming this synchronous output.
++  snapshot_q <= snapshot_mem[{gpu_read_bank,gpu_addr}];
++ end
++
++ always @(posedge clk) begin
++  if (reset) begin
++   generation <= 0;
++   copy_state <= COPY_IDLE;
++   copy_bank <= 0; gpu_read_bank <= 0;
++   copy_issue_addr <= 0; copy_capture_addr <= 0;
++   bank_valid <= 0; bank_ready <= 0;
++   bank_token[0] <= 0; bank_token[1] <= 0;
++   bank_count[0] <= 0; bank_count[1] <= 0;
++   owner <= 0; error <= 0; claim_result <= 0;
++  end else begin
++   // Raw generations advance even while old snapshots are queued/consumed.
++   if (result_success) generation <= generation + 1'b1;
++   if (consumer_reset) begin
++    copy_state <= COPY_IDLE;
++    bank_valid <= 0; bank_ready <= 0;
++    owner <= 0; error <= 0; claim_result <= 0;
++   end else begin
++    if (clear_error) error <= 0;
++    if (accept_request) begin owner <= 1; gpu_read_bank <= gpu_bank; end
++    if (gpu_read_done) owner <= 0;
++    if (reject_request || gpu_fault || producer_rejected) error <= 1;
++    if (gpu_release) begin
++     if (release_safe) begin bank_valid[release_bank] <= 0; bank_ready[release_bank] <= 0; end
++     else error <= 1;
++    end
++    case (copy_state)
++     COPY_WAIT_CPU: if (!cpu_view_active) begin
++      // Switch the address mux only after the accepted CPU burst drains.
++      copy_issue_addr <= 0;
++      copy_state <= COPY_PRIME;
++     end
++     COPY_PRIME: begin
++      // This edge issues raw word0. First capture is the next edge.
++      copy_capture_addr <= 0;
++      copy_issue_addr <= 1;
++      copy_state <= COPY_RUN;
++     end
++     COPY_RUN: begin
++      if (copy_capture_addr == 8'hff) begin
++       bank_ready[copy_bank] <= 1;
++       copy_state <= COPY_IDLE;
++      end else begin
++       copy_capture_addr <= copy_issue_addr;
++       if (copy_issue_addr != 8'hff) copy_issue_addr <= copy_issue_addr + 1'b1;
++      end
++     end
++     default: ;
++    endcase
++    if (claim) begin
++     // Rejection is expected flow control, not a protocol fault. A new
++     // attempt always replaces the mailbox; stale success cannot survive.
++     claim_result <= {26'd0,leased,invalid_claim,no_free_bank,duplicate_claim,2'b00};
++     if (accept_claim) begin
++      claim_result <= {30'd0,claim_bank,1'b1};
++      bank_valid[claim_bank] <= 1;
++      bank_ready[claim_bank] <= 0;
++      bank_token[claim_bank] <= claim_token;
++      bank_count[claim_bank] <= result_count;
++      copy_bank <= claim_bank;
++      copy_state <= COPY_WAIT_CPU;
++     end
++    end
++   end
++  end
++ end
++endmodule
+--- a/frozen/src/fpga/common/os30/geometry_raw_load.v
++++ b/frozen/src/fpga/common/os30/geometry_raw_load.v
+@@ -27,6 +27,9 @@
+  output wire busy,output reg done,unsupported,output reg [1:0] dma_error,
+  output reg all_inside,output reg [31:0] cycles,
+  output reg [31:0] valid_slots,
++ // QGF1 admission metadata, captured during the existing clip scan.
++ output reg [31:0] importable_slots,
++ output reg [31:0] w_fingerprint0,w_fingerprint1,w_fingerprint2,w_fingerprint3,
+  output wire [31:0] compute_cycles,
+  output wire fma_request_valid,output wire [31:0] fma_request_a,fma_request_b,fma_request_c,
+  output wire fma_request_multiply,input wire fma_response_valid,
+@@ -140,6 +143,10 @@
+  // Every vertex still needs four synchronous reads; no extra scan cycles.
+  reg [31:0] clip_w;
+  reg [3:0] clip_xy;
++ wire [3:0] w_fingerprint=compute_position_data[3:0]^compute_position_data[7:4]^
++  compute_position_data[11:8]^compute_position_data[15:12]^compute_position_data[19:16]^
++  compute_position_data[23:20]^compute_position_data[27:24]^compute_position_data[31:28];
++ wire importable_w=!clip_w[31] && clip_w[30:23]!=0 && clip_w<32'h46fffe00;
+  wire [31:0] neg_w={~clip_w[31],clip_w[30:0]};
+  wire [1:0] clip_pair={float_lt(compute_position_data,neg_w),float_lt(clip_w,compute_position_data)};
+  wire [5:0] classification={clip_xy,clip_pair};
+@@ -201,6 +208,7 @@
+    if(raw_word==4)normal_xy<=word_data[31:16];
+   end
+   if(reset)begin
++   importable_slots<=0;w_fingerprint0<=0;w_fingerprint1<=0;w_fingerprint2<=0;w_fingerprint3<=0;
+    state<=IDLE;done<=0;unsupported<=0;dma_error<=0;cycles<=0;all_inside<=0;
+    n<=0;job_dest<=0;job_mask<=0;valid_slots<=0;held_job_aspect<=0;held_cx<=0;held_cy<=0;held_cz<=0;held_amb<=0;held_dif<=0;held_lit<=0;held_su<=0;held_sv<=0;
+    raw_word<=0;raw_vertex<=0;source_u<=0;normal_xy<=0;
+@@ -216,6 +224,7 @@
+     valid_slots<=valid_slots&~invalidate_mask;
+    case(state)
+     IDLE:if(start)begin
++     importable_slots<=0;w_fingerprint0<=0;w_fingerprint1<=0;w_fingerprint2<=0;w_fingerprint3<=0;
+      if(!valid_range)begin state<=INVALID;unsupported<=1;dma_error<=1;all_inside<=0;cycles<=0;end
+      else begin
+      state<=FETCH;done<=0;unsupported<=0;dma_error<=0;cycles<=0;all_inside<=1;
+@@ -243,10 +252,17 @@
+      end
+      if(read_valid)begin
+       case(read_row)
+-       0:clip_w<=compute_position_data;
++       0:begin
++        clip_w<=compute_position_data;
++        w_fingerprint0[job_dest+read_vertex]<=w_fingerprint[0];
++        w_fingerprint1[job_dest+read_vertex]<=w_fingerprint[1];
++        w_fingerprint2[job_dest+read_vertex]<=w_fingerprint[2];
++        w_fingerprint3[job_dest+read_vertex]<=w_fingerprint[3];
++       end
+        1:clip_xy[3:2]<=clip_pair;
+        2:clip_xy[1:0]<=clip_pair;
+        3:begin
++        importable_slots[job_dest+read_vertex]<=importable_w && classification==0;
+         if(classification!=0)all_inside<=0;
+         if({1'b0,read_vertex}+1'b1==n)begin state<=IDLE;done<=1;valid_slots<=valid_slots|job_mask;end
+        end
+--- a/frozen/src/fpga/common/os30/gpu_core.v
++++ b/frozen/src/fpga/common/os30/gpu_core.v
+@@ -1,3 +1,9 @@
++// Local guard: QGF owns the snapshot port and emits ordinary vertex loads.
++`ifdef INCLUDE_GPU_BRAM_IMPORT
++`ifndef INCLUDE_GPU_QUEUED_FRONT
++`define GPU_CORE_DIRECT_BRAM_IMPORT
++`endif
++`endif
+ //------------------------------------------------------------------------------
+ // SPDX-License-Identifier: Apache-2.0
+ // SPDX-FileType: SOURCE
+@@ -341,6 +347,47 @@
+     output reg  [1:0]  gpu_swap_idx,
+ 
+     input  wire        slave_swap_pending,    // CMD_FLIP backpressure from display slave
++`ifdef INCLUDE_GPU_BRAM_IMPORT
++    // Ordered direct import from the leased geometry LOAD result BRAM.
++    output wire        import_req,
++    output wire [31:0] import_token,
++    output wire [4:0]  import_src,
++    output wire [7:0]  import_addr,
++    output wire        import_read_done,
++    input  wire        import_grant,
++    input  wire        import_error,
++    input  wire [31:0] import_data,
++`ifdef INCLUDE_GPU_QUEUED_FRONT
++    output wire        import_release,
++    output wire [31:0] import_release_token,
++    output wire        import_fault,
++`else
++    output reg         import_release,
++    output reg  [31:0] import_release_token,
++    output reg         import_fault,
++`endif
++    output wire        import_cancel,
++`endif
++`ifdef INCLUDE_GPU_QUEUED_FRONT
++    output wire math_req,
++    input wire math_grant,
++    output wire math_release,
++    output wire math_fma_valid,
++    output wire [31:0] math_fma_a, math_fma_b, math_fma_c,
++    output wire math_fma_multiply,
++    input wire math_fma_result_valid,
++    input wire [31:0] math_fma_result,
++    input wire math_fma_unsupported,
++    output wire math_scratch_read, math_scratch_write,
++    output wire [2:0] math_scratch_read_addr, math_scratch_write_addr,
++    input wire [31:0] math_scratch_data,
++    output wire [31:0] math_scratch_write_data,
++    input wire queue_reg_wr,
++    input wire [9:0] queue_reg_addr,
++    input wire [31:0] queue_reg_wdata,
++    input wire [3:0] queue_reg_wstrb,
++    output wire [31:0] queue_reg_rdata,
++`endif
+ `ifdef INCLUDE_GPU_RENDER_CACHE
+     // Render cache barrier (gpu_color_depth_cache between the m_rd/m_wr ports
+     // and the arbiter): fences, flips and clears wait for memory_barrier_done
+@@ -380,6 +427,9 @@
+ localparam GPU_ADDR_W = 26;
+ 
+ wire active = reset_n & gpu_enable;
++`ifdef INCLUDE_GPU_BRAM_IMPORT
++assign import_cancel = soft_reset || ring_reset;
++`endif
+ 
+ assign dbg_state = 6'd0;
+ assign dbg_setup_step = 6'd0;
+@@ -430,6 +480,8 @@
+ localparam RING_WORDS = 4096;  // 16 KB
+ localparam RING_ADDR_BITS = 12;
+ localparam GEOMETRY_WORKER = `ifdef INCLUDE_GPU_GEOMETRY_WORKER 1 `else 0 `endif;
++localparam QUEUED_FRONT = `ifdef INCLUDE_GPU_QUEUED_FRONT 1 `else 0 `endif;
++localparam COMMAND_WORKER = GEOMETRY_WORKER || QUEUED_FRONT;
+ 
+ reg [31:0] ring_bram [0:RING_WORDS-1];
+ reg [RING_ADDR_BITS-1:0] ring_wr_addr;  // Append pointer (word index)
+@@ -525,7 +577,34 @@
+             || (GPU_WRITE_COMBINE && !fb_write_drain_complete);
+ 
+ // Port B: GPU read (synchronous, 1-cycle latency)
+-generate if (GEOMETRY_WORKER) begin : g_geometry_worker
++generate
++`ifdef INCLUDE_GPU_QUEUED_FRONT
++if (QUEUED_FRONT) begin : g_queued_front
++    wire [RING_ADDR_BITS-1:0] address;
++    reg [31:0] data;
++    always @(posedge clk) data <= ring_bram[address];
++    gpu_queued_front #(.ADDR_BITS(RING_ADDR_BITS), .QUEUE_BITS(9)) worker (
++        .clk(clk), .reset_n(reset_n), .enable(active),
++        .soft_reset(soft_reset), .ring_reset(ring_reset),
++        .input_wrptr(ring_wrptr), .input_rdptr(upload_rdptr), .input_addr(address), .input_data(data),
++        .output_rdptr(ring_rdptr), .output_addr(ring_rd_addr),
++        .output_data(ring_rd_data), .output_wrptr(command_wrptr), .busy(geometry_worker_busy),
++        .view_req(import_req), .view_token(import_token), .view_source(import_src), .view_addr(import_addr),
++        .view_done(import_read_done), .view_grant(import_grant), .view_error(import_error), .view_data(import_data),
++        .view_release(import_release), .view_release_token(import_release_token), .view_fault(import_fault),
++        .math_req(math_req), .math_grant(math_grant), .math_release(math_release),
++        .math_fma_valid(math_fma_valid), .math_fma_a(math_fma_a), .math_fma_b(math_fma_b), .math_fma_c(math_fma_c),
++        .math_fma_multiply(math_fma_multiply), .math_fma_result_valid(math_fma_result_valid),
++        .math_fma_result(math_fma_result), .math_fma_unsupported(math_fma_unsupported),
++        .math_scratch_read(math_scratch_read), .math_scratch_read_addr(math_scratch_read_addr),
++        .math_scratch_data(math_scratch_data), .math_scratch_write(math_scratch_write),
++        .math_scratch_write_addr(math_scratch_write_addr), .math_scratch_write_data(math_scratch_write_data),
++        .queue_reg_wr(queue_reg_wr), .queue_reg_addr(queue_reg_addr), .queue_reg_wdata(queue_reg_wdata),
++        .queue_reg_wstrb(queue_reg_wstrb), .queue_reg_rdata(queue_reg_rdata)
++    );
++end else
++`endif
++if (GEOMETRY_WORKER) begin : g_geometry_worker
+     wire [RING_ADDR_BITS-1:0] address;
+     reg [31:0] data;
+     always @(posedge clk) data <= ring_bram[address];
+@@ -3374,6 +3453,10 @@
+ localparam S_VCWRITE          = 6'd19; // Serialize six packed vertex words
+ localparam S_PAY_WAIT         = 6'd18; // Worker output may pause inside a payload
+ 
++`ifdef GPU_CORE_DIRECT_BRAM_IMPORT
++localparam S_IMPORT_WAIT      = 6'd20;
++localparam S_IMPORT_FAULT     = 6'd21; // Visible halt; only reset can recover.
++`endif
+ reg [5:0] state;
+ 
+ // Command decoding
+@@ -3440,6 +3523,34 @@
+ localparam [4:0] CMDCLS_LOAD_VERT_CLIP   = 5'd19;  // 0x56
+ localparam [4:0] CMDCLS_GEOMETRY         = 5'd20;  // 0x59
+ localparam [4:0] CMDCLS_PROJECTED        = 5'd21;  // internal worker cache load
++`ifdef GPU_CORE_DIRECT_BRAM_IMPORT
++localparam [4:0] CMDCLS_IMPORT_CONTEXT   = 5'd22;  // 0x5D, three words
++localparam [4:0] CMDCLS_IMPORT_VERTEX    = 5'd23;  // 0x5E, token + slots
++localparam [4:0] CMDCLS_IMPORT_RELEASE   = 5'd24;  // 0x5F, token
++localparam [4:0] CMDCLS_IMPORT_INVALID   = 5'd25;
++reg [31:0] import_u_offset, import_v_offset, import_context_flags;
++reg import_context_valid;
++reg [31:0] import_command_token, import_descriptor;
++reg import_start;
++wire importer_done, importer_error;
++wire [31:0] imported_x, imported_y, imported_w, imported_u, imported_v, imported_depth;
++wire [15:0] imported_rgb;
++wire import_context_bad = import_context_flags[31:19] != 0 ||
++    (import_context_flags[16] &&
++        (import_u_offset > 32'd524280 || import_v_offset > 32'd524280 ||
++         import_u_offset[2:0] != 0 || import_v_offset[2:0] != 0));
++geometry_bram_import vertex_importer (
++    .clk(clk), .reset(!reset_n || import_cancel), .start(import_start),
++    .token(import_command_token), .source_slot(import_descriptor[4:0]),
++    .u_offset(import_u_offset), .v_offset(import_v_offset), .context_flags(import_context_flags),
++    .busy(), .done(importer_done), .error(importer_error),
++    .view_req(import_req), .view_token(import_token), .view_source(import_src),
++    .view_addr(import_addr), .view_done(import_read_done),
++    .view_grant(import_grant), .view_error(import_error), .view_data(import_data),
++    .clip_x(imported_x), .clip_y(imported_y), .clip_w(imported_w),
++    .tex_u(imported_u), .tex_v(imported_v), .depth(imported_depth), .rgb565(imported_rgb)
++);
++`endif
+ reg [4:0] cmd_class;
+ reg [1:0] geometry_cull;  // indexed word bits 15=front, 16=back; screen winding
+ reg geometry_sort_odd;
+@@ -4271,7 +4382,7 @@
+         // Consume the first word of the next packed-record chunk and prime
+         // ring_rd_data so S_PAY_DATA sees the first record word index.
+         pay_idx      <= 6'd31;
+-        if (GEOMETRY_WORKER && ring_empty) state <= S_PAY_WAIT;
++        if (COMMAND_WORKER && ring_empty) state <= S_PAY_WAIT;
+         else begin
+             ring_rdptr   <= ring_rdptr + 1'b1;
+             ring_rd_addr <= ring_rdptr + 1'b1;
+@@ -6354,6 +6465,11 @@
+     reg        z_src_pending_applied;
+     reg        acc_drain_done;
+ 
++`ifdef GPU_CORE_DIRECT_BRAM_IMPORT
++    import_start <= 1'b0;
++    import_release <= 1'b0;
++    import_fault <= 1'b0;
++`endif
+     spanprod_pl_origin_we = 1'b0;
+     spanprod_pl_origin_wa = 4'd0;
+     spanprod_pl_origin_wd = 0;
+@@ -6488,6 +6604,15 @@
+         tri_fill_idx <= 3'd0;
+         cmd_is_flip <= 0;
+         cmd_class <= CMDCLS_NONE;
++`ifdef GPU_CORE_DIRECT_BRAM_IMPORT
++        import_u_offset <= 0;
++        import_v_offset <= 0;
++        import_context_flags <= 0;
++        import_context_valid <= 0;
++        import_command_token <= 0;
++        import_descriptor <= 0;
++        import_release_token <= 0;
++`endif
+         geometry_cull <= 2'b00;
+         geometry_sort_odd <= 1'b0;
+         spanprod_compact_direct <= 1'b0;
+@@ -6677,14 +6802,22 @@
+         end
+ 
+         // Soft reset: return FSM to idle, deassert all bus signals
+-        if (soft_reset) begin
++        if (soft_reset
++`ifdef GPU_CORE_DIRECT_BRAM_IMPORT
++            || (ring_reset && (state == S_IMPORT_WAIT || state == S_IMPORT_FAULT ||
++                (state != S_IDLE && cmd_class >= CMDCLS_IMPORT_CONTEXT && cmd_class <= CMDCLS_IMPORT_INVALID)))
++`endif
++        ) begin
++`ifdef GPU_CORE_DIRECT_BRAM_IMPORT
++            import_context_valid <= 1'b0;
++`endif
+ `ifdef INCLUDE_SPAN_LOOKAHEAD
+             span_la <= LA_IDLE;
+             span_la_chunk <= 1'b0;
+ `endif
+             state        <= S_IDLE;
+-            ring_rdptr   <= GEOMETRY_WORKER ? 12'd0 : ring_wrptr;
+-            ring_rd_addr <= GEOMETRY_WORKER ? 12'd0 : ring_wrptr;
++            ring_rdptr   <= COMMAND_WORKER ? 12'd0 : ring_wrptr;
++            ring_rd_addr <= COMMAND_WORKER ? 12'd0 : ring_wrptr;
+             m_wr_awvalid <= 0;
+             m_wr_wvalid  <= 0;
+             fbwq_rd_ptr  <= 4'b0;
+@@ -7241,6 +7374,15 @@
+                                       || cmd_payload_words == 13'd10
+                                       || cmd_payload_words == 13'd15))
+                                ? CMDCLS_GEOMETRY : CMDCLS_NONE;
++`ifdef GPU_CORE_DIRECT_BRAM_IMPORT
++                8'h5D: cmd_class <= (cmd_payload_words == 13'd3)
++                    ? CMDCLS_IMPORT_CONTEXT : CMDCLS_IMPORT_INVALID;
++                8'h5E: cmd_class <= (!GEOMETRY_WORKER && INCLUDE_VTX_CACHE && INCLUDE_XFORM_RGB
++                                    && SINGLE_CLIP_VERTEX && cmd_payload_words == 13'd2)
++                    ? CMDCLS_IMPORT_VERTEX : CMDCLS_IMPORT_INVALID;
++                8'h5F: cmd_class <= (cmd_payload_words == 13'd1)
++                    ? CMDCLS_IMPORT_RELEASE : CMDCLS_IMPORT_INVALID;
++`endif
+                 default:         cmd_class <= CMDCLS_NONE;
+             endcase
+ 
+@@ -7254,7 +7396,7 @@
+                 // accepts.
+                 pay_remaining <= cmd_payload_words;
+                 // Start first BRAM read (data arrives next cycle)
+-                if (GEOMETRY_WORKER && ring_empty) state <= S_PAY_WAIT;
++                if (COMMAND_WORKER && ring_empty) state <= S_PAY_WAIT;
+                 else begin
+                     ring_rdptr <= ring_rdptr + 1'b1;
+                     ring_rd_addr <= ring_rdptr + 1'b1;
+@@ -7636,6 +7778,23 @@
+                     default: ;
+                 endcase
+             end
++`ifdef GPU_CORE_DIRECT_BRAM_IMPORT
++            CMDCLS_IMPORT_CONTEXT: begin
++                case (pay_idx)
++                    0: import_u_offset <= ring_rd_data;
++                    1: import_v_offset <= ring_rd_data;
++                    2: import_context_flags <= ring_rd_data;
++                    default: ;
++                endcase
++            end
++            CMDCLS_IMPORT_VERTEX: begin
++                if (pay_idx == 0) import_command_token <= ring_rd_data;
++                if (pay_idx == 1) import_descriptor <= ring_rd_data;
++            end
++            CMDCLS_IMPORT_RELEASE: begin
++                if (pay_idx == 0) import_release_token <= ring_rd_data;
++            end
++`endif
+             CMDCLS_LOAD_VERTS,
+             CMDCLS_LOAD_VERT_CLIP: begin
+                 // T3 0x53/0x56: one vert (raw {x,y,z} for 0x53, clip {x,y,w}
+@@ -7824,7 +7983,7 @@
+                 // A worker may be blocked behind its small output queue or
+                 // awaiting another published CPU word. Consume each payload
+                 // word once, then wait before issuing an unavailable read.
+-                if (GEOMETRY_WORKER && ring_empty) state <= S_PAY_WAIT;
++                if (COMMAND_WORKER && ring_empty) state <= S_PAY_WAIT;
+                 else begin
+                     ring_rdptr <= ring_rdptr + 1'b1;
+                     ring_rd_addr <= ring_rdptr + 1'b1;
+@@ -8071,6 +8230,36 @@
+                     state <= S_IDLE;
+                 end
+             end
++`ifdef GPU_CORE_DIRECT_BRAM_IMPORT
++            CMDCLS_IMPORT_CONTEXT: begin
++                if (import_context_bad) begin
++                    import_context_valid <= 1'b0;
++                    import_fault <= 1'b1;
++                    state <= S_IMPORT_FAULT;
++                end else begin
++                    import_context_valid <= 1'b1;
++                    state <= S_IDLE;
++                end
++            end
++            CMDCLS_IMPORT_VERTEX: begin
++                if (!import_context_valid || !tri_state_valid || import_descriptor[31:10] != 0) begin
++                    import_fault <= 1'b1;
++                    state <= S_IMPORT_FAULT;
++                end else begin
++                    xf_load_slot <= import_descriptor[9:5];
++                    import_start <= 1'b1;
++                    state <= S_IMPORT_WAIT;
++                end
++            end
++            CMDCLS_IMPORT_RELEASE: begin
++                import_release <= 1'b1;
++                state <= S_IDLE;
++            end
++            CMDCLS_IMPORT_INVALID: begin
++                import_fault <= 1'b1;
++                state <= S_IMPORT_FAULT;
++            end
++`endif
+             CMDCLS_LOAD_VERT_CLIP: begin
+                 // T3 0x56: park ONE pre-transformed clip-space vert in the cache.
+                 // Same wire as 0x53 but w1-3 are CPU-computed M*v clip {x,y,w};
+@@ -9048,6 +9237,43 @@
+         // Serialize the remainder of a cache write from the existing projection
+         // staging registers.  No next command is consumed until all six words
+         // are committed, preserving immediate LOAD -> DRAW and repeated slots.
++`ifdef GPU_CORE_DIRECT_BRAM_IMPORT
++        S_IMPORT_WAIT: begin
++            if (importer_done) begin
++                if (importer_error) begin
++                    import_fault <= 1'b1;
++                    state <= S_IMPORT_FAULT;
++                end else begin
++                    // Exactly the 0x56 staging and reciprocal/projection entry.
++                    // A failed or partial read never changes the vertex cache.
++                    xf_camx <= imported_x;
++                    xf_camy <= imported_y;
++                    xf_camz <= imported_w;
++                    dv_szi[0] <= imported_u;
++                    dv_tzi[0] <= imported_v;
++                    xf_load_depth <= imported_depth;
++                    vt_rrow[0] <= imported_rgb[15:11];
++                    vt_lrow[0] <= imported_rgb[10:5];
++                    vt_brow[0] <= imported_rgb[4:0];
++                    xf_vtx <= 2'd0;
++                    xf_row <= 2'd0;
++                    xf_idx <= 2'd0;
++                    xf_behind <= 2'd0;
++                    xf_to_cache <= 1'b1;
++                    xf_lit <= 1'b0;
++                    xf_clip <= 1'b1;
++                    xf_last_vtx <= 2'd0;
++                    xf_state <= XF_RECIP_INIT;
++                    state <= S_XFORM;
++                end
++            end
++        end
++        S_IMPORT_FAULT: begin
++            // Hold busy and stop consuming commands. Fabric/soft/ring reset
++            // also cancels the external lease and synchronous-port ownership.
++            state <= S_IMPORT_FAULT;
++        end
++`endif
+         S_VCWRITE: begin
+             case (vcw_cnt)
+                 3'd1: vc_mem[{3'd1, xf_load_slot}] <= vt_zi[0];
+@@ -11632,6 +11858,14 @@
+                          : 2'd0] <= 1'b0;
+         end  // closes the housekeeping `begin` introduced for m_wr_inflight + gpu_swap_req auto-clear
+     end
++`ifdef GPU_CORE_DIRECT_BRAM_IMPORT
++    // Reset wins even if a queued context/import/release executes on this edge.
++    if (import_cancel) begin
++        import_context_valid <= 1'b0;
++        import_start <= 1'b0;
++        import_release <= 1'b0;
++    end
++`endif
+     if (spanprod_pl_origin_we)
+         spanprod_pl_origin[spanprod_pl_origin_wa] <= spanprod_pl_origin_wd;
+     if (spanprod_pl_du_we)
+@@ -11662,3 +11896,7 @@
+ // CPU uploads data via MMIO before use.
+ 
+ endmodule
++
++`ifdef GPU_CORE_DIRECT_BRAM_IMPORT
++`undef GPU_CORE_DIRECT_BRAM_IMPORT
++`endif
+--- /dev/null
++++ b/frozen/src/fpga/common/os30/gpu_queued_front.v
+@@ -0,0 +1,313 @@
++// QGF1: ordered floating-point cull and vertex preparation ahead of raster.
++// Input jobs remain in the ingress ring until their complete run is emitted.
++// The private output FIFO contains values, never references to snapshot RAM.
++// Unsupported cull arithmetic pauses before any output from that run and is
++// repaired from its immutable operands without consulting live software state.
++`default_nettype none
++module gpu_queued_front #(
++ parameter ADDR_BITS=12, parameter QUEUE_BITS=9
++) (
++ input wire clk, reset_n, enable, soft_reset, ring_reset,
++ input wire [ADDR_BITS-1:0] input_wrptr,
++ output reg [ADDR_BITS-1:0] input_rdptr,
++ output wire [ADDR_BITS-1:0] input_addr,
++ input wire [31:0] input_data,
++ input wire [ADDR_BITS-1:0] output_rdptr, output_addr,
++ output reg [31:0] output_data,
++ output reg [ADDR_BITS-1:0] output_wrptr,
++ output wire busy,
++ output wire view_req,
++ output wire [31:0] view_token,
++ output wire [4:0] view_source,
++ output wire [7:0] view_addr,
++ output reg view_done,
++ input wire view_grant, view_error,
++ input wire [31:0] view_data,
++ output reg view_release, view_fault,
++ output reg [31:0] view_release_token,
++ output wire math_req,
++ input wire math_grant,
++ output reg math_release,
++ output wire math_fma_valid,
++ output wire [31:0] math_fma_a, math_fma_b, math_fma_c,
++ output wire math_fma_multiply,
++ input wire math_fma_result_valid,
++ input wire [31:0] math_fma_result,
++ input wire math_fma_unsupported,
++ output wire math_scratch_read, math_scratch_write,
++ output wire [2:0] math_scratch_read_addr, math_scratch_write_addr,
++ input wire [31:0] math_scratch_data,
++ output wire [31:0] math_scratch_write_data,
++ input wire queue_reg_wr,
++ input wire [9:0] queue_reg_addr,
++ input wire [31:0] queue_reg_wdata,
++ input wire [3:0] queue_reg_wstrb,
++ output reg [31:0] queue_reg_rdata
++);
++ localparam HEADER_PRIME=0, HEADER=1, COPY=2, CONTEXT=3, WAIT_JOBS=4,
++  VIEW_REQUEST=5, VIEW_PRIME=6, JOB_PRIME=7, JOB_CAPTURE=8,
++  MATH_REQUEST=9, CULL_START=10, CULL_WAIT=11, REPAIR=12, NEXT_JOB=13,
++  VERTEX_SELECT=14, VERTEX_PRIME=15, VERTEX_CAPTURE=16, VERTEX_EMIT=17,
++  DRAW_SELECT=18, DRAW_PRIME=19, DRAW_CAPTURE=20, DRAW_HEADER=21,
++  DRAW_WORD=22, RUN_FINISH=23, RELEASE_TOKEN=24, FAULT=25;
++ reg [4:0] state;
++ reg [12:0] remaining, payload_count;
++ reg [2:0] context_index;
++ reg [31:0] token, control_word, u_offset, v_offset, flags_rgb;
++ reg [ADDR_BITS-1:0] job_base, write_ptr;
++ reg [6:0] triangle_count;
++ reg [5:0] job_index;
++ reg [14:0] indices;
++ reg [63:0] keep_mask;
++ reg [31:0] vertex_mask;
++ reg [5:0] vertex_index;
++ reg [2:0] vertex_row;
++ reg [3:0] emit_index;
++ reg [31:0] clip_x, clip_y, clip_w, tex_u, tex_v, depth;
++ reg [15:0] rgb565;
++ reg [14:0] draw_indices;
++ reg snapshot_owned, protocol_error, repair_pending;
++ reg [31:0] repair_serial, repair_ack;
++ reg [3:0] repair_operand;
++ (* ramstyle="M10K, no_rw_check" *) reg [31:0] queue [0:(1<<QUEUE_BITS)-1];
++ wire reset=!reset_n || soft_reset || ring_reset;
++ wire input_empty=input_rdptr==input_wrptr;
++ wire [ADDR_BITS-1:0] input_available=input_wrptr-input_rdptr;
++ wire [ADDR_BITS-1:0] output_used=write_ptr-output_rdptr;
++ wire output_full=output_used==((1<<QUEUE_BITS)-1);
++ wire private_header=input_data[31:24]==8'h60 || input_data[31:24]==8'h61;
++ wire take_header=enable && state==HEADER && !input_empty && (private_header || !output_full);
++ wire take_copy=enable && state==COPY && !input_empty && !output_full;
++ wire take_context=enable && state==CONTEXT && !input_empty;
++ wire take_release=enable && state==RELEASE_TOKEN && !input_empty;
++ wire take_input=take_header || take_copy || take_context || take_release;
++ wire job_read=state==JOB_PRIME || state==JOB_CAPTURE || state==DRAW_PRIME || state==DRAW_CAPTURE;
++ assign input_addr=job_read ? job_base+{{(ADDR_BITS-6){1'b0}},job_index}
++                          : input_rdptr+{{(ADDR_BITS-1){1'b0}},take_input};
++ assign busy=state!=HEADER || !input_empty;
++ assign view_req=state==VIEW_REQUEST && enable && !reset;
++ assign view_token=token;
++ assign view_source=5'd0; // Every valid successful LOAD has at least slot0.
++ wire [4:0] first_global=control_word[4:0];
++ wire [1:0] cull_mode=control_word[6:5];
++ wire bad_context=control_word[7] || |control_word[31:23] ||
++   triangle_count==0 || triangle_count>64 || payload_count!={6'd0,triangle_count}+13'd5 ||
++   |flags_rgb[31:19] || (flags_rgb[16] &&
++   (u_offset>32'd524280 || v_offset>32'd524280 || u_offset[2:0]!=0 || v_offset[2:0]!=0));
++ wire [5:0] global_i0={1'b0,first_global}+{1'b0,input_data[4:0]};
++ wire [5:0] global_i1={1'b0,first_global}+{1'b0,input_data[9:5]};
++ wire [5:0] global_i2={1'b0,first_global}+{1'b0,input_data[14:10]};
++ wire bad_job=|input_data[31:15] || global_i0[5] || global_i1[5] || global_i2[5];
++ wire [31:0] indexed_mask=(32'b1<<indices[4:0]) | (32'b1<<indices[9:5]) | (32'b1<<indices[14:10]);
++ wire c_ready,c_out,c_bad,c_vertex_read;
++ wire [1:0] c_reject,c_vertex_field;
++ wire [4:0] c_vertex_index;
++ wire [5:0] c_clip;
++ wire [31:0] c_cross;
++ wire c_fma_valid,c_scratch_read,c_scratch_write;
++ assign math_req=state==MATH_REQUEST && enable && !reset;
++ assign math_fma_valid=c_fma_valid && math_grant && !reset;
++ assign math_scratch_read=c_scratch_read && math_grant && !reset;
++ assign math_scratch_write=c_scratch_write && math_grant && !reset;
++ geometry_float_cull_mem cull (
++  .clk(clk),.reset(reset),.in_valid(state==CULL_START && enable && math_grant),.in_ready(c_ready),
++  .vertex_indices(indices),.clip_bits(18'd0),.negative_w(3'd0),.cull_mode(cull_mode),
++  .out_valid(c_out),.out_ready(state==CULL_WAIT && enable),.reject_class(c_reject),
++  .clip_or(c_clip),.cross_bits(c_cross),.unsupported(c_bad),
++  .vertex_read_valid(c_vertex_read),.vertex_read_index(c_vertex_index),.vertex_read_field(c_vertex_field),.vertex_data(view_data),
++  .scratch_read_valid(c_scratch_read),.scratch_read_index(math_scratch_read_addr),.scratch_data(math_scratch_data),
++  .scratch_write(c_scratch_write),.scratch_write_index(math_scratch_write_addr),.scratch_write_data(math_scratch_write_data),
++  .fma_valid(c_fma_valid),.fma_a(math_fma_a),.fma_b(math_fma_b),.fma_c(math_fma_c),
++  .fma_multiply_only(math_fma_multiply),.fma_result_valid(math_fma_result_valid && math_grant),
++  .fma_result(math_fma_result),.fma_unsupported(math_fma_unsupported)
++ );
++ wire [4:0] repair_slot=repair_operand<3?indices[4:0]:repair_operand<6?indices[9:5]:indices[14:10];
++ wire [2:0] repair_row=(repair_operand==0 || repair_operand==3 || repair_operand==6)?3'd0:
++                         (repair_operand==1 || repair_operand==4 || repair_operand==7)?3'd1:3'd4;
++ wire [2:0] c_row=c_vertex_field==2?3'd4:{1'b0,c_vertex_field};
++ assign view_addr=state==REPAIR?{repair_row,repair_slot}:
++                  (state==VERTEX_PRIME || state==VERTEX_CAPTURE)?{vertex_row,vertex_index[4:0]}:
++                  {c_row,c_vertex_index};
++ wire [31:0] converted;
++ wire conversion_error;
++ geometry_import_convert converter(.value(view_data),.depth_mode(vertex_row==4),.result(converted),.error(conversion_error));
++ wire signed [31:0] raw_u={{16{view_data[15]}},view_data[15:0]};
++ wire signed [31:0] raw_v={{16{view_data[31]}},view_data[31:16]};
++ wire signed [31:0] u_units=raw_u-$signed(u_offset)+(flags_rgb[17]?32'sd16:32'sd0);
++ wire signed [31:0] v_units=raw_v-$signed(v_offset)+(flags_rgb[17]?32'sd16:32'sd0);
++ wire bad_vertex=((vertex_row==0 || vertex_row==1 || vertex_row==3 || vertex_row==4) && conversion_error) ||
++  (vertex_row==3 && (view_data<32'h00800000 || view_data>=32'h46fffe00)) ||
++  (vertex_row==4 && (view_data[31] || view_data[30:23]==0 || view_data[30:23]==8'hff)) ||
++  (vertex_row==7 && view_data!=0);
++ reg emit;
++ reg [31:0] emit_data;
++ // Passive native observer taps: these are exactly the RAM write handshake.
++ wire output_push=emit;
++ wire [31:0] output_word=emit_data;
++ wire [31:0] used_mask=vertex_mask;
++ always @* begin
++  emit=0;emit_data=0;
++  if(enable && !output_full && !reset)begin
++   if(state==HEADER && !input_empty && !private_header)begin emit=1;emit_data=input_data;end
++   if(state==COPY && !input_empty)begin emit=1;emit_data=input_data;end
++   if(state==VERTEX_EMIT)begin
++    emit=1;
++    case(emit_index)
++     0:emit_data=32'h56000008;
++     1:emit_data={27'd0,first_global+vertex_index[4:0]};
++     2:emit_data=clip_x;3:emit_data=clip_y;4:emit_data=clip_w;
++     5:emit_data=tex_u;6:emit_data=tex_v;7:emit_data={16'd0,rgb565};8:emit_data=depth;
++     default:emit_data=0;
++    endcase
++   end
++   if(state==DRAW_HEADER)begin emit=1;emit_data=32'h54000001;end
++   if(state==DRAW_WORD)begin emit=1;emit_data={17'd0,draw_indices};end
++  end
++ end
++ always @* begin
++  queue_reg_rdata=0;
++  case(queue_reg_addr)
++   10'h020:queue_reg_rdata={29'd0,protocol_error,repair_pending,busy};
++   10'h021:queue_reg_rdata=repair_serial;
++   10'h022:queue_reg_rdata={17'd0,indices};
++   10'h023:queue_reg_rdata={18'd0,job_index,6'd0,cull_mode};
++   10'h024:queue_reg_rdata={28'd0,repair_operand};
++   10'h025:queue_reg_rdata=view_data;
++   default:;
++  endcase
++ end
++ always @(posedge clk)begin
++  output_data<=queue[output_addr[QUEUE_BITS-1:0]];
++  if(emit)queue[write_ptr[QUEUE_BITS-1:0]]<=emit_data;
++ end
++ always @(posedge clk)begin
++  view_done<=0;view_release<=0;view_fault<=0;math_release<=0;
++  if(reset)begin
++   input_rdptr<=(!reset_n || ring_reset)?0:input_wrptr;
++   output_wrptr<=0;write_ptr<=0;state<=HEADER_PRIME;
++   remaining<=0;payload_count<=0;context_index<=0;token<=0;control_word<=0;
++   u_offset<=0;v_offset<=0;flags_rgb<=0;job_base<=0;triangle_count<=0;job_index<=0;indices<=0;
++   keep_mask<=0;vertex_mask<=0;vertex_index<=0;vertex_row<=0;emit_index<=0;
++   clip_x<=0;clip_y<=0;clip_w<=0;tex_u<=0;tex_v<=0;depth<=0;rgb565<=0;draw_indices<=0;
++   snapshot_owned<=0;protocol_error<=0;repair_pending<=0;
++   // A late CPU ACK from a cancelled consumer epoch must never match the
++   // first request after soft/ring reset. Only fabric reset clears serials.
++   repair_serial<=!reset_n?32'd0:repair_serial+1'b1;
++   repair_ack<=0;repair_operand<=0;
++   view_release_token<=0;
++  end else begin
++   if(emit)begin write_ptr<=write_ptr+1'b1;output_wrptr<=write_ptr+1'b1;end
++   if(take_input)input_rdptr<=input_rdptr+1'b1;
++   // Bad/late acknowledgments are recoverable protocol errors: the pending
++   // request and its operands remain intact until a matching full-word ACK.
++   if(queue_reg_wr && (queue_reg_addr==10'h024 || queue_reg_addr==10'h02e || queue_reg_addr==10'h02d))begin
++    if(queue_reg_wstrb!=4'hf)protocol_error<=1;
++    else case(queue_reg_addr)
++     10'h024:if(repair_pending && queue_reg_wdata<=8)repair_operand<=queue_reg_wdata[3:0];else protocol_error<=1;
++     10'h02e:repair_ack<=queue_reg_wdata;
++     10'h02d:if(!repair_pending || state!=REPAIR || repair_ack!=repair_serial ||
++                !queue_reg_wdata[0] || |queue_reg_wdata[31:2])protocol_error<=1;
++             else begin
++              keep_mask[job_index]<=queue_reg_wdata[1];
++              if(queue_reg_wdata[1])vertex_mask<=vertex_mask|indexed_mask;
++              repair_pending<=0;state<=NEXT_JOB;
++             end
++     default:;
++    endcase
++   end
++   if(enable)case(state)
++    HEADER_PRIME:state<=HEADER;
++    HEADER:if(take_header)begin
++     remaining<=input_data[12:0];payload_count<=input_data[12:0];
++     if(input_data[31:24]==8'h60)begin
++      if(|input_data[23:13] || input_data[12:0]<6 || input_data[12:0]>69)begin
++       protocol_error<=1;view_fault<=1;state<=FAULT;
++      end else begin context_index<=0;keep_mask<=0;vertex_mask<=0;state<=CONTEXT;end
++     end else if(input_data[31:24]==8'h61)begin
++      if(input_data[23:0]!=24'd1)begin protocol_error<=1;view_fault<=1;state<=FAULT;end
++      else state<=RELEASE_TOKEN;
++     end else state<=input_data[12:0]==0?HEADER:COPY;
++    end
++    COPY:if(take_copy)begin remaining<=remaining-1'b1;if(remaining==1)state<=HEADER;end
++    CONTEXT:if(take_context)begin
++     case(context_index)
++      0:token<=input_data;
++      1:begin control_word<=input_data;triangle_count<=input_data[22:16];end
++      2:u_offset<=input_data;
++      3:v_offset<=input_data;
++      4:flags_rgb<=input_data;
++      default:;
++     endcase
++     if(context_index==4)begin job_base<=input_rdptr+1'b1;job_index<=0;state<=WAIT_JOBS;end
++     else context_index<=context_index+1'b1;
++    end
++    WAIT_JOBS:if(bad_context)begin protocol_error<=1;view_fault<=1;state<=FAULT;end
++      else if(input_available>={{(ADDR_BITS-7){1'b0}},triangle_count})state<=VIEW_REQUEST;
++    VIEW_REQUEST:if(view_error)begin protocol_error<=1;view_fault<=1;state<=FAULT;end
++      else if(view_grant)begin snapshot_owned<=1;state<=VIEW_PRIME;end
++    VIEW_PRIME:state<=JOB_PRIME;
++    JOB_PRIME:state<=JOB_CAPTURE;
++    JOB_CAPTURE:if(bad_job)begin protocol_error<=1;view_fault<=1;view_done<=1;snapshot_owned<=0;state<=FAULT;end
++      else begin
++       indices<=input_data[14:0];
++       if(cull_mode==0)begin
++        keep_mask[job_index]<=1;
++        vertex_mask<=vertex_mask|(32'b1<<input_data[4:0])|(32'b1<<input_data[9:5])|(32'b1<<input_data[14:10]);
++        state<=NEXT_JOB;
++       end else if(cull_mode==3)state<=NEXT_JOB;
++       else state<=MATH_REQUEST;
++      end
++    MATH_REQUEST:if(math_grant)state<=CULL_START;
++    CULL_START:if(c_ready && math_grant)state<=CULL_WAIT;
++    CULL_WAIT:if(c_out)begin
++     math_release<=1;
++     if(c_bad)begin repair_serial<=repair_serial+1'b1;repair_operand<=0;repair_pending<=1;state<=REPAIR;end
++     else begin
++      keep_mask[job_index]<=c_reject==0;
++      if(c_reject==0)vertex_mask<=vertex_mask|indexed_mask;
++      state<=NEXT_JOB;
++     end
++    end
++    REPAIR:;
++    NEXT_JOB:if({1'b0,job_index}+7'd1==triangle_count)begin vertex_index<=0;state<=VERTEX_SELECT;end
++      else begin job_index<=job_index+1'b1;state<=JOB_PRIME;end
++    VERTEX_SELECT:if(vertex_index==32)begin
++       view_done<=1;snapshot_owned<=0;job_index<=0;state<=DRAW_SELECT;
++      end else if(vertex_mask[vertex_index[4:0]])begin vertex_row<=0;state<=VERTEX_PRIME;end
++      else vertex_index<=vertex_index+1'b1;
++    VERTEX_PRIME:state<=VERTEX_CAPTURE;
++    VERTEX_CAPTURE:if(bad_vertex)begin
++       protocol_error<=1;view_fault<=1;view_done<=1;snapshot_owned<=0;state<=FAULT;
++      end else begin
++       case(vertex_row)
++        0:clip_x<=converted;1:clip_y<=converted;3:clip_w<=converted;4:depth<=converted;
++        5:begin tex_u<=flags_rgb[16]?(u_units<<11):0;tex_v<=flags_rgb[16]?(v_units<<11):0;end
++        6:rgb565<=flags_rgb[18]?{view_data[7:3],view_data[15:10],view_data[23:19]}:flags_rgb[15:0];
++        default:;
++       endcase
++       if(vertex_row==7)begin emit_index<=0;state<=VERTEX_EMIT;end
++       else begin vertex_row<=vertex_row+1'b1;state<=VERTEX_PRIME;end
++      end
++    VERTEX_EMIT:if(emit)begin
++     if(emit_index==8)begin vertex_index<=vertex_index+1'b1;state<=VERTEX_SELECT;end
++     else emit_index<=emit_index+1'b1;
++    end
++    DRAW_SELECT:if(keep_mask[job_index])state<=DRAW_PRIME;
++      else if({1'b0,job_index}+7'd1==triangle_count)state<=RUN_FINISH;
++      else job_index<=job_index+1'b1;
++    DRAW_PRIME:state<=DRAW_CAPTURE;
++    DRAW_CAPTURE:begin draw_indices<={global_i2[4:0],global_i1[4:0],global_i0[4:0]};state<=DRAW_HEADER;end
++    DRAW_HEADER:if(emit)state<=DRAW_WORD;
++    DRAW_WORD:if(emit)begin
++     if({1'b0,job_index}+7'd1==triangle_count)state<=RUN_FINISH;
++     else begin job_index<=job_index+1'b1;state<=DRAW_SELECT;end
++    end
++    RUN_FINISH:begin input_rdptr<=job_base+{{(ADDR_BITS-7){1'b0}},triangle_count};state<=HEADER_PRIME;end
++    RELEASE_TOKEN:if(take_release)begin view_release_token<=input_data;view_release<=1;state<=HEADER;end
++    FAULT:;
++    default:state<=HEADER_PRIME;
++   endcase
++  end
++ end
++endmodule
++`default_nettype wire
+--- a/frozen/src/fpga/common/os30/phase10_load_alias.v
++++ b/frozen/src/fpga/common/os30/phase10_load_alias.v
+@@ -1,8 +1,31 @@
+ // Private LOD5: completed native LOAD remains in BRAM. CPU copies the
+ // read-only, cacheable 32-byte raw view into its ordinary LoadedVertex slots.
+-// All hardware jobs use dest0. No result DMA, persistent ownership or counters.
++// All hardware jobs use dest0. BIM2 snapshots let GPU imports overlap later LOADs.
+ module geometry_load_alias (
+  input wire clk,reset,
++`ifdef INCLUDE_GPU_BRAM_IMPORT
++ input wire import_reset, import_req,
++ input wire [31:0] import_token,
++ input wire [4:0] import_src,
++ input wire [7:0] import_addr,
++ output wire import_grant, import_error,
++ output wire [31:0] import_data,
++ input wire import_read_done, import_release, import_fault,
++ input wire [31:0] import_release_token,
++`endif
++`ifdef INCLUDE_GPU_QUEUED_FRONT
++ input wire math_req,math_release,output wire math_grant,
++ input wire math_fma_valid,math_fma_multiply,
++ input wire [31:0] math_fma_a,math_fma_b,math_fma_c,
++ output wire math_fma_result_valid,math_fma_unsupported,
++ output wire [31:0] math_fma_result,
++ input wire math_scratch_read,math_scratch_write,
++ input wire [2:0] math_scratch_read_addr,math_scratch_write_addr,
++ input wire [31:0] math_scratch_write_data,output wire [31:0] math_scratch_data,
++ output wire queue_reg_wr,output wire [9:0] queue_reg_addr,
++ output wire [31:0] queue_reg_wdata,output wire [3:0] queue_reg_wstrb,
++ input wire [31:0] queue_reg_rdata,
++`endif
+  input wire reg_wr,input wire [9:0] reg_addr,
+  input wire [31:0] reg_wdata,input wire [3:0] reg_wstrb,
+  output reg [31:0] reg_rdata,
+@@ -20,13 +43,148 @@
+  reg lit,active,pending,completed,success,config_error;
+  wire raw_busy,raw_done,unsupported,all_inside;
+  wire [1:0] dma_error;
+- wire write_idle=reg_wr && reg_wstrb==4'hf && !active;
+- wire start_request=write_idle && reg_addr==10'h002 && reg_wdata[0];
+- wire raw_start=pending && !view_active && !raw_busy;
++ wire tf_busy, tf_reserve, tf_owner;
++ wire full_write=reg_wr && reg_wstrb==4'hf;
++ wire write_idle=full_write && !active && !tf_reserve;
++ wire start_request=full_write && !active && reg_addr==10'h002 && reg_wdata[0];
++ wire import_leased, import_owner, import_view_block;
++ wire [7:0] raw_view_addr, alias_view_addr;
++ wire queue_math_block;
++ wire raw_start=pending && !view_active && !import_leased && !raw_busy && !tf_reserve && !queue_math_block;
+  wire matrix_we=write_idle && reg_addr[9:4]==6'h04;
+  // Give START priority over accepting a new alias burst on the same edge.
+- assign view_block=active || start_request;
+- geometry_raw_load #(.CAPTURE_CONTEXT(0),.ENABLE_INVALIDATE(0),
++ assign view_block=active || start_request || import_view_block || tf_reserve;
++`ifdef INCLUDE_GPU_BRAM_IMPORT
++ wire [31:0] import_generation, import_claim_result;
++ wire [1:0] import_free_banks;
++ wire import_sticky_error;
++ geometry_import_view import_view (
++  .clk(clk), .reset(reset), .consumer_reset(import_reset),
++  .result_success(raw_done && !unsupported && dma_error==0),
++  .result_valid(view_valid && completed && success), .producer_active(active || tf_reserve), .result_count(view_count),
++  .claim(reg_wr && reg_wstrb==4'hf && reg_addr==10'h00f), .claim_token(reg_wdata),
++  .clear_error(write_idle && reg_addr==10'h002 && reg_wdata[1]),
++  .producer_rejected(start_request && import_leased),
++  .generation(import_generation), .leased(import_leased), .error(import_sticky_error),
++  .claim_result(import_claim_result), .free_banks(import_free_banks),
++  .cpu_view_active(view_active), .cpu_view_addr(view_read_addr),
++  .cpu_view_block(import_view_block), .result_addr(alias_view_addr), .result_data(view_read_data),
++  .gpu_req(import_req), .gpu_token(import_token), .gpu_src(import_src), .gpu_addr(import_addr),
++  .gpu_grant(import_grant), .gpu_error(import_error), .gpu_data(import_data),
++  .gpu_read_done(import_read_done), .gpu_release(import_release), .gpu_fault(import_fault),
++  .gpu_release_token(import_release_token), .owner(import_owner)
++ );
++`else
++ assign import_leased=1'b0, import_owner=1'b0, import_view_block=1'b0;
++ assign alias_view_addr=view_read_addr;
++`endif
++ wire raw_fma_request, raw_fma_multiply;
++ wire [31:0] raw_fma_a, raw_fma_b, raw_fma_c;
++ wire raw_fma_result_valid, raw_fma_result_bad;
++ wire [31:0] raw_fma_result;
++ wire tf_scratch_read, tf_scratch_write;
++ wire [6:0] tf_scratch_read_addr, tf_scratch_write_addr;
++ wire [31:0] tf_scratch_data, tf_scratch_write_data;
++`ifdef INCLUDE_GPU_QUEUED_FRONT
++ // Raw LOAD and queued cull share one FMA and six existing scratch words.
++ // Each complete cull relinquishes ownership; accepted raw work has priority.
++ // Consumer reset cancels the culler but never resets accepted producer DMA.
++ reg queue_math_owner,queue_math_abort;
++ reg [3:0] queue_math_outstanding;
++ wire shared_fma_valid,shared_fma_bad;
++ wire [31:0] shared_fma_data;
++ wire queue_fma_issue=queue_math_owner && !queue_math_abort && !import_reset && math_fma_valid;
++ assign queue_math_block=queue_math_owner || queue_math_abort;
++ assign math_grant=queue_math_owner && !queue_math_abort && !import_reset;
++ assign math_fma_result_valid=shared_fma_valid && math_grant;
++ assign math_fma_result=shared_fma_data;
++ assign math_fma_unsupported=shared_fma_bad;
++ assign math_scratch_data=tf_scratch_data;
++ assign tf_scratch_read=math_grant && math_scratch_read;
++ assign tf_scratch_write=math_grant && math_scratch_write;
++ assign tf_scratch_read_addr={4'b0,math_scratch_read_addr};
++ assign tf_scratch_write_addr={4'b0,math_scratch_write_addr};
++ assign tf_scratch_write_data=math_scratch_write_data;
++ assign tf_busy=1'b0,tf_reserve=1'b0,tf_owner=1'b0;
++ assign raw_view_addr=alias_view_addr;
++ assign queue_reg_wr=reg_wr;
++ assign queue_reg_addr=reg_addr;
++ assign queue_reg_wdata=reg_wdata;
++ assign queue_reg_wstrb=reg_wstrb;
++ GeometryFmaProbe shared_fma (
++  .clk(clk),.reset(reset),.io_valid(queue_math_owner?queue_fma_issue:raw_fma_request),
++  .io_a(queue_math_owner?math_fma_a:raw_fma_a),.io_b(queue_math_owner?math_fma_b:raw_fma_b),
++  .io_c(queue_math_owner?math_fma_c:raw_fma_c),
++  .io_multiplyOnly(queue_math_owner?math_fma_multiply:raw_fma_multiply),
++  .io_result(shared_fma_data),.io_resultValid(shared_fma_valid),.io_unsupported(shared_fma_bad)
++ );
++ assign raw_fma_result_valid=shared_fma_valid && !queue_math_owner;
++ assign raw_fma_result=shared_fma_data;
++ assign raw_fma_result_bad=shared_fma_bad;
++ always @(posedge clk)begin
++  if(reset)begin queue_math_owner<=0;queue_math_abort<=0;queue_math_outstanding<=0;end
++  else begin
++   if(queue_math_owner)begin
++    case({queue_fma_issue,shared_fma_valid})
++     2'b10:queue_math_outstanding<=queue_math_outstanding+1'b1;
++     2'b01:queue_math_outstanding<=queue_math_outstanding-1'b1;
++     default:;
++    endcase
++    if(import_reset)queue_math_abort<=1;
++    if((math_release || queue_math_abort || import_reset) &&
++       queue_math_outstanding==0 && !queue_fma_issue)begin
++     queue_math_owner<=0;queue_math_abort<=0;
++    end
++   end else if(!import_reset && math_req && !active && !pending && !raw_busy && !start_request)begin
++    queue_math_owner<=1;queue_math_outstanding<=0;
++   end
++  end
++ end
++`elsif INCLUDE_TRIANGLE_PREFLIGHT
++ assign queue_math_block=1'b0;
++ wire [31:0] tf_reg_rdata;
++ wire [7:0] tf_raw_addr;
++ wire tf_fma_request, tf_fma_multiply, shared_fma_valid, shared_fma_bad;
++ wire [31:0] tf_fma_a, tf_fma_b, tf_fma_c, shared_fma_data;
++ geometry_triangle_preflight preflight (
++  .clk(clk),.reset(reset),.reg_wr(reg_wr),.reg_addr(reg_addr),
++  .reg_wdata(reg_wdata),.reg_wstrb(reg_wstrb),.reg_rdata(tf_reg_rdata),
++  .generation(import_generation),.source_valid(view_valid && completed && success),
++  .producer_active(active || pending || raw_busy),.source_count(view_count),
++  .alias_active(view_active),.copy_busy(import_leased),
++  .conflict(full_write && ((reg_addr==10'h002 && reg_wdata[0]) || reg_addr==10'h00f)),
++  .busy(tf_busy),.reserve(tf_reserve),.port_owner(tf_owner),
++  .raw_addr(tf_raw_addr),.raw_data(view_read_data),
++  .scratch_read(tf_scratch_read),.scratch_read_addr(tf_scratch_read_addr),.scratch_data(tf_scratch_data),
++  .scratch_write(tf_scratch_write),.scratch_write_addr(tf_scratch_write_addr),.scratch_write_data(tf_scratch_write_data),
++  .fma_valid(tf_fma_request),.fma_a(tf_fma_a),.fma_b(tf_fma_b),.fma_c(tf_fma_c),
++  .fma_multiply_only(tf_fma_multiply),.fma_result_valid(shared_fma_valid && tf_owner),
++  .fma_result(shared_fma_data),.fma_unsupported(shared_fma_bad)
++ );
++ // Raw LOAD drains its FMA before completion/clip scan. Preflight owns the
++ // same FMA and scratch until its final response is consumed. Consumer-only
++ // GPU reset touches neither this reservation nor the accepted raw DMA.
++ GeometryFmaProbe shared_fma (
++  .clk(clk),.reset(reset),.io_valid(tf_owner?tf_fma_request:raw_fma_request),
++  .io_a(tf_owner?tf_fma_a:raw_fma_a),.io_b(tf_owner?tf_fma_b:raw_fma_b),
++  .io_c(tf_owner?tf_fma_c:raw_fma_c),.io_multiplyOnly(tf_owner?tf_fma_multiply:raw_fma_multiply),
++  .io_result(shared_fma_data),.io_resultValid(shared_fma_valid),.io_unsupported(shared_fma_bad)
++ );
++ assign raw_fma_result_valid=shared_fma_valid && !tf_owner;
++ assign raw_fma_result=shared_fma_data;
++ assign raw_fma_result_bad=shared_fma_bad;
++ assign raw_view_addr=tf_owner?tf_raw_addr:alias_view_addr;
++`else
++ assign queue_math_block=1'b0;
++ assign tf_busy=1'b0, tf_reserve=1'b0, tf_owner=1'b0;
++ assign raw_view_addr=alias_view_addr;
++ assign raw_fma_result_valid=1'b0, raw_fma_result_bad=1'b0, raw_fma_result=32'b0;
++ assign tf_scratch_read=1'b0, tf_scratch_write=1'b0;
++ assign tf_scratch_read_addr=7'b0, tf_scratch_write_addr=7'b0, tf_scratch_write_data=32'b0;
++`endif
++ wire [31:0] raw_importable,raw_wfp0,raw_wfp1,raw_wfp2,raw_wfp3;
++ geometry_raw_load #(.EXTERNAL_FMA(`ifdef INCLUDE_GPU_QUEUED_FRONT 1 `elsif INCLUDE_TRIANGLE_PREFLIGHT 1 `else 0 `endif),
++  .CAPTURE_CONTEXT(0),.ENABLE_INVALIDATE(0),
+   .SOURCE_MIN_ADDRESS(32'h00000000),.SOURCE_END_ADDRESS(33'h001000000)) load(
+   .clk(clk),.reset(reset),.slot_invalidate(1'b0),.invalidate_mask(32'b0),
+   .matrix_we(matrix_we),.matrix_addr(reg_addr[3:0]),.matrix_data(reg_wdata),
+@@ -39,20 +197,47 @@
+   .dma_request_start(),.dma_request_base(),.dma_request_words(),
+   .dma_response_busy(1'b0),.dma_response_done(1'b0),.dma_response_error(2'b0),
+   .dma_response_word_valid(1'b0),.dma_response_word_index(8'b0),.dma_response_word_data(32'b0),
+-  .output_addr(view_read_addr),.output_data(view_read_data),
++  .output_addr(raw_view_addr),.output_data(view_read_data),
+   .busy(raw_busy),.done(raw_done),.unsupported(unsupported),.dma_error(dma_error),
+   .all_inside(all_inside),.cycles(),.valid_slots(),.compute_cycles(),
+-  .fma_request_valid(),.fma_request_a(),.fma_request_b(),.fma_request_c(),.fma_request_multiply(),
+-  .fma_response_valid(1'b0),.fma_response_data(32'b0),.fma_response_unsupported(1'b0),
+-  .scratch_read_valid(1'b0),.scratch_read_addr(7'b0),.scratch_read_data(),
+-  .scratch_write(1'b0),.scratch_write_addr(7'b0),.scratch_write_data(32'b0));
++  .importable_slots(raw_importable),.w_fingerprint0(raw_wfp0),.w_fingerprint1(raw_wfp1),.w_fingerprint2(raw_wfp2),.w_fingerprint3(raw_wfp3),
++  .fma_request_valid(raw_fma_request),.fma_request_a(raw_fma_a),.fma_request_b(raw_fma_b),.fma_request_c(raw_fma_c),.fma_request_multiply(raw_fma_multiply),
++  .fma_response_valid(raw_fma_result_valid),.fma_response_data(raw_fma_result),.fma_response_unsupported(raw_fma_result_bad),
++  .scratch_read_valid(tf_scratch_read),.scratch_read_addr(tf_scratch_read_addr),.scratch_read_data(tf_scratch_data),
++  .scratch_write(tf_scratch_write),.scratch_write_addr(tf_scratch_write_addr),.scratch_write_data(tf_scratch_write_data));
+  always @*begin
+   reg_rdata=0;
+   case(reg_addr)
+    10'h000:reg_rdata=32'h4c4f4405;
+-   10'h001:reg_rdata={23'b0,&matrix_valid,config_error,dma_error,all_inside,unsupported,success,completed,active};
++   10'h001:begin
++    reg_rdata={23'b0,&matrix_valid,config_error,dma_error,all_inside,unsupported,success,completed,active};
++`ifdef INCLUDE_GPU_BRAM_IMPORT
++    reg_rdata[9]=import_leased;
++    reg_rdata[10]=import_sticky_error;
++    reg_rdata[12:11]=import_free_banks;
++`endif
++   end
++`ifdef INCLUDE_GPU_BRAM_IMPORT
++   10'h00d:reg_rdata=32'h42494d32;
++   10'h00e:reg_rdata=import_generation;
++   10'h010:reg_rdata=import_claim_result;
++`endif
++`ifdef INCLUDE_GPU_QUEUED_FRONT
++   10'h01a:reg_rdata=32'h51474631;
++   10'h01b:reg_rdata=(view_valid && completed && success && !active)?raw_importable:32'd0;
++   10'h01c:reg_rdata=raw_wfp0;
++   10'h01d:reg_rdata=raw_wfp1;
++   10'h01e:reg_rdata=raw_wfp2;
++   10'h01f:reg_rdata=raw_wfp3;
++`endif
+    default:reg_rdata=0;
+   endcase
++`ifdef INCLUDE_GPU_QUEUED_FRONT
++  if(reg_addr>=10'h020 && reg_addr<=10'h02f)reg_rdata=queue_reg_rdata;
++`endif
++`ifdef INCLUDE_TRIANGLE_PREFLIGHT
++  if(reg_addr>=10'h011 && reg_addr<=10'h019)reg_rdata=tf_reg_rdata;
++`endif
+  end
+  always @(posedge clk)begin
+   if(reset)begin
+@@ -71,7 +256,7 @@
+     case(reg_addr)
+      10'h002:begin
+       if(reg_wdata[1])begin completed<=0;success<=0;config_error<=0;end
+-      if(reg_wdata[0])begin
++      if(reg_wdata[0] && !import_leased)begin
+        completed<=!(&matrix_valid);success<=0;config_error<=!(&matrix_valid);
+        if(&matrix_valid)begin active<=1;pending<=1;end
+       end
+--- a/frozen/src/fpga/targets/pocket/os30/core_top.v
++++ b/frozen/src/fpga/targets/pocket/os30/core_top.v
+@@ -2811,7 +2811,7 @@
+     );
+ 
+     // Private LOD5 results: cacheable BRAM view at reserved0x13f80000.
+-    // No result DMA and no GPU command ingress. CPU copies completed results.
++    // CPU alias and optional ordered GPU import share the completed result BRAM.
+     wire geometry_reg_wr;
+     wire [9:0] geometry_reg_addr;
+     wire [31:0] geometry_reg_wdata,geometry_reg_rdata;
+@@ -2824,6 +2824,38 @@
+     wire [31:0] geometry_view_data;
+     wire geometry_view_active,geometry_view_block,geometry_view_valid;
+     wire [5:0] geometry_view_count;
++`ifdef INCLUDE_GPU_QUEUED_FRONT
++    wire geometry_math_req;
++    wire geometry_math_grant;
++    wire geometry_math_release;
++    wire geometry_math_fma_valid;
++    wire [31:0] geometry_math_fma_a;
++    wire [31:0] geometry_math_fma_b;
++    wire [31:0] geometry_math_fma_c;
++    wire geometry_math_fma_multiply;
++    wire geometry_math_fma_result_valid;
++    wire [31:0] geometry_math_fma_result;
++    wire geometry_math_fma_unsupported;
++    wire geometry_math_scratch_read;
++    wire geometry_math_scratch_write;
++    wire [2:0] geometry_math_scratch_read_addr;
++    wire [2:0] geometry_math_scratch_write_addr;
++    wire [31:0] geometry_math_scratch_data;
++    wire [31:0] geometry_math_scratch_write_data;
++    wire geometry_queue_reg_wr;
++    wire [9:0] geometry_queue_reg_addr;
++    wire [31:0] geometry_queue_reg_wdata;
++    wire [3:0] geometry_queue_reg_wstrb;
++    wire [31:0] geometry_queue_reg_rdata;
++`endif
++
++`ifdef INCLUDE_GPU_BRAM_IMPORT
++    wire geometry_import_req, geometry_import_grant, geometry_import_error;
++    wire geometry_import_read_done, geometry_import_release, geometry_import_fault, geometry_import_cancel;
++    wire [31:0] geometry_import_token, geometry_import_data, geometry_import_release_token;
++    wire [4:0] geometry_import_src;
++    wire [7:0] geometry_import_addr;
++`endif
+     // Only startup/fabric reset cancels the independent M2 source read.
+     // CPU-only reset discards only local alias responses, never raw LOAD DMA.
+     reg [2:0] geometry_startup = 3'b000;
+@@ -2850,6 +2882,40 @@
+     wire geometry_cpu_sdram_bvalid;
+     wire [1:0] geometry_cpu_sdram_bresp;
+     geometry_load_alias geometry_load (
++`ifdef INCLUDE_GPU_QUEUED_FRONT
++        .math_req(geometry_math_req),
++        .math_grant(geometry_math_grant),
++        .math_release(geometry_math_release),
++        .math_fma_valid(geometry_math_fma_valid),
++        .math_fma_a(geometry_math_fma_a),
++        .math_fma_b(geometry_math_fma_b),
++        .math_fma_c(geometry_math_fma_c),
++        .math_fma_multiply(geometry_math_fma_multiply),
++        .math_fma_result_valid(geometry_math_fma_result_valid),
++        .math_fma_result(geometry_math_fma_result),
++        .math_fma_unsupported(geometry_math_fma_unsupported),
++        .math_scratch_read(geometry_math_scratch_read),
++        .math_scratch_write(geometry_math_scratch_write),
++        .math_scratch_read_addr(geometry_math_scratch_read_addr),
++        .math_scratch_write_addr(geometry_math_scratch_write_addr),
++        .math_scratch_data(geometry_math_scratch_data),
++        .math_scratch_write_data(geometry_math_scratch_write_data),
++        .queue_reg_wr(geometry_queue_reg_wr),
++        .queue_reg_addr(geometry_queue_reg_addr),
++        .queue_reg_wdata(geometry_queue_reg_wdata),
++        .queue_reg_wstrb(geometry_queue_reg_wstrb),
++        .queue_reg_rdata(geometry_queue_reg_rdata),
++`endif
++`ifdef INCLUDE_GPU_BRAM_IMPORT
++        .import_req(geometry_import_req), .import_token(geometry_import_token),
++        .import_src(geometry_import_src), .import_addr(geometry_import_addr),
++        .import_grant(geometry_import_grant), .import_error(geometry_import_error),
++        .import_data(geometry_import_data), .import_read_done(geometry_import_read_done),
++        .import_release(geometry_import_release), .import_release_token(geometry_import_release_token),
++        .import_fault(geometry_import_fault),
++        // Both consumer reset replicas cancel local ownership only; raw DMA drains.
++        .import_reset(!reset_n_cpu_core || !reset_n_cpu_media || geometry_import_cancel),
++`endif
+         .clk(clk_cpu),.reset(geometry_reset),
+         .reg_wr(geometry_reg_wr),.reg_addr(geometry_reg_addr),
+         .reg_wdata(geometry_reg_wdata),.reg_wstrb(geometry_reg_wstrb),.reg_rdata(geometry_reg_rdata),
+@@ -4044,6 +4110,39 @@
+     // the internal write combiner in front of it only costs time and RAM.
+     .GPU_WRITE_COMBINE(`ifdef INCLUDE_GPU_RENDER_CACHE 0 `else 1 `endif)
+ ) gpu (
++`ifdef INCLUDE_GPU_QUEUED_FRONT
++        .math_req(geometry_math_req),
++        .math_grant(geometry_math_grant),
++        .math_release(geometry_math_release),
++        .math_fma_valid(geometry_math_fma_valid),
++        .math_fma_a(geometry_math_fma_a),
++        .math_fma_b(geometry_math_fma_b),
++        .math_fma_c(geometry_math_fma_c),
++        .math_fma_multiply(geometry_math_fma_multiply),
++        .math_fma_result_valid(geometry_math_fma_result_valid),
++        .math_fma_result(geometry_math_fma_result),
++        .math_fma_unsupported(geometry_math_fma_unsupported),
++        .math_scratch_read(geometry_math_scratch_read),
++        .math_scratch_write(geometry_math_scratch_write),
++        .math_scratch_read_addr(geometry_math_scratch_read_addr),
++        .math_scratch_write_addr(geometry_math_scratch_write_addr),
++        .math_scratch_data(geometry_math_scratch_data),
++        .math_scratch_write_data(geometry_math_scratch_write_data),
++        .queue_reg_wr(geometry_queue_reg_wr),
++        .queue_reg_addr(geometry_queue_reg_addr),
++        .queue_reg_wdata(geometry_queue_reg_wdata),
++        .queue_reg_wstrb(geometry_queue_reg_wstrb),
++        .queue_reg_rdata(geometry_queue_reg_rdata),
++`endif
++`ifdef INCLUDE_GPU_BRAM_IMPORT
++        .import_req(geometry_import_req), .import_token(geometry_import_token),
++        .import_src(geometry_import_src), .import_addr(geometry_import_addr),
++        .import_grant(geometry_import_grant), .import_error(geometry_import_error),
++        .import_data(geometry_import_data), .import_read_done(geometry_import_read_done),
++        .import_release(geometry_import_release), .import_release_token(geometry_import_release_token),
++        .import_fault(geometry_import_fault),
++        .import_cancel(geometry_import_cancel),
++`endif
+     .clk(clk_cpu),
+     .reset_n(reset_n_cpu_media),
+     .gpu_enable(1'b1),

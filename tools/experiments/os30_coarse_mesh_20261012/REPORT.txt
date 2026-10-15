@@ -1,0 +1,94 @@
+AJ03 cached geometry groups: implementation and measured decision
+
+Outcome: NO_GAIN. Selected source revision: F28.
+The CPU submits one cached descriptor list and a shared context for up to32
+consecutive admissible vertex/triangle jobs. Hardware fetches member descriptors,
+restores context after legacy preemption, transforms/culls, and sends results
+through the existing GPU command path. The producer skips internal CPU LOAD
+handlers. Source reuse still waits for true final completion.
+
+Measured native frame intervals (cycles; cold / warm)
+App     Same-ELF baseline core     AJ02 individual             AJ03 groups
+F25     4,229,536 / 4,594,411      4,744,686 / 4,673,434      4,682,326 / 4,669,689
+F26     4,326,462 / 4,673,773      4,836,758 / 4,790,865      4,787,216 / 4,751,887
+F27     4,264,850 / 4,649,707      not run                    4,757,143 / 4,724,262
+F28     4,256,732 / 4,631,100      4,877,586 / 4,649,518      4,806,008 / 4,630,859
+
+F28 versus its same-ELF control: cold +12.904%, warm -0.005%; combined +6.177%. Positive is slower.
+Only comparisons within one row isolate the hardware path.
+
+Submission reduction and its scope
+F25: cold: 98 logical jobs in 21 CPU requests (12 GROUP + 9 single); warm: 76 logical jobs in 27 CPU requests (14 GROUP + 13 single).
+F26: cold: 98 logical jobs in 21 CPU requests (12 GROUP + 9 single); warm: 76 logical jobs in 27 CPU requests (14 GROUP + 13 single).
+F27: cold: 98 logical jobs in 21 CPU requests (12 GROUP + 9 single); warm: 76 logical jobs in 27 CPU requests (14 GROUP + 13 single).
+F28: cold: 126 logical jobs in 26 CPU requests (15 GROUP + 11 single); warm: 103 logical jobs in 33 CPU requests (19 GROUP + 14 single).
+F27 preserves all174 admitted logical jobs across both intervals while reducing
+the eligible warm requests76->27 and cold98->21. This is64.5% and78.6% fewer
+eligible requests. It still leaves250 legacy hardware LOADs warm. The warm CPU
+LOAD callback count is354->305 (13.8% fewer), so the larger percentages must
+not be presented as eliminating that fraction of all CPU graphics work.
+
+Implemented software refinements
+F25 adds GROUP descriptors, source-generation fences and exact group caching.
+F26 invalidates only groups intersecting a new repair hint and keeps the cold
+descriptor compiler out of the hot path. F27 publishes a complete GROUP
+immediately instead of waiting for the ordinary512-word lazy kick threshold.
+F28 adds a bounded, caller-specific dead-slot proof. It can follow one
+actual immutable caller continuation and nested immutable display lists,
+looking past16 audited vertex-independent state opcodes. Actual dispatch
+still executes every state command; GROUP still ends at state/list boundaries.
+The proof and dependent groups are keyed by the exact continuation.
+Mutable commands, later canonical reads, a second external return, scan/depth
+overflow, and SETOTHERMODE fog-flush operations remain rejection barriers.
+Runtime proves55 additional caller-dependent jobs across both intervals.
+Warm eligible submissions103->33 (68.0% fewer); actual CPU vertex callbacks
+354->284 (19.8% fewer). Legacy hardware LOADs remain223. Total CPU GPU-ring
+upload falls23,000->18,590 words versus the same-ELF baseline core.
+Warm frame time differs by only241 cycles (0.0052%): effectively equal.
+Cold frame time is12.904% slower. No worthwhile speedup is established.
+
+Why fewer requests alone did not make F27 faster
+Remaining legacy LOADs force repeated ownership and context setup. The warm
+trace proves overlap (CPU legacy LOADs start while prior output is draining),
+but removing publication calls alone does not remove geometry/material work
+or downstream GPU backpressure. A whole-group raw lock would delay existing
+CPU handoffs; terminal canonical handback also needs per-slot validity and
+failed-LOAD recovery because smaller LOADs preserve earlier high slots.
+Warm F27 performs4,912 geometry register writes versus2,459 for its control.
+Matrix/scalar context reprogramming adds2,269 writes; collapsing ACQUIRE to
+one transaction would remove only206 writes. Actual lease wait is15,267 cycles,
+so ownership residence must not be mistaken for CPU blocked time.
+F28 reduces that burden, but still makes4,575 geometry writes versus2,459:
+matrix2,496 vs1,136; scalar1,022 vs345; LOAD669 vs978; lease388 vs0.
+Its97 warm leases wait20,328 cycles in total. More buffering or fewer kick
+calls alone does not remove the remaining CPU admission/context work.
+
+Validation and delivery
+All11 selected full native replay receipts pass exact image/depth,
+draw payload/state/order, source lifetime, physical descriptor/context/snapshot
+and true-completion checks. Known timestamp-only normalization is documented
+in the strict receipts. Tests and historical failures remain separately bound.
+Focused RTL:160 cases /133,895 checks, including malformed requests, reset,
+DMA errors, output backpressure, repair and priority preemption.
+Actual extracted-C ownership/cache tests and independent corruption tests are
+included with their exact source/build receipts. They do not replace hardware tests.
+F28 rejects all22 deliberately corrupted ownership/source/caller witnesses.
+F28 checker v3 initially could not distinguish four repeated immutable list
+sources. Those failures are preserved. Strengthened v4 requires a unique
+match against the complete independently consumed baseline raw context, then
+retains exact source, caller, sequence and all652 raw-context checks.
+
+No Quartus fit, full seed sweep, production update or Pocket deployment.
+The physical overlay retains90MHz/seed3/effort3 from the qualified baseline,
+but AJ03 area/timing are unmeasured. The baseline itself had only311 spare
+ALMs and4 spare M10Ks; estimated memory usage is not a fit result.
+
+Limits
+Two bounded SM64 native CPU/raster/game/audio intervals with synthetic scan/audio services. No sustained Pocket FPS or Quake2/all-level claim.
+Each row uses the identical ELF, fixture and workload for control and candidate. Different rows have different ELF placement and are not causal software A/B measurements.
+Function attribution includes preceding retirement gaps. Overlapping hardware state counters must not be added into predicted savings.
+Physical overlay is prepared only. Baseline timing and resource counts do not qualify AJ03.
+
+Reproduce evidence inventory: python3 verify.py --patches --evidence
+Run portable tests outside this bundle: python3 run_tests.py --output /tmp/aj03-tests
+Native replay requires the separately retained, hash-bound game fixtures.

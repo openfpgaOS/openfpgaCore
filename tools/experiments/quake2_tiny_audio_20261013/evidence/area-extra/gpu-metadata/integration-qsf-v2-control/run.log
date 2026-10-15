@@ -1,0 +1,27 @@
+================================================================
+ REAL gpu_core FB-write path through MiSTer SDRAM under contention
+ gpu_core fbwq -> arbiter M0 -> slave -> io_sdram -> sdram_model
+ rows=240
+================================================================
+
+[Pass A] reference render (aggressors OFF, fast write path)...
+  reference render complete (cyc=738914).
+
+[Pass B] DUT render (aggressors ON: CPU+bridge+audio+scanout)...
+[0] SDRAM ERROR: refresh interval exceeded (1701 cycles since last refresh, max 1700)
+  DUT render complete (cyc=1791183).
+
+[Stream] reference writes=4716  contention writes=4716
+[Stream] op differences: 0 of 4716 compared (address differs in 0)
+[Stream] => streams IDENTICAL: fault is BELOW the slave (io_sdram/PHY/model)
+
+[Diff] comparing reference FB vs contention FB byte-for-byte...
+QSF gate: nonzero=132904 depthdiff=0 fbhash=9584c7a6555edab7 zhash=b1317e78f926ac45
+
+----------------------------------------------------------------
+framebuffer byte diffs (reference vs contention): 0 / 153600
+  of which missing-pixel (dut=0x00): 0   corrupted (dut!=ref,!=0): 0
+total simulated cycles: 1791183
+harness DMA/fence timeouts: none
+----------------------------------------------------------------
+RESULT: PASS — GPU FB output IDENTICAL with/without contention.

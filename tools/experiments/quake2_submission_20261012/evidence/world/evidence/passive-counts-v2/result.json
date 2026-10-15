@@ -1,0 +1,103 @@
+{
+  "observer_only": "exports existing two perPC counters; all instructions/cycles/output retained",
+  "addresses": {
+    "reserve": "104071f2",
+    "fan_memcpy": "10407220"
+  },
+  "elf_sha256": "661df2c2d20963c1793878baa2e5abab0931b03add01afd956d01d5dc2ac942a",
+  "results": [
+    {
+      "workload": "main",
+      "steady_frames": 340,
+      "steady": {
+        "reserve": 14544,
+        "fans": 50858
+      },
+      "reserves_per_frame": 42.77647058823529,
+      "fans_per_frame": 149.58235294117648,
+      "reserve_reduction_percent": 71.40272916748593,
+      "verification": [
+        {
+          "phase": "startup",
+          "exact_totals_frames_profiles_oracle_sync": true,
+          "exact_commands_pixels": false,
+          "counts": {
+            "reserve": 675,
+            "fans": 2581
+          }
+        },
+        {
+          "phase": "full",
+          "exact_totals_frames_profiles_oracle_sync": true,
+          "exact_commands_pixels": true,
+          "counts": {
+            "reserve": 15219,
+            "fans": 53439
+          }
+        }
+      ]
+    },
+    {
+      "workload": "sound",
+      "steady_frames": 100,
+      "steady": {
+        "reserve": 4133,
+        "fans": 15841
+      },
+      "reserves_per_frame": 41.33,
+      "fans_per_frame": 158.41,
+      "reserve_reduction_percent": 73.90947541190582,
+      "verification": [
+        {
+          "phase": "startup",
+          "exact_totals_frames_profiles_oracle_sync": true,
+          "exact_commands_pixels": false,
+          "counts": {
+            "reserve": 675,
+            "fans": 2581
+          }
+        },
+        {
+          "phase": "full",
+          "exact_totals_frames_profiles_oracle_sync": true,
+          "exact_commands_pixels": true,
+          "counts": {
+            "reserve": 4808,
+            "fans": 18422
+          }
+        }
+      ]
+    },
+    {
+      "workload": "live",
+      "steady_frames": 100,
+      "steady": {
+        "reserve": 3817,
+        "fans": 11929
+      },
+      "reserves_per_frame": 38.17,
+      "fans_per_frame": 119.29,
+      "reserve_reduction_percent": 68.00234722105792,
+      "verification": [
+        {
+          "phase": "startup",
+          "exact_totals_frames_profiles_oracle_sync": true,
+          "exact_commands_pixels": false,
+          "counts": {
+            "reserve": 1063,
+            "fans": 3192
+          }
+        },
+        {
+          "phase": "full",
+          "exact_totals_frames_profiles_oracle_sync": true,
+          "exact_commands_pixels": true,
+          "counts": {
+            "reserve": 4880,
+            "fans": 15121
+          }
+        }
+      ]
+    }
+  ]
+}

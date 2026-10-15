@@ -1,0 +1,292 @@
+{
+  "passed": true,
+  "baseline_app_sha256": "13c8f43af0ca9ea84b84cf1cd9e824bd6f0c1d39eb2b65dc01337408102862a0",
+  "final_app_sha256": "c08bed78555f08252c9694c1f019db968e2ce79809ff41b909cfdd61b30e743b",
+  "unchanged_core_sha256": "542029e588e2a646f20fc98f1dbaf89a667ced48c75de9e89354df74da8622b6",
+  "logical_core": {
+    "worker_sha256": "56b3f89d26ef2ffa3588c5679cfb9806d3859071f27fe6e30bdabcd06bcabfab",
+    "replayer_sha256": "88895d4f468e3faae61fd1c74cbd0644660b9cbf50b8fd92afc493877ce7ff76",
+    "cb_read_window": 4,
+    "gpu_core_sha256": "dad27ae2f70055ab3ce5627afb6590398cfb3ec6fb53a4ff1fc8dc0cf1b07bab",
+    "gpu_tex_cache_sha256": "c3fdc0adfe5ed583c37bf09ad3dbbbecb1e3c6ae1f5714cab5064eacc328e51c",
+    "color_depth_cache_sha256": "ab1f1aeeb135cd2f80e44adb39616c35f28f1e164ab639b2f5645fbb447000ae",
+    "source_pins_sha256": "5fee5692b4966933fe99cbff369ebab4e5b4fb1612bd8df564526b4f14fbbd5b",
+    "build_command_sha256": "16ee1c53edd0368a2242e7df85d6518943180167ff5374d8d178262626aa96df"
+  },
+  "total_qualified_application_frames": 1920,
+  "cpu_and_exact_gates": [
+    {
+      "candidate": "final-native",
+      "baseline": "baseline",
+      "workload": "main",
+      "passed": true,
+      "baseline_cycles_per_frame": 3601124.6411764706,
+      "candidate_cycles_per_frame": 3438326.3852941175,
+      "change_percent": -4.520761487143854
+    },
+    {
+      "candidate": "final-native",
+      "baseline": "baseline",
+      "workload": "sound",
+      "passed": true,
+      "baseline_cycles_per_frame": 3897394.95,
+      "candidate_cycles_per_frame": 3777980.57,
+      "change_percent": -3.0639537827697017
+    },
+    {
+      "candidate": "final-native",
+      "baseline": "baseline",
+      "workload": "live",
+      "passed": true,
+      "baseline_cycles_per_frame": 4020670.28,
+      "candidate_cycles_per_frame": 3953934.63,
+      "change_percent": -1.6598140447368404
+    },
+    {
+      "candidate": "final-demo2",
+      "baseline": "baseline-demo2",
+      "workload": "demo2",
+      "passed": true,
+      "baseline_cycles_per_frame": 3100322.34,
+      "candidate_cycles_per_frame": 3037013.44,
+      "change_percent": -2.0420102511018223
+    },
+    {
+      "candidate": "final-worker",
+      "baseline": "baseline-worker",
+      "workload": "main",
+      "passed": true,
+      "baseline_cycles_per_frame": 4910651.902941177,
+      "candidate_cycles_per_frame": 4750785.476470588,
+      "change_percent": -3.2555031313630467
+    },
+    {
+      "candidate": "final-worker",
+      "baseline": "baseline-worker",
+      "workload": "sound",
+      "passed": true,
+      "baseline_cycles_per_frame": 5961748.54,
+      "candidate_cycles_per_frame": 5853965.05,
+      "change_percent": -1.8079174134372322
+    },
+    {
+      "candidate": "final-worker",
+      "baseline": "baseline-worker",
+      "workload": "live",
+      "passed": true,
+      "baseline_cycles_per_frame": 5149042.3,
+      "candidate_cycles_per_frame": 5080386.1,
+      "change_percent": -1.3333780536236794
+    },
+    {
+      "candidate": "final-cpu",
+      "baseline": "baseline-cpu",
+      "workload": "main",
+      "passed": true,
+      "baseline_cycles_per_frame": 5204347.997058824,
+      "candidate_cycles_per_frame": 5066530.576470588,
+      "change_percent": -2.6481207764377235
+    },
+    {
+      "candidate": "final-cpu",
+      "baseline": "baseline-cpu",
+      "workload": "sound",
+      "passed": true,
+      "baseline_cycles_per_frame": 6263433.16,
+      "candidate_cycles_per_frame": 6179743.43,
+      "change_percent": -1.3361638555427713
+    },
+    {
+      "candidate": "final-cpu",
+      "baseline": "baseline-cpu",
+      "workload": "live",
+      "passed": true,
+      "baseline_cycles_per_frame": 5314096.17,
+      "candidate_cycles_per_frame": 5269669.78,
+      "change_percent": -0.8360102749137788
+    }
+  ],
+  "busy_cpu_frames": [
+    {
+      "label": "baseline",
+      "cycles": {
+        "92": 6331893,
+        "94": 6184720,
+        "148": 6602026
+      }
+    },
+    {
+      "label": "final-native",
+      "cycles": {
+        "92": 6023615,
+        "94": 6050115,
+        "148": 6221487
+      }
+    }
+  ],
+  "paced_frames": [
+    {
+      "workload": "main",
+      "frame": 20,
+      "baseline_cycles": 4876283,
+      "final_cycles": 4864878,
+      "throughput_change_percent": 0.23443547813533083,
+      "final_components": {
+        "cpu_cycles": 4177941,
+        "cpu_overlap": 2147090,
+        "ring_wait": 670543,
+        "fence_wait": 16263,
+        "final_drain": 128,
+        "prior_frame_fences": 0,
+        "upload_wait": 0
+      },
+      "full_color_depth_exact": true
+    },
+    {
+      "workload": "main",
+      "frame": 80,
+      "baseline_cycles": 5029624,
+      "final_cycles": 5019454,
+      "throughput_change_percent": 0.20261167848136807,
+      "final_components": {
+        "cpu_cycles": 3975498,
+        "cpu_overlap": 2382399,
+        "ring_wait": 555725,
+        "fence_wait": 488100,
+        "final_drain": 128,
+        "prior_frame_fences": 0,
+        "upload_wait": 0
+      },
+      "full_color_depth_exact": true
+    },
+    {
+      "workload": "main",
+      "frame": 92,
+      "baseline_cycles": 7668318,
+      "final_cycles": 7416421,
+      "throughput_change_percent": 3.3964765484591597,
+      "final_components": {
+        "cpu_cycles": 6023615,
+        "cpu_overlap": 2433547,
+        "ring_wait": 86131,
+        "fence_wait": 1118656,
+        "final_drain": 128,
+        "prior_frame_fences": 0,
+        "upload_wait": 187888
+      },
+      "full_color_depth_exact": true
+    },
+    {
+      "workload": "main",
+      "frame": 94,
+      "baseline_cycles": 7096300,
+      "final_cycles": 7036799,
+      "throughput_change_percent": 0.8455691288041578,
+      "final_components": {
+        "cpu_cycles": 6050115,
+        "cpu_overlap": 2714303,
+        "ring_wait": 500687,
+        "fence_wait": 485866,
+        "final_drain": 128,
+        "prior_frame_fences": 0,
+        "upload_wait": 0
+      },
+      "full_color_depth_exact": true
+    },
+    {
+      "workload": "main",
+      "frame": 148,
+      "baseline_cycles": 6989415,
+      "final_cycles": 6646207,
+      "throughput_change_percent": 5.163967959469207,
+      "final_components": {
+        "cpu_cycles": 6221487,
+        "cpu_overlap": 2381094,
+        "ring_wait": 410357,
+        "fence_wait": 14232,
+        "final_drain": 128,
+        "prior_frame_fences": 0,
+        "upload_wait": 0
+      },
+      "full_color_depth_exact": true
+    },
+    {
+      "workload": "main",
+      "frame": 180,
+      "baseline_cycles": 6005220,
+      "final_cycles": 5729971,
+      "throughput_change_percent": 4.803671781235885,
+      "final_components": {
+        "cpu_cycles": 4587869,
+        "cpu_overlap": 2083924,
+        "ring_wait": 656104,
+        "fence_wait": 485867,
+        "final_drain": 128,
+        "prior_frame_fences": 0,
+        "upload_wait": 0
+      },
+      "full_color_depth_exact": true
+    },
+    {
+      "workload": "main",
+      "frame": 300,
+      "baseline_cycles": 3417528,
+      "final_cycles": 3393667,
+      "throughput_change_percent": 0.7031037517823746,
+      "final_components": {
+        "cpu_cycles": 3044011,
+        "cpu_overlap": 2039284,
+        "ring_wait": 335115,
+        "fence_wait": 14410,
+        "final_drain": 128,
+        "prior_frame_fences": 0,
+        "upload_wait": 0
+      },
+      "full_color_depth_exact": true
+    },
+    {
+      "workload": "live",
+      "frame": 81,
+      "baseline_cycles": 13441894,
+      "final_cycles": 13415394,
+      "throughput_change_percent": 0.19753426548634323,
+      "final_components": {
+        "cpu_cycles": 10331156,
+        "cpu_overlap": 1680742,
+        "ring_wait": 30648,
+        "fence_wait": 964871,
+        "final_drain": 128,
+        "prior_frame_fences": 0,
+        "upload_wait": 2088588
+      },
+      "full_color_depth_exact": true
+    }
+  ],
+  "limitations": [
+    "CPU work uses approximate scalar OS25-derived timing with os30 cache sizes, not actual Vexii instruction timing.",
+    "GPU raster/cache/mesh arbitration and 100MHz16-bit PSRAM controller/PHY timing are simulated using actual RTL.",
+    "Frames start with an idle GPU and resident snapshot; carryover from prior frames, CPU/scanout SDRAM contention, audio/OS ISR costs and vblank are absent.",
+    "The recorded CPU branch/control path is retained. Real ring-full, fence, and upload-busy waits stretch the producer; additional polling instruction costs are not executed.",
+    "GPU unpublished command writes are packed at the end of the measured submission interval while preserving publish timing; reserve capacity is checked before CPU submission work.",
+    "CPU non-framebuffer snapshots are installed after preceding fences and before submission. This validates these captured rendering outputs, not all CPU/GPU memory races.",
+    "The render gate omits CPU framebuffer snapshots; full CPU framebuffer output has separate600-frame exact tests. Complete rendered color/depth match for every sample.",
+    "All baseline scenes are pinned deployed13c8 app/currentMAC+CB4 core controls. Live81 reconstructs exactly one frame-start clear from independent command trace.",
+    "Initial paced v1 serialized uploads after every word and overestimated extra upload delay. Only asynchronous issue/recorded busy-poll modelv3 and vectorsv2 are used here.",
+    "Relative throughput estimates are scenario comparisons, not a measured Pocket FPS claim."
+  ],
+  "provenance_sha256": {
+    "comparisons/final-native-vs-baseline.json": "798bbffff07b9a5a5d6b82ad8d24e198ffe3e7c502b59cd5a1eb8b5766266db3",
+    "comparisons/final-demo2-vs-baseline-demo2.json": "281e631389a2a3d8c3a92e2fcd26f261b0f28db6126e27573bc767ad64ecb30c",
+    "comparisons/final-worker-vs-baseline-worker.json": "693fa242604c97134eaa11fbce257bf09eed537ce5449546ceec9bc1e0e74d86",
+    "comparisons/final-cpu-vs-baseline-cpu.json": "5c0efd2c567a4d4261507623139fe0030b3066071a23a93940b7e5585821e6a3",
+    "paced-report-final-native.json": "a035c454d352f166cac3ef15df09ef9b9b6d31eb4c6f9e3862d91e86bcdcca6b",
+    "prepared.json": "921d71d1b4ab846b65bcce21a4c5710f1c613d0f212a2d5e276c850a31f4731e",
+    "bench.py": "540eb3fd7dd321f68b086d5202a7d7373cd772747afaa757578de72aee10f344",
+    "bench_timeline.py": "be6922ba062d7c1d3449f5fe7a8cf4d53a454f200272128825c06dda18ed98e6",
+    "bench_demo2.py": "5ceda80b398ed52279ba6c556d3659a7f2fcd04f8e0415354b1f8901d2a84445",
+    "pace_prepare.py": "d745290e461a3628ae5a05fc606b0e4b3d99f2c878f3e5e4a08d252546e2ca77",
+    "pace_replay.py": "f1054618615987ee819b23941fbf461130d31678769e790a0d3ef061128670ec",
+    "pace_report.py": "53edbbc43e1d33528605418d9cdd7592aadc341245b4f0e0b47e1d0a6b883e9a",
+    "finalize.py": "5ec32b018011f3da8e8aa852800d491cf56d4004805fc325241ef4050fc38cd8"
+  }
+}

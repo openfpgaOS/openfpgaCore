@@ -1,0 +1,104 @@
+{
+  "status": "PASS",
+  "sources": [
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/rtl/geometry_mesh_task_ctrl.v",
+      "sha256": "b2efc5506e55bec2bc3fd2c99532e33b88f6e1270cc55ffc3d28370d21da980d"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/rtl/geometry_mesh_raw_frontend.v",
+      "sha256": "61854f2d9949339c9b4c123d1b174da3828601cbf1edcbc0c410fbf854fac764"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/rtl/geometry_mesh_task_engine.v",
+      "sha256": "89ffb46cdcc2366fefc9b4334d5f0d3f1a66667f072078c69281226f8f4f81e5"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/native-v1/frozen/src/fpga/common/geometry_float_cull_mem.v",
+      "sha256": "53163df4519861d2ffa3d115b45656a90f03e6ef869a02188d1344710931f2ac"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/geometry_raw_load.v",
+      "sha256": "ade3041bfd27ab6200c5d6356775adac778a34eb0d81c1f253ff83367627c144"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/geometry_transform_light.v",
+      "sha256": "6987e27771c84173b31eb53e9f3bce4e7337437414548ef089f3adfe430c810f"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/GeometryFmaProbe.v",
+      "sha256": "348d11609de14326dc9408c11e39a385a85a4e0678eaaf5d69f39d6cfba38088"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/phase10_raw_vtx_dma.v",
+      "sha256": "ce51296a880ef212cacffbe4bb4c1728fc1bc9976d3504dd91883882d4316f81"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/geometry_float_batch_recip.v",
+      "sha256": "c3cc22d4aa4559d0cfe087c6556361eec22e363fbff79072bb65a1028c3dfd9b"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/phase10_float_recip2.v",
+      "sha256": "d68bc3fcdcb750f88cebf9aa8ed890a499d12210cbd50fe9d3a049c168bea5cc"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/geometry_color_rtz.v",
+      "sha256": "27025e32c4c8f42168db8e49149d9ee7cd2255d606ddb7ed0f5c932bedd1a335"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/geometry_mesh_chain.v",
+      "sha256": "d5b5b6097143bcd0910c77825562e06c18b3f65bdcba76fee2b1bdc1274d32f8"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/geometry_mesh_packet.v",
+      "sha256": "7514026cf2b23e8f219aa193e24c922bacac05e04079bd6f3edd772cbb97e493"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/native-v1/frozen/src/fpga/common/geometry_import_convert.v",
+      "sha256": "3beac876e469ec45ff3d3e81c9645671dcb92737d1f84dd188ca454fbbcf7526"
+    }
+  ],
+  "build_command": [
+    "verilator",
+    "--cc",
+    "--exe",
+    "--build",
+    "-j",
+    "4",
+    "-Wno-fatal",
+    "--top-module",
+    "geometry_mesh_chain",
+    "--Mdir",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/chain-v1/obj",
+    "-CFLAGS",
+    "-std=c++17 -O1 -fsanitize=address,undefined -fno-omit-frame-pointer",
+    "-LDFLAGS",
+    "-fsanitize=address,undefined",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/rtl/geometry_mesh_task_ctrl.v",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/rtl/geometry_mesh_raw_frontend.v",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/rtl/geometry_mesh_task_engine.v",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/native-v1/frozen/src/fpga/common/geometry_float_cull_mem.v",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/geometry_raw_load.v",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/geometry_transform_light.v",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/GeometryFmaProbe.v",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/phase10_raw_vtx_dma.v",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/geometry_float_batch_recip.v",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/phase10_float_recip2.v",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/geometry_color_rtz.v",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/geometry_mesh_chain.v",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/geometry_mesh_packet.v",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/native-v1/frozen/src/fpga/common/geometry_import_convert.v",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/test_chain.cpp"
+  ],
+  "test_sha256": "4bce3ea275d5bfd5377d208949d5e2aadac759f39e6785956adf360c79692808",
+  "runner_sha256": "385c89bed17e8e3082372211d5acfb85e225b76a047fa8a7532fcc92b36dcabe",
+  "result": {
+    "status": "PASS",
+    "tasks": 13,
+    "checks": 2702,
+    "cycles": 3125,
+    "AXI_bursts": 23,
+    "AXI_beats": 214
+  },
+  "scope": "Actual baseline LOAD/DMA/shared FMA/culler plus actual packet converter, synthetic contexts, original TRI input, ordinary GPU packets with randomized backpressure; no GPU raster/frame timing or live-scene context claim."
+}

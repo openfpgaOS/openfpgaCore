@@ -1,0 +1,98 @@
+TFP1 TRIANGLE FRONT END — CORRECT, REJECTED FOR PERFORMANCE
+
+Result
+Implemented and tested a current-generation BRAM-resident triangle path for
+os30. The hardware uses the existing transform FMA and scratch memory to
+perform the CPU's exact culling sequence. Supported runs import vertices
+directly into the GPU. Software defers canonical vertex readback until a
+fallback needs it. No second CPU or second FPU was added.
+
+All three versions preserve the tested rendering and game state. None improves
+complete native frame time. The best version is 1.823% slower in the warm
+interval; the latest, with broader coverage, is 2.041% slower. Do not promote
+this prototype as a performance improvement.
+
+Same-ELF comparisons, CPU cycles
+  Version                    Baseline first/warm     Candidate first/warm
+  v1 sparse fallback reads   4,026,645 / 4,413,309     4,267,308 / 4,633,417
+  v2 bulk fallback reads     3,935,317 / 4,329,312     4,024,027 / 4,408,243
+  v3 cold-material coverage  3,981,433 / 4,370,891     4,086,870 / 4,460,109
+  Warm frame-time change: v1 +4.987%, v2 +1.823%, v3 +2.041%.
+
+Each pair uses its own identical ELF, fresh matching scene capture, fixed
+memory/display/audio services, and identical pre-release preparation. Different
+software versions have different code layouts; evaluate each candidate against
+its paired baseline, not against another version's baseline. The first interval
+is a prepared replay interval, not a cold boot. A separate v1 control with BIM2
+imports but no TFP1 was also slower: +1.280% warm.
+
+What worked
+  - Hardware performs the exact reduced-FMA nine-operation CPU cull; existing
+    fixed-point GPU winding was deliberately not substituted.
+  - Supported vertices stay in raw accelerator BRAM and immutable BIM2 snapshots;
+    the common path avoids canonical CPU readback, CPU culling and quantization.
+  - Partial LOAD survivors and fog/CPU-only consumers materialize safely before
+    their raw source can be overwritten.
+  - Unsupported triangles cause fallback before any draw from that batch.
+  - v3 prepares a cold material only after successful preflight finds a surviving
+    triangle. Fully rejected batches leave material side effects unchanged.
+
+What limited performance
+  - v1 replaced large copies with 3,071 small materialization calls across two
+    intervals. v2 reduced this to 581 by copying once on the first fallback.
+  - In v3, 2,235 triangles across 247 batches used hardware classification;
+    5,871 of 8,124 loaded vertices still needed CPU materialization. Two snapshot
+    banks and unsupported/clipped/material cases limit coverage.
+  - v3 reduces warm legacy indexed-run attribution from 596,857 to 364,499
+    cycles and canonical copy attribution from 195,003 to 152,331. However the
+    new front-end function takes 296,604 cycles versus 9,856 for its disabled
+    probe path. Its hardware preflight occupies 80,342 warm cycles: the CPU
+    waits for those results, then still filters/repackages/submits draw jobs.
+  - The v2 banks are both occupied for1,231,887 warm cycles (27.95% of that
+    interval). Most reservation lifetime is after command publication but
+    before the GPU's first import result; only one duplicate-generation CLAIM
+    is rejected. This is ordered GPU queue pressure, not copying bandwidth.
+    Preflight admission itself waits only one DRAIN cycle per batch.
+  - v3 still retires3,934 MORE instructions in the warm frame overall: removed
+    indexed-run instructions are largely replaced with front-end control.
+  - This is synchronous cull preflight plus GPU vertex import, not a fully
+    asynchronous hardware producer of complete GPU triangle batches. Hardware
+    math is doing real work, but the control handoff remains on the frame's
+    critical path. More bandwidth alone does not remove this measured cost.
+  - Function retirement-gap attribution is observational; it is not a sum of
+    independently removable wall-time costs or a causal speedup bound.
+
+Correctness evidence
+  - Current frozen CPU: 4,426 arithmetic cases; actual TFP controller matches
+    18,983 supported intermediate FP results and handles 1,804 fallback cases.
+    922,696 controller/control checks, including all FSM reset states and64jobs.
+  - Actual extracted lazy helpers: 8,000 randomized partial loads; 310,247 sparse
+    checks and 322,014 bulk checks, with ASan/UBSan and fog alpha preservation.
+  - Shared-FMA phase10 wrapper arbitration/reset checks: 376 pass. This focused
+    test uses a raw-producer stub; full native replays exercise the actual LOAD.
+  - Every version: exact color/depth frames, all physical framebuffer histories,
+    final Surface pool, indexed vertex payloads/material/draw ordering, and
+    CPU FP/FCSR state. Only the previously identified timestamp register is
+    normalized in integer register comparisons.
+  - v3: 375 preflight batches/2,851 submitted triangles,120 hardware fallback
+    batches,1,452 successful vertex imports,178 released snapshots, and zero
+    protocol, memory, or deadline errors.
+  - Fresh ELF disassembly confirms the intended nine-operation fallback DAG.
+
+Scope and next architectural requirement
+These are two bounded native RTL replay intervals with synthetic display/audio
+traffic and bounded guest services, not sustained Pocket FPS measurements.
+No Quartus fit, timing claim, full seed sweep, bitstream deployment, sibling
+repository update, or commit was made. Production and SD card contents remain
+unchanged. Physical baseline headroom remains only311 ALMs and4 M10Ks; the
+prototype's physical resource cost has not been qualified.
+
+A further design would need to consume complete triangle batches in hardware
+and overlap their preparation/submission with useful CPU work, while preserving
+ordered fallback. Merely adding a culler and waiting for its visibility masks
+has now been tested and is insufficient. Additional banks or a second processor
+are not justified by these measurements alone.
+
+Evidence: performance-v1.json, performance-v2.json, performance-v3.json;
+review/{baseline-v1,front-v1,baseline-v2,front-v2,baseline-v3,front-v3}.json;
+tests/{cpu-arithmetic-v1,controller-v1,lazy-v2,wrapper-v3}; app-build[-v2|-v3].

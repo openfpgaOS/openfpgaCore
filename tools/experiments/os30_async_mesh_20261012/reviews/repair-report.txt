@@ -1,0 +1,7 @@
+Pure async mesh repair component qualification: PASS.
+
+The exact frozen CPU passed 1,184 tasks and 66,348 ordinary GPU words: all 638 captured geometry tasks (8,068 vertices / 64,544 raw words), 512 randomized cases, and 34 raw-failure boundary cases. This includes partial clipping, equal/negative W, NaN/Inf/subnormal inputs, quantization and FCSR preservation. The host ASan/UBSan suite passed 442,190 checks, including malformed-input zero output and cancellation at every selected packet prefix.
+
+The final helper is async_mesh_repair.c/.h. Build its translation unit with -fno-fast-math -ffp-contract=off; target arithmetic instructions are explicit. It performs no allocation or renderer state lookup and emits only through its callback. Caller owns worker token, frozen source/context, output ordering and coupled reset.
+
+These are component arithmetic/ownership-contract tests with controlled uniform materials. They are not a full-frame performance, real shader setup, physical fit or hardware FPS result. The final app math and read-only lifetime review are separately hash-bound. Qualification input/output hashes and limitations are in qualification-v1.json. Failed development runs remain recorded in development-history-v1.json; only native-v6/native-v7 and host-v1 are selected final helper evidence.

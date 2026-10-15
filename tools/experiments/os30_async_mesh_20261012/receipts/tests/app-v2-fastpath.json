@@ -1,0 +1,32 @@
+{
+  "status": "PASS",
+  "checks": 153334,
+  "credit_delays": 512,
+  "reset_interleavings": 512,
+  "scope": "Actual C sink with independent MMIO ready/ACK/epoch model, token cancellation, output pressure, and coupled reset races; not an RTL equivalence or speed test.",
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app-v2/evidence/test_repair_fastpath.py": "ea6a2408c8f0137dc75e3bd8e1bd89c585310f0ef5f4ca503d5c5027686704a1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app-v2/src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "6065b1a337721dfb233d03bde2862e2a0659d611c5b919faab292583030b27cf",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app-v2/evidence/repair-fastpath-v1/test.c": "fb0fba59b056084c6be656607b67cc9762339ee6ab9f82f1a6c303468235cee0"
+  },
+  "callback_sha256": "ad813ee5ffa429ba0cd81e8d6870428803379786afe272ebe5e0491e53660571",
+  "substitutions": [
+    "MMIO reads become read_mmio; the DATA store becomes write_mmio. No condition/control-flow transformation."
+  ],
+  "commands": [
+    [
+      "cc",
+      "-std=c11",
+      "-O1",
+      "-g",
+      "-fsanitize=address,undefined",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app-v2/evidence/repair-fastpath-v1/test.c",
+      "-o",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app-v2/evidence/repair-fastpath-v1/test"
+    ],
+    [
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app-v2/evidence/repair-fastpath-v1/test"
+    ]
+  ],
+  "sanitizers": "ASan+UBSan; LSan disabled under ptrace"
+}

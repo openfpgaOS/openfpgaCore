@@ -1,0 +1,33 @@
+--- divisor-preload/gpu_geometry_worker.v
++++ ring-lookahead/gpu_geometry_worker.v
+@@ -235,13 +235,18 @@
+ 
+ wire input_empty = input_rdptr == input_wrptr;
+ wire [ADDR_BITS-1:0] used_words = write_ptr - output_rdptr;
+-wire [ADDR_BITS:0] free_words = (1 << QUEUE_BITS)-1 - {1'b0,used_words};
++localparam [ADDR_BITS:0] QUEUE_LAST = (1 << QUEUE_BITS)-1;
++wire [ADDR_BITS:0] free_words = QUEUE_LAST - {1'b0,used_words};
++// Zero free space is exactly equality with the typed capacity. Avoid a
++// second subtraction before the input-ring lookahead/queue-write enables.
++wire queue_has_space = {1'b0,used_words} != QUEUE_LAST;
+ wire take_input = enable && !input_empty
+     && ((state == HEADER) || (state == LOAD)
+-        || (state == COPY && (mode != PASS || free_words != 0)));
++        || (state == COPY && (mode != PASS || queue_has_space)));
+ // Look ahead on consumption so the synchronous RAM delivers the next word
+ // on the following cycle. Empty cycles continue refreshing the current head.
+-assign input_addr = input_rdptr + {{(ADDR_BITS-1){1'b0}},take_input};
++// Increment independently of the late consume decision, then select.
++assign input_addr = take_input ? input_rdptr + 1'b1 : input_rdptr;
+ assign busy = !input_empty || state != HEADER
+     || (INCLUDE_NATIVE_MESH && native_tx_state != 0);
+ // Explicit finite decode: Quartus implements even an 8-bit "% 5" here as
+@@ -334,7 +339,7 @@
+     emit = 1'b0;
+     if (enable) case (state)
+         SPACE: emit = free_words >= needed && mode == PASS;
+-        COPY: emit = !input_empty && mode == PASS && free_words != 0;
++        COPY: emit = !input_empty && mode == PASS && queue_has_space;
+         EMIT, TRI_HEADER, TRI_WORD, P_ALPHA_HEADER, P_ALPHA_WORD: emit = 1'b1;
+         default: ;
+     endcase

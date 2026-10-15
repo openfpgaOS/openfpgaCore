@@ -1,0 +1,65 @@
+os30 PSRAM32 depth-read ordering experiment — 2026-10-10
+
+Result: retain the existing simpler core. Selective depth admission is
+correct, but gives no substantial whole-frame speedup in this SM64 replay.
+No production source changed. No Quartus build, full sweep or deployment.
+
+Measured native CPU cycles (lower is better):
+                              First interval     Warm interval   Warm change
+Baseline                            3,980,965         4,366,717       —
+Existing broad selective wait       3,972,383         4,358,469      -0.189%
+Smaller depth-only selective wait   3,975,229         4,358,613      -0.186%
+Depth wait + guarded read priority  3,977,229         4,367,768      +0.024%
+
+All runs use exactly the same application ELF, starting state and fixed
+synthetic display/audio schedule. Geometry queue/import features remain
+absent from these simpler-core models; the application uses their fallback.
+
+The depth-only variant hashes the 64-byte lines of writes still in the
+16-entry GPU framebuffer queue. It permits depth reads past unrelated
+entries, while local staging/flush registers retain conservative waits.
+The render cache protects accepted/popped writes. The source adds 129 bits
+of tag/state storage; this is not a synthesized ALM estimate.
+
+The second variant also permits a read ahead of an unaccepted cache write
+when both complete bursts fit single, distinct physical cache lines.
+Same-line, crossing, long or unaligned requests keep write priority.
+The existing registered read lookup preserves RAM ownership. This cache
+change adds combinational arbitration, with no new registers or RAM.
+
+Why the frame does not become substantially faster:
+- Baseline warm depth-gate time 356,008 cycles falls to 116,854 with the small
+  gate, but color/depth response time rises 492,433 to 712,917. The request
+  is issued sooner and mostly waits at the cache instead.
+- Guarded read priority cuts upstream read-address wait 212,241 to 94,683
+  versus the small gate. Other write/drain stalls increase; frame time is
+  effectively unchanged from baseline.
+- Cache misses remain 12,266 / 12,277 / 12,270, and writebacks 19,205 / 19,215 /
+  19,211 for baseline /small gate /priority. These scheduling changes do
+  not eliminate significant memory work.
+
+Validation:
+- Exact color/depth pixels, all physical buffer histories, ordered draw
+  commands, surface pool and FP/FCSR pass on both intervals in all four runs.
+  CPU register differences are confined to the known timestamp register.
+- Protocol, display/audio deadline and source/input/output binding checks
+  pass, including an independent full replay audit.
+- Directed/randomized queue and actual render-cache tests pass 1,846,538
+  checks: queue wrap, simultaneous push/pop, delayed pending tags, hash
+  aliases, partial masks, dirty same-set eviction, posted writes, stalls,
+  flush and reset. See tests/REPORT.txt for layer-specific scope.
+- Both source patches pass exact zero-fuzz forward/reverse restoration.
+
+Excluded evidence: depth-v1 has an obsolete passive depth-stall predicate;
+its counters are not used. depth-v2 failed observer compilation and did not
+run. depth-v3 and priority-v1 use observer-v3, which reconstructs the actual
+depth predicate if Verilator has inlined it. Earlier evidence is preserved.
+
+Reproduction recipes and frozen model manifests are local to this directory.
+summary.json binds the final measurements and validation receipts. The
+source-only tools/experiments/os30_depth_hazard_20261010 package preserves
+the candidate patches without enabling them in the production core.
+
+Limits: two prepared native intervals, not measured Pocket FPS or a broad
+game benchmark. Wait counters overlap; they are not additive speedup
+estimates. FPGA area/timing and hardware behavior remain unqualified.

@@ -1,0 +1,121 @@
+{
+  "status": "CORRECT_QUEUED_PROTOTYPE_NO_NET_SPEEDUP",
+  "decision": "Keep the simple baseline; do not fit or deploy this prototype.",
+  "scope": "Private os30 experiment; immutable native models and app revisions. Production sources, sibling deployments and SD card unchanged.",
+  "implemented": [
+    "Immutable raw-vertex snapshot runs queued in the existing ingress ring; no CPU preflight-result poll or returned keep-mask compaction.",
+    "Shared exact culler and conversion emit ordinary vertex/draw packets into an independent BRAM FIFO.",
+    "Snapshot lifetime ends after conversion and ordered explicit release, before raster consumption; supported runs overlap later CPU work.",
+    "Conservative hardware admission metadata; exact CPU arithmetic-only repair from retained operands, with caller FCSR preservation.",
+    "Raw vertex LOAD completion remains synchronous. CPU still performs display-list admission/context setup and unsupported paths."
+  ],
+  "results": [
+    {
+      "variant": "v1 app / 512-word output",
+      "baseline": "baseline-v2",
+      "candidate": "queued-v2",
+      "baseline_cycles": [
+        4023610,
+        4395563
+      ],
+      "candidate_cycles": [
+        4104599,
+        4469437
+      ],
+      "cycle_change_percent": [
+        2.0128441871851477,
+        1.680649327515038
+      ],
+      "warm_cpu_instruction_change_percent": -1.0347413331022737,
+      "warm_ingress_word_change_percent": -17.10869565217391
+    },
+    {
+      "variant": "v2 app / 512-word output",
+      "baseline": "baseline-v3",
+      "candidate": "queued-v3",
+      "baseline_cycles": [
+        3980965,
+        4366717
+      ],
+      "candidate_cycles": [
+        4032356,
+        4401461
+      ],
+      "cycle_change_percent": [
+        1.2909181567785755,
+        0.7956549508475241
+      ],
+      "warm_cpu_instruction_change_percent": -1.8415756603732292,
+      "warm_ingress_word_change_percent": -16.64347826086956
+    },
+    {
+      "variant": "v2 app / 2048-word output counterfactual",
+      "baseline": "baseline-v3",
+      "candidate": "queued-large-v1",
+      "baseline_cycles": [
+        3980965,
+        4366717
+      ],
+      "candidate_cycles": [
+        3986680,
+        4367046
+      ],
+      "cycle_change_percent": [
+        0.1435581573814293,
+        0.0075342642996911735
+      ],
+      "warm_cpu_instruction_change_percent": -2.939522304909792,
+      "warm_ingress_word_change_percent": -19.660869565217386
+    }
+  ],
+  "verification": {
+    "native": "Every candidate passes exact color/depth, all physical color-buffer history, surface pool, FP/FCSR and architectural registers except the known time register; 1708 indexed draws preserve referenced values and load-time projection/draw-time state.",
+    "units": "Actual metadata, shared-FMA/reset, FIFO/order/wrap/repair, extracted C admission, lazy materialization and actual CPU repair passed. Separate 2048-word FIFO pressure/wrap suite passes.",
+    "fixture_fix": "Initial queued-v1 run is excluded: legacy snapshot restoration incorrectly conflated the independent ingress/output pointers. replay_v2/v3 preserve the drained output pointer and restore only ingress; zero host clock edges added.",
+    "observer_caveat": "v1-driver legacy ring occupancy combines distinct pointers and is not used for QGF pressure conclusions; v3 observer fixes it. Static legacy poll-PC attribution is not used for conclusions."
+  },
+  "findings": {
+    "overlap_real": true,
+    "best_warm_frame_delta_cycles": 329,
+    "best_warm_frame_delta_percent": 0.0075342642996911735,
+    "fifo_effect": "2048 rather than 512 words recovers 34415 warm cycles, but only returns to baseline.",
+    "main_costs": "Admission/context/publication and retained CPU paths offset reduced CPU cull/vertex-packet work. FIFO backpressure limits eligible coverage; exact FMA request arbitration is only about 3000 warm cycles.",
+    "memory_limit": "This does not rule out all CPU/GPU memory bottlenecks. It rules out claiming a frame-speed improvement from this geometry queue or faster snapshot copying on these intervals."
+  },
+  "physical": {
+    "built": false,
+    "timing_qualified": false,
+    "seed_sweep": false,
+    "deployed": false,
+    "512_stage": "Four spare M10Ks are nominally allocated to snapshots and output FIFO; ALM fit/timing unqualified.",
+    "2048_counterfactual": "Existing 4096-word ingress retained; larger FIFO is a capacity experiment, not a fitted design. Repartitioning ingress BRAM was considered and not implemented because this only ties baseline."
+  },
+  "package_physical_stage": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/physical-v1",
+  "limitations": [
+    "Two fixed native SM64 intervals with synthetic display/audio traffic and bounded guest services; no sustained hardware FPS claim.",
+    "Conservative admitted opaque/current-generation path only; clipping/equal-W/unsupported materials use existing CPU path.",
+    "No fully asynchronous raw LOAD implementation or second CPU."
+  ],
+  "evidence_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/abi.json": "4cbc77c9b75299babc5fd0c30d18e27cd5654cdddb130619788313a7dc8fc30d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/performance-v1.json": "a49e825e5135e36b3a9e65dae4adede0d9f92fe6389294f11c9f12f1987d140e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/performance-v2.json": "3261b4d4638703a98cbcba7e9fa4c6a6a706409fff4f46074a7e7a815b551982",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/performance-capacity-v1.json": "66f410e32765cbeebb3c37d09b708f2f829baf5b567bd5117b58c24213553c6e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/native-v1/prepared.json": "dbe985926477ed119ebc5c416250d1f87a3711c568f4cff9075861b914a1b233",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/native-v1/build.json": "c34d58c5e40bdf2f3db6d0d37960f8621fa557e696dcda48769f149f42e5cae5",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/native-large-fifo-v1/prepared.json": "45c81f580a75621b6ebaae08d816565947475fecc4747a1deb7c55235e8fc2d5",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/native-large-fifo-v1/build.json": "15c8fe5833aeb567201144a2b4d5073cd42db85b6590602b67ed2aa2d945f362",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/app-build/build-result.json": "b069d4d9f6d6f5dc924b745fde5ba939bb3a2bfb5a47ae8388e4d9ccfc39eb5d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/app-build-v2/build-result.json": "6612e4738fb1562f0bb8e1b10cee772f1e375a16cc8be3612793b3f39c2e9483",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/review/unit-verification-v1.json": "0e94f69453d54a46b16bbbaee237d0fba8306b0f89914b8baca3cadbd4fab3f3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/review/app-v2-liveness.json": "e292565f4ec0973588f8dd8a380fd8de01d79c0f77f20703943b284d03b08488",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/review/physical-preflight-v1.json": "4be061ce8d74329b6771287d3f0e46cad4c98ac760bd64730898408d7cddfcf8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/review/queue-architecture-conclusion-v1.json": "20723b2af03ef4fc9f1f48ca14f4e01045060349a680904d3a3012c298de8216",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/review/queue-pressure-appv2-fifo512.json": "8a0753f6a175c94c732c85933d9e721c0fe94447c954e810097af48a8f00165f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/review/queue-pressure-appv2-fifo2048.json": "f7195dcd3f7f4627ad7b705bf366da6a6b40de2506bd1ce1bab7955b1a9a2820",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/review/strict-queued-v2.json": "562d6b5c5c95d65d02d4d449fc2fa57449fe6b0b1d8fb3db3de3b0233244cec7",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/review/strict-queued-v3.json": "ce4301788a03f543a1cb3ff020d2caf8baf71e658f6d84d806155fdcb422aa3e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/review/strict-queued-large-v1.json": "eb5a0c012869c551b4f569dbbeef126e354a415e1be36cb481d9e08471b1c6a9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/worker-large-v1/manifest.json": "2d16d636901f854c114b05b344f0487aec5bdb6c41b03cf7eaa5ae84ba66c968"
+  }
+}

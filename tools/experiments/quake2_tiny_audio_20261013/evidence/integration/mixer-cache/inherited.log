@@ -1,0 +1,198 @@
+=== Audio mixer (audio_mixer.v v3) Test Suite ===
+
+test_flat_mmio_independence:
+  OK   voice  0 RATE (0xdead0001)
+  OK   voice 31 RATE (0xbeef0001)
+  OK   voice  7 VOL_TARGET (0x00001234)
+  OK   voice 15 VOL_TARGET (0x00005678)
+test_group_composition:
+  OK   voice 5 vol_l after compose = 95 (expected [93..97])
+  OK   voice 5 vol_r after compose = 95 (expected [93..97])
+test_master_mute:
+  OK   voice 12 vol_lr after master=0 (0x00000000)
+test_master_fade_tracks_settled_voice:
+  OK   settled vol_l at master=0xFF = 253 (expected [250..255])
+  OK   settled vol_l follows master fade to 0x40 = 62 (expected [59..65])
+  OK   settled vol_r follows master fade to 0x40 = 62 (expected [59..65])
+  OK   settled vol_lr follows master fade to 0 (0x00000000)
+  OK   settled vol_l recovers when master returns = 253 (expected [250..255])
+  OK   settled vol_l follows group fade to 0x80 = 126 (expected [123..129])
+test_voice_end_irq:
+  OK   voice 3 voice_end_pending bit set
+  OK   voice 3 voice_end_pending cleared by W1C
+test_explicit_lr_targets:
+  OK   center sample emitted
+  OK   center L = 1012 (expected [900..1100])
+  OK   center R = 1012 (expected [900..1100])
+  OK   hard-left sample emitted
+  OK   hard-left L = 1012 (expected [900..1100])
+  OK   hard-left R muted
+  OK   hard-right sample emitted
+  OK   hard-right L muted
+  OK   hard-right R = 1012 (expected [900..1100])
+  OK   post-start set_vol_lr sample emitted
+  OK   post-start hard-left L = 1012 (expected [900..1100])
+  OK   post-start hard-left R muted
+test_stream_hold_resume:
+  OK   stream plays written region (post ramp-in mag) = 253 (expected [150..400])
+  OK   held position just below WPTR = 509 (expected [506..511])
+  OK   faded to silence at hold (VOL_LR) (0x00000000)
+  OK   held voice outputs silence
+  OK   position frozen while held (0x000001fd)
+  OK   never fetched at/past WPTR (poison untouched)
+  OK   held stream voice stays active
+  OK   held stream voice raises no end IRQ
+  OK   auto-resume after WPTR advance (mag) = 253 (expected [150..400])
+  OK   re-held just below new WPTR = 1017 (expected [1014..1019])
+  OK   still never fetched past WPTR after resume
+  OK   plays across ring seam after wrapped WPTR (mag) = 253 (expected [150..400])
+  OK   held below wrapped WPTR = 397 (expected [394..399])
+test_stream_empty_and_full:
+  OK   empty stream voice is silent
+  OK   empty stream voice holds at 0 (0x00000000)
+  OK   empty stream voice issues NO fetch (0x00000000)
+  OK   full ring plays without spurious hold (mag) = 253 (expected [150..400])
+  OK   full-ring position advances freely
+test_stream_quiet_is_per_voice:
+  OK   ordinary voice settles before empty streams
+  OK   ordinary voice produces nonzero PCM
+  OK   empty streams settle
+  OK   empty streams leave ordinary PCM bit-identical
+test_stream_max_rate:
+  OK   rate-2.0 stream plays written region (mag) = 253 (expected [150..400])
+  OK   rate-2.0 held just below WPTR = 510 (expected [504..511])
+  OK   rate-2.0 never fetched at/past WPTR
+  OK   rate-2.0 auto-resume (mag) = 253 (expected [150..400])
+  OK   rate-2.0 still never fetched past WPTR after resume
+test_legacy_loop_ignores_wptr:
+  OK   legacy loop voice plays past a stale WPTR (mag) = 253 (expected [150..400])
+  OK   legacy loop voice still active
+  OK   legacy voice fetched past WPTR
+test_queued_writes_under_memory_stall:
+  OK   mixer read held by SDRAM stall
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   queued write can reserve a slot
+  OK   full queue backpressures the writer
+  OK   all queued writes reach inactive voice (0x0000014f)
+test_rearm_during_sample:
+  OK   old one-shot has an outstanding read
+  OK   retired sample cannot end the replacement (0x00000000)
+  OK   replacement stays active (0x00000001)
+  OK   replacement position stays inside its sample
+  OK   old one-shot has an outstanding read
+  OK   retired sample cannot end the replacement (0x00000000)
+  OK   replacement stays active (0x00000001)
+  OK   replacement position stays inside its sample
+  OK   old one-shot has an outstanding read
+  OK   retired sample cannot end the replacement (0x00000000)
+  OK   replacement stays active (0x00000001)
+  OK   replacement position stays inside its sample
+  OK   old one-shot has an outstanding read
+  OK   retired sample cannot end the replacement (0x00000000)
+  OK   replacement stays active (0x00000001)
+  OK   replacement position stays inside its sample
+  OK   old one-shot has an outstanding read
+  OK   retired sample cannot end the replacement (0x00000000)
+  OK   replacement stays active (0x00000001)
+  OK   replacement position stays inside its sample
+  OK   old one-shot has an outstanding read
+  OK   retired sample cannot end the replacement (0x00000000)
+  OK   replacement stays active (0x00000001)
+  OK   replacement position stays inside its sample
+test_rearm_phase_sweep:
+  OK   288 stop/rearm interleavings preserve DMA bounds and ownership
+  OK   sweep reaches parameter capture, outstanding reads and retirement
+test_mister_paced_mixer:
+  OK   real mixer produces 400 buffered stereo samples
+  OK   real mixer output keeps 48 kHz cadence through memory stalls
+  OK   real mixer produces 400 buffered stereo samples
+  OK   real mixer output keeps 48 kHz cadence through memory stalls
+  OK   SDRAM latency leaves buffered PCM bit-identical
+  OK   real mixer produces 400 buffered stereo samples
+  OK   real mixer output keeps 48 kHz cadence through memory stalls
+  OK   real mixer produces 400 buffered stereo samples
+  OK   real mixer output keeps 48 kHz cadence through memory stalls
+  OK   SDRAM latency leaves buffered PCM bit-identical
+test_mutable_fields_all_voices:
+  OK   all 32 voices retain independent mutable fields
+PERF audio samples 15383 trace 5b57dacf3fb5afcf
+
+=== Results: 177 passed, 0 failed ===

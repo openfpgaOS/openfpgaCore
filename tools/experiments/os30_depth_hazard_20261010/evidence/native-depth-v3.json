@@ -1,0 +1,130 @@
+{
+  "binding": {
+    "bound_files": 41,
+    "model_sources": 169
+  },
+  "health": {
+    "cycles": [
+      3975229,
+      4358613
+    ],
+    "latency_maxima": {
+      "0": {
+        "scan_latency": 0,
+        "audio_latency": 0,
+        "audio_queue_latency": 0
+      },
+      "1": {
+        "scan_latency": 397,
+        "audio_latency": 417,
+        "audio_queue_latency": 365
+      },
+      "2": {
+        "scan_latency": 380,
+        "audio_latency": 434,
+        "audio_queue_latency": 387
+      }
+    },
+    "gpu_counters_reconcile": true,
+    "commands": 5562,
+    "command_words": 46036
+  },
+  "frames": [
+    {
+      "frame": 1,
+      "buffer": 0,
+      "sha256": "b7a2e67c63ec5f1ce5f787bedad2fff8743d2c7a1edadaf9bcb8d274fe3ac5bc"
+    },
+    {
+      "frame": 2,
+      "buffer": 1,
+      "sha256": "a42df17ef68b61162980c48170bf3a307ce909b7d1c1ba265f1b3a1b2b1bb8eb"
+    }
+  ],
+  "register_differences": {
+    "entry-regs.bin": {},
+    "entry-2.bin": {
+      "21": [
+        3211353,
+        1796159346
+      ]
+    },
+    "entry-3.bin": {
+      "21": [
+        7575600,
+        1802309562
+      ]
+    }
+  },
+  "all_FCSR_and_FP_registers_exact": true,
+  "final_surface_pool_sha256": "5127c4dafb5f8e900ddd1c81203b6ec33a4680a7dadaf9d3ed1820d28b12e8b3",
+  "untouched_buffer_history_exact": true,
+  "removed_reference_clear": [
+    {
+      "word": 23036,
+      "payload": [
+        270532608,
+        41943280,
+        41943040
+      ]
+    }
+  ],
+  "preparation": {
+    "probe_address": 288652872,
+    "probe_before": 2,
+    "probe_after": 0
+  },
+  "status": "PASS_QGF1_BASELINE",
+  "evidence_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/input.cfg": "f20c502fd2a07ee7192376aa240e714ae34d3758c12a6da6e9b852d71db68322",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/run.log": "d4ca8159624155175b0956629e2770719e9555763514a277cfd31e0429a142eb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/prepared-memory.json": "c73e16ee5fd01529e2ae93360240ddccc81541d3f54a0fa5ad68a345afbdbcee",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/prepared-front.json": "25178bef30d9ff44d5e461bd38f70a25168d0a6740c33febc5d5731e46b7557a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/commands.bin": "346df8f0cff9505a8d02f0e8f49dea5cfeacdef9878136c706f6a338318ed427",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/mmio.tsv": "85b93a72e6ab1e4a4cd0d9795f97bcfd2cb5b04f4742bc09e2aa0197c463c56f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/result.json": "efe0921efc95f561b3cf3b2ec91a3018714517fa81e7bfa9249ee0742f46c0b3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/pc.csv": "56006946a4a0644d7574ae33049b4b95cef3b652483abbddf96ce99f4876f9b0",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/boundaries.tsv": "41a8f8654058326d8c7066320c615e80e5296760c30c4e3326ef3158f86da816",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/entry-regs.bin": "4d8df4bcb157547fd99aa103366a3ce01126b9dc07601660da6509b434b5d4cf",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/entry-2.bin": "a0314c4c3a9f2c699d8a74a0525d73882cf32d7c052bdd389f3df28d1e5cf597",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/frame-1.bin": "b7a2e67c63ec5f1ce5f787bedad2fff8743d2c7a1edadaf9bcb8d274fe3ac5bc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/frame-1-buffer0.bin": "b7a2e67c63ec5f1ce5f787bedad2fff8743d2c7a1edadaf9bcb8d274fe3ac5bc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/frame-1-buffer1.bin": "5087dc62a353e03130310ca0925575785854d33dc6233b6dfb158ba0c07bfeb4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/frame-1-buffer2.bin": "1a74bac257b8449c58783ab93cc39ec07d83ba9ff9289e19d1bc49310b58fe4a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/entry-3.bin": "8ff09e2a35909f9ce5b0eec0f41282afefff2df163b663569e0d84457ac4d334",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/frame-2.bin": "8988e7dc092d095848a747606969533a477157ab9dca917313200f90991538e3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/frame-2-buffer0.bin": "0fc3c70f9d86c5f4a655efa383ca56a2258c619a6ec004e8f80d684e476d210e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/frame-2-buffer1.bin": "a42df17ef68b61162980c48170bf3a307ce909b7d1c1ba265f1b3a1b2b1bb8eb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/frame-2-buffer2.bin": "8988e7dc092d095848a747606969533a477157ab9dca917313200f90991538e3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/surface-arena.bin": "5127c4dafb5f8e900ddd1c81203b6ec33a4680a7dadaf9d3ed1820d28b12e8b3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/surface-arena.physical.bin": "5127c4dafb5f8e900ddd1c81203b6ec33a4680a7dadaf9d3ed1820d28b12e8b3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/surface-arena.json": "21755e6ff1aad3a6e3646dac99ab1504718d779c5bc56efd677b51131f1d8002",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/import-stats.bin": "f1c19314208ec565b4e50664b650fc0d256b4eb5a177acdccefc78bef7543a6c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/import-stats.physical.bin": "f1c19314208ec565b4e50664b650fc0d256b4eb5a177acdccefc78bef7543a6c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/import-stats.json": "2c8d98601bba6223ef47daa3c0c1d5d763ca44aae714c7093f70e0c53200317c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/front-stats.bin": "f366f82b0177478c240783195f72602e8b14b8f4f683508ef88b05682d8ed539",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/front-stats.physical.bin": "f366f82b0177478c240783195f72602e8b14b8f4f683508ef88b05682d8ed539",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/front-stats.json": "05c1adc9de5ec2ac1025b9a844aaab7e4a9c7811cc0c20519c15e971c2a94474",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/frame.bin": "0fc3c70f9d86c5f4a655efa383ca56a2258c619a6ec004e8f80d684e476d210e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/stalls.json": "369ff2a45532c1959033fa9681c3ec6ca8a5b558bf4306505296a819da5a3eb2",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/stalls-pcs.csv": "0f274cc954a881852fde41021273a6c7e9a704da602449c196810e2b9d20bd1f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/stalls-pages.csv": "1adcc51d69e4d188eadd396a0d20591ab49702a7015f3066e832c0d8468bc914",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/first-word.json": "cee598936a8a64564130ef2e8c0db6f2db17917034f9b8aef5ce8be98a820053",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/gpu-profile.json": "c2323e891990c207ce1ed297bb945830f999f056921a7d62a381ddcecdfd1880",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/gpu-profile-timeline.csv": "4a6fc8cab78b1f18a7d5f1063b21dcb6ef06ae7fa471d685b55c573ad8b1cff0",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/gpu-profile-events.csv": "6135ff238551c78a9f565fe482716dfa54681541ce7e737a08d9e41b5a9d074f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/pc-phase-1.csv": "0c2e0a1960f655cb63bfc3e4755bad30007267691f1708abdb4f5998a37c8ba2",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/pc-phase-2.csv": "ab97f15a950d69e553fc246e51a842f987cbd7459e1102c3d253321eb5d715e6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/process.json": "7c9eb1f8ecd2021ea24950d1f74ecc60412509f2135adbd4ee9e2a5ad821f931",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/manifest.json": "3d3c464a6dcdc8172f7d053183e44110e6bdf52d67f2fe6fb5009e4d34df8550"
+  },
+  "checker_sources_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/check_replays.py": "0b136a3a7d377af3e1268975d33995380fba9a5e275dbfdc2cd8e01497f70ba3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/tests/check_replays.py": "4dbf49fc2ccf0a416b21eadf4978dd93a1bd731a316e7e30c44b7caa140c92f9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/gpu-bottleneck-v1/review/check_runs.py": "cc73ef3582f0c4594162e3635bbb6704089ad5879f2c36441b8de04a5cef9793"
+  },
+  "fixture_manifest_sha256": "439a3f2c21eb75beece65d263e0baa1b9aa4f812cf5f779f73fd5e821cf7969d",
+  "limitations": [
+    "Two prepared native intervals with synthetic display/audio and bounded services; not hardware FPS, FPGA fit or timing."
+  ]
+}

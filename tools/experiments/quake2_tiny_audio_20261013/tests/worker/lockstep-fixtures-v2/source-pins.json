@@ -1,0 +1,14 @@
+{
+  "baseline": "/home/alberto/Repos/openfpgaCore/tools/experiments/quake2_gpu_draws_20261013/core/worker-tests/gpu_geometry_worker.v",
+  "baseline_sha256": "164d5ce2eeeb478eb7504660b8a4afef4d8f6a16cf75372ba5eff26917305892",
+  "fixture_sources": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-gpu-draws-20261013/worker-descriptor-tests/geometry_worker_tb.v": "a75ab55b255cb9b4324ac85f7a95f1026f66aebe5d1c3b854376977a1b8fcaec",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-gpu-draws-20261013/worker-descriptor-tests/geometry_worker.cpp": "b2da77e3749e8568c8c3cbb77102161b4ccaa9b0aec1b1de1091b4423d73f569"
+  },
+  "generated": {
+    "geometry_worker_tb.v": "cebfda5c40ec7bb684810d754478368bad70739e84a565ac8703e633cb61a1ed",
+    "gpu_geometry_worker_reference.v": "80f2e11d90d9e8a223f2128e13b335aa404bd9213e981ed3ade08ceeafca1143",
+    "geometry_worker.cpp": "bcfa7d6991bb5063b1e5b2f05e01f96cee1842a172aa04b2b5e50d538b7bee7f"
+  },
+  "fixture_revision_note": "v1 arithmetic reference incorrectly expected output from native descriptors with nearclip <= 0. Native ABI rejects these jobs. v2 models rejection; old/new lockstep itself had not diverged."
+}

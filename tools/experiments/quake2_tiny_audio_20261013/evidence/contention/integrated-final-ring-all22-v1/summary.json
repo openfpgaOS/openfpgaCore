@@ -1,0 +1,24 @@
+{
+  "results_sha256": "160d755e32bb1be9de2b38aa3d563429c3cdfb0102c4c4b39aa9a2d3bc6d5291",
+  "comparison": "Every common produced PCM sample against cache-disabled quiet reference; underruns reported separately.",
+  "scope": "400ms,32voices,real mixer/cache/selected arbiter,bounded synthetic slave,saturated synthetic CPU/GPU.",
+  "limits": "No physical SDRAM pin/timing, firmware ISR or game FPS claim; stream WPTR starts safely ahead without dynamic production.",
+  "rows": [
+    {
+      "MHz": 90,
+      "latency": 32,
+      "workload": "q2-all22-plus-stream",
+      "pcm_samples_compared": 65774,
+      "off_underruns": 7024,
+      "on_underruns": 0,
+      "off_final_fifo": 0,
+      "on_final_fifo": 767,
+      "on_fifo_draining": false,
+      "off_audio_words_per_output": 48.49503311258278,
+      "on_audio_words_per_output": 11.283749416100067,
+      "word_reduction_factor": 4.297776503560802,
+      "off_gpu_work_fraction": 0.570313,
+      "on_gpu_work_fraction": 0.909052
+    }
+  ]
+}

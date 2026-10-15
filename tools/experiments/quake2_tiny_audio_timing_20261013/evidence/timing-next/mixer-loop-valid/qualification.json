@@ -1,0 +1,43 @@
+{
+  "passed": true,
+  "candidate_sha256": "5b044c9835e64159c2185eec3c69391cf7f16227997943f9cbaa21f86c689ddc",
+  "parent_sha256": "c6d2517af662f356b44617230c27aa880c449928282e738c374a2db86663f73a",
+  "added_cycles": 0,
+  "added_registers": 0,
+  "all_normal_transcripts_parent_identical": true,
+  "all_cache_transcripts_parent_identical": true,
+  "paired_counts": {
+    "inherited.log": {
+      "cycles": 4531366,
+      "consumer_visits": 25382
+    },
+    "reference.log": {
+      "cycles": 23059799,
+      "consumer_visits": 856866
+    },
+    "capacity.csv": {
+      "cycles": 264551175,
+      "consumer_visits": 7676928
+    }
+  },
+  "total_paired_cycles": 292142340,
+  "total_consumer_visits": 8559176,
+  "receipts": {
+    "tests-v1/receipt.json": "4a3f890c1a7a95946dbbfdc970659bf29049f2167351a2ca2b4c4c3c35cd58c7",
+    "lockstep-v3/receipt.json": "4a3f890c1a7a95946dbbfdc970659bf29049f2167351a2ca2b4c4c3c35cd58c7",
+    "cache-integration-v1/receipt.json": "7589d076df9a622d9b3a520bef97876d78358f3c4285d5e0bae8f6431e364518"
+  },
+  "fixtures": {
+    "lockstep/audio_mixer_reference.v": "5257d81b5c300e571a63a7a54c4de92c2b59f2c8bf7c8cfff818a7b589a78f4c",
+    "lockstep/independent_reference.hpp": "4e192d76b02f48f558cce4eda0972d1484be250efa59577fb8c56098d3b21cad",
+    "lockstep/run.py": "ae5982efc6a4d3af60060e8c578a641a97376ff6cc6324fd7d36951d6e24240d",
+    "lockstep/sources/mister_audio_output.v": "d6788091160dae0689f9e7f649df7f90db5b4530d8111c8a3276dacadf6d378d",
+    "lockstep/sources/sync_fifo.v": "66545eaee0463d5e25e862cb5fbccb357b2d34948f93a9f8a706c04c536aa28c",
+    "lockstep/tb_audio_mixer.v": "68ecc9fb9aee771ecf3cf9b4f28a09a477fc97b6a2187d9d9b76b0e1dc218997",
+    "lockstep/tb_audio_mixer_main.cpp": "0e61bc7a7d3aec627aa9b91c3c803b3d688d42f8e30d086de986bd9f41d346cf"
+  },
+  "proof_sha256": "68c38c69887c410a002a7a08774baac9bda4099cf60e2209373ea0474d3ba5b4",
+  "patch_sha256": "56bce4b8f528b071a0e0fba1ce112bd32e778cb816036a991aacc81f26a3bb5d",
+  "physical_timing_claim": false,
+  "dock_unchanged": true
+}

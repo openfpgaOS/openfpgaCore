@@ -1,0 +1,60 @@
+{
+  "label": "native-v1",
+  "results": [
+    {
+      "workload": "main",
+      "steady_frames": 340,
+      "drawn_alias_models": 4414,
+      "native_draws": 3271,
+      "CPU_draws": 1143,
+      "native_percent": 74.1051200724966,
+      "native_assets_seen": 20,
+      "native_assets_seen_steady": 20,
+      "exact_control_alias_bounds_calls_equal_native_plus_fallback": true,
+      "evidence": {
+        "validation/runs/world-control/main/result.json": "29d620ca05de75d2d4bf5b112ca63872a18b3f1160e2c55ef6a035b359799385",
+        "validation/runs/native-v1/main/result.json": "44abd2c54b167730673831c29970274a17500c7f99357ee82e8aba24f1033cdb",
+        "validation/runs/native-v1/main/commands.bin": "19015576ec2a931ce4db4fb8864ae4b4c7e823c60a73501d4b57094bf4abad0a"
+      }
+    },
+    {
+      "workload": "sound",
+      "steady_frames": 100,
+      "drawn_alias_models": 2036,
+      "native_draws": 1635,
+      "CPU_draws": 401,
+      "native_percent": 80.30451866404715,
+      "native_assets_seen": 17,
+      "native_assets_seen_steady": 17,
+      "exact_control_alias_bounds_calls_equal_native_plus_fallback": true,
+      "evidence": {
+        "validation/runs/world-control/sound/result.json": "46521fca1237d0e8aac9018594e7641110ff1869a6c02240a143c6ca374a3ca1",
+        "validation/runs/native-v1/sound/result.json": "6134ade2dc022910fd7e33c689718ab3be738a4501c6738aa83f442bb7dd726c",
+        "validation/runs/native-v1/sound/commands.bin": "d1544063fb07e1ecabdcab6ebe5aa12bb83d8e5c7290aca8ec773205d79ef471"
+      }
+    },
+    {
+      "workload": "live",
+      "steady_frames": 100,
+      "drawn_alias_models": 742,
+      "native_draws": 580,
+      "CPU_draws": 162,
+      "native_percent": 78.16711590296497,
+      "native_assets_seen": 6,
+      "native_assets_seen_steady": 6,
+      "exact_control_alias_bounds_calls_equal_native_plus_fallback": true,
+      "evidence": {
+        "validation/runs/world-control/live/result.json": "da90186d84aeea2b0b16d54c0e5aa22098ce7f000045193a56019838ba6bd439",
+        "validation/runs/native-v1/live/result.json": "ee813e584a71b33a844689abb469629b8b081e21648ebf7569a20796b4abfdba",
+        "validation/runs/native-v1/live/commands.bin": "3f745d4ade3a17ab1c63c64f9513896703459f04b95b335f7a455e6bc1491a03"
+      }
+    }
+  ],
+  "limits": [
+    "Counts reflect these fixed demo/live windows, not every map or frame.",
+    "R_SetAliasDrawBounds executes once for each CPU-prepared drawn alias; native early returns omit it.",
+    "All actual R_DrawAliasModel entries also include culled objects; those are not the denominator.",
+    "Native draw count and eliminated bounds-call count agree exactly without changing measured execution.",
+    "A draw is not a triangle-weighted workload fraction; these percentages do not predict FPS."
+  ]
+}

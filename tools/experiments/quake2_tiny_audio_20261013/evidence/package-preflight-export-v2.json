@@ -1,0 +1,17 @@
+{
+  "passed": true,
+  "checks": [
+    {
+      "mode": "final",
+      "rejected_incomplete": true,
+      "reason": "ValueError: Require completed full30seed sweep before final assembly"
+    },
+    {
+      "mode": "source-only",
+      "rejected_incomplete": true,
+      "reason": "ValueError: Require completed full30seed sweep before final assembly"
+    }
+  ],
+  "assembly_script_sha256": "51ec2ac0c51bc40e0671fa7592246995c0995eae426ff072a34bb0240bf0102f",
+  "scope": "Both export modes reject an incomplete real sweep before writing artifacts."
+}

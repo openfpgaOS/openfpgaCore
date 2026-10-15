@@ -1,0 +1,30 @@
+{
+  "status": "PASS",
+  "checks": 30273,
+  "scope": [
+    "Actual C cached suffix helper vs independent slot-array oracle, 30,000 random streams and directed overwrite/read/state/bounds cases.",
+    "Actual acquire/release/epoch/drain functions against inert MMIO fixture: absent capability, same-ticket reuse, retained lease on consumer reset, source drain under own idle lease, publication before pending-job waits. Host replaces only fence instruction.",
+    "Does not simulate RTL repair insertion or establish full-frame performance."
+  ],
+  "command": [
+    "cc",
+    "-std=c11",
+    "-O1",
+    "-g",
+    "-fno-omit-frame-pointer",
+    "-fsanitize=address,undefined",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app/evidence/app-tests-v1/test.c",
+    "-o",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app/evidence/app-tests-v1/test"
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app/evidence/app-tests-v1/run.py": "766fbe0050432130ca5f2e99fb38bf60cfee2bb76384658d44798465286b1bf0",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "91b3255e2c578a8bd3aeea4936db3357af0e17525578e140bd28ab39152761d8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app/src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "bbcd3047a14e544aec16cb855fd58ba2ad751db76a4253fe8f22c5f2f84d1da6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app/evidence/app-tests-v1/test.c": "f38b5527483b25cc475651c13a7ee512b808ac8ca4a92735fccc16522b2bec10"
+  },
+  "helper_sha256": {
+    "admission": "ff9e101d1e717602b408067c4f3b6a6d91f9dbf60265721db2215c10175ffea3",
+    "lease": "119c06fdb7fc6bb1b2e3723e575714df60950066458a02f4446d69033774afd3"
+  }
+}

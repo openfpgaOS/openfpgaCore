@@ -1,0 +1,16 @@
+{
+  "status": "NATIVE_BUILD_PASS",
+  "baseline_prepared_sha256": "dbe985926477ed119ebc5c416250d1f87a3711c568f4cff9075861b914a1b233",
+  "prepared_sha256": "45c81f580a75621b6ebaae08d816565947475fecc4747a1deb7c55235e8fc2d5",
+  "recipe_sha256": "b26a649de7428b2aeabb338211282231fdf109f118a4b005f38978abc4aecc25",
+  "source_count": 175,
+  "changed_source": "frozen/src/fpga/common/gpu_core.v",
+  "before_sha256": "a50e45f4e1e866973158efdd5cbf48f56a43f8e2124f713806386d372e2c1e25",
+  "after_sha256": "df17bf29f1f1ec239cdcca8921c8c913298e7b4f636f97a01c2f08fb999205da",
+  "patch_sha256": "82d89443eb5b71519af0f9d341e7379e5f75239c462bdede0a080dff06756126",
+  "compile_argv_delta": "Only absolute model paths relocated; no flags or source-list changes.",
+  "production_mutated": false,
+  "quartus_run": false,
+  "area_fit_claim": false,
+  "build_sha256": "15c8fe5833aeb567201144a2b4d5073cd42db85b6590602b67ed2aa2d945f362"
+}

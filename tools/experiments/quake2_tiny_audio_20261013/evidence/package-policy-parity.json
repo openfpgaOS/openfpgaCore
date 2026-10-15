@@ -1,0 +1,49 @@
+{
+  "passed": true,
+  "qsf_sha256": "351431b8158de34a5a18361c8ae8a9d5d94a81b714c3853dfa3d315a47c1f1d1",
+  "sweep_recipe_sha256": "570a77c4d8aec800c2e90e9241721ec27cfa479f1638ddd91561c0fd834b46f2",
+  "package_recipe_sha256": "a75be47998af65041c0c78568f528e6f27b650b0924dbbb5bc5ae3ce830e705b",
+  "settings": {
+    "global_setting": {
+      "effective": "AREA",
+      "assignments": [
+        "SPEED",
+        "AREA",
+        "SPEED",
+        "AREA"
+      ]
+    },
+    "instance_assignments": [
+      "set_instance_assignment -name OPTIMIZATION_TECHNIQUE SPEED -to ic|cpu|cpu"
+    ],
+    "physical_synthesis": {
+      "PHYSICAL_SYNTHESIS_COMBO_LOGIC": {
+        "effective": "OFF",
+        "assignments": [
+          "OFF",
+          "ON",
+          "OFF"
+        ]
+      },
+      "PHYSICAL_SYNTHESIS_EFFORT": {
+        "effective": "NORMAL",
+        "assignments": [
+          "NORMAL",
+          "FAST",
+          "NORMAL"
+        ]
+      }
+    },
+    "cpu_combo_scope": {
+      "present": true,
+      "target": "ic|cpu|cpu",
+      "effective": "ON",
+      "assignments": [
+        {
+          "target": "ic|cpu|cpu",
+          "value": "ON"
+        }
+      ]
+    }
+  }
+}

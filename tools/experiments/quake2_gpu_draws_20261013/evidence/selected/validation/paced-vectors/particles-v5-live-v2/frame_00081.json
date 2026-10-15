@@ -1,0 +1,185 @@
+{
+  "frame": 81,
+  "stride": 640,
+  "step": 2,
+  "cpu_cycles": 9419363,
+  "batches": [
+    {
+      "words": 4,
+      "first_write": 630,
+      "publish": 735
+    },
+    {
+      "words": 1065,
+      "first_write": 3677611,
+      "publish": 3686031
+    },
+    {
+      "words": 621,
+      "first_write": 3766941,
+      "publish": 3771575
+    },
+    {
+      "words": 250,
+      "first_write": 3798244,
+      "publish": 3800336
+    },
+    {
+      "words": 690,
+      "first_write": 3840784,
+      "publish": 3845879
+    },
+    {
+      "words": 791,
+      "first_write": 3910391,
+      "publish": 3916600
+    },
+    {
+      "words": 918,
+      "first_write": 3994518,
+      "publish": 4001330
+    },
+    {
+      "words": 703,
+      "first_write": 4057331,
+      "publish": 4062681
+    },
+    {
+      "words": 571,
+      "first_write": 4126572,
+      "publish": 4130815
+    },
+    {
+      "words": 405,
+      "first_write": 4181575,
+      "publish": 4184774
+    },
+    {
+      "words": 679,
+      "first_write": 4249485,
+      "publish": 4254513
+    },
+    {
+      "words": 575,
+      "first_write": 4300119,
+      "publish": 4304481
+    },
+    {
+      "words": 578,
+      "first_write": 4403941,
+      "publish": 4408747
+    },
+    {
+      "words": 165,
+      "first_write": 4428420,
+      "publish": 4429785
+    },
+    {
+      "words": 2088,
+      "first_write": 4680101,
+      "publish": 4695637
+    },
+    {
+      "words": 524,
+      "first_write": 4752524,
+      "publish": 4756566
+    },
+    {
+      "words": 165,
+      "first_write": 7951617,
+      "publish": 7952867
+    },
+    {
+      "words": 183,
+      "first_write": 7982829,
+      "publish": 7984242
+    },
+    {
+      "words": 165,
+      "first_write": 8008404,
+      "publish": 8009642
+    },
+    {
+      "words": 165,
+      "first_write": 8033456,
+      "publish": 8034688
+    },
+    {
+      "words": 165,
+      "first_write": 8058933,
+      "publish": 8060165
+    },
+    {
+      "words": 165,
+      "first_write": 8083024,
+      "publish": 8084256
+    },
+    {
+      "words": 183,
+      "first_write": 8104668,
+      "publish": 8106051
+    },
+    {
+      "words": 165,
+      "first_write": 8119037,
+      "publish": 8120269
+    },
+    {
+      "words": 20,
+      "first_write": 8146168,
+      "publish": 8146344
+    },
+    {
+      "words": 165,
+      "first_write": 8150976,
+      "publish": 8152208
+    },
+    {
+      "words": 165,
+      "first_write": 8165313,
+      "publish": 8166545
+    },
+    {
+      "words": 20,
+      "first_write": 8178289,
+      "publish": 8178465
+    },
+    {
+      "words": 165,
+      "first_write": 8182188,
+      "publish": 8183420
+    },
+    {
+      "words": 1507,
+      "first_write": 8323684,
+      "publish": 8334965
+    },
+    {
+      "words": 3817,
+      "first_write": 9227681,
+      "publish": 9255865
+    },
+    {
+      "words": 2,
+      "first_write": 9269299,
+      "publish": 9269353
+    }
+  ],
+  "raw_vector_sha256": "70eb8b7eeb9d255a66b3e1158201c8d786167c96aaf3072fa61db4efc630792c",
+  "vector_sha256": "416eff72abcdc5ff75362f6e5c38bf8b4a82cda2d436167514f05b85c4a2af6d",
+  "paced_vector_sha256": "aeba63646758b12a31b31614bb4ee8d22e206c3aae0884c2f0678de8fcf08d3c",
+  "removed_next_frame_clear": [
+    285212675,
+    1344274432,
+    41943280,
+    41943040
+  ],
+  "timeline_sha256": "ccacfd588b508dde28c586eacab1bd76973ee1b5750a040f1ece2420066a52df",
+  "recovered_frame_start_clear": [
+    285212675,
+    1342177280,
+    41943280,
+    41943040
+  ],
+  "limits": "Attach observed CPU work and fence points to immutable GPU command batches.\n\nEach captured MMIO command batch is published at its observed CPU work offset.\nThe real RTL ring reservation and fences add elapsed time without erasing CPU\nwork. Word writes may be packed at the end of a batch's CPU submission interval:\nthe GPU cannot consume unpublished words, so publication timing is preserved.\nCPU framebuffer writes are excluded by the established independent raster gate;\nthis is a producer/backpressure model, not a complete CPU memory-coherency model.\n"
+}

@@ -1,0 +1,73 @@
+OS30 integrated mesh experiment: measured outcome
+
+NOT DEPLOYED. NO PHYSICAL BUILD OR TIMING QUALIFICATION SELECTED.
+
+The implemented 512-word mesh queue did not make these full native intervals
+faster. The final F19 MESH4 adaptive-feed app takes 8,901,507 cycles versus
+8,531,290 for its same-ELF capability-off control: +370,217 cycles (+4.340%).
+Its warm interval is 4,588,457 versus 4,463,823 cycles (+2.792%).
+
+Measured comparison (positive means slower; cycles, not Pocket FPS):
+Version     Control sum Candidate sum Total delta Warm delta  Configuration
+v5          8,438,043  9,411,083  +11.532%   +9.676%  Single-packet 512; immediate
+v6          8,438,043  9,339,545  +10.684%   +8.826%  Single-packet 512; merge 128
+v7          8,438,043  8,855,417   +4.946%   +3.439%  Multipacket 512; immediate
+v8          8,438,043  8,448,526   +0.124%   -1.054%  Multipacket 2048; diagnostic
+v9          8,438,043  8,068,806   -4.376%   -5.182%  Multipacket 16384; ceiling
+v7/appv3    8,486,239  8,878,785   +4.626%   +2.978%  Multipacket 512; batch 512
+v7/appv4    8,531,290  8,901,507   +4.340%   +2.792%  Multipacket 512; adaptive 128
+
+Each row compares the same app ELF and prepared input with capability off/on.
+Rows using different app versions are not interchangeable controls: code layout,
+source-cache hashes and the capability-off path also change. The two intervals
+include game/render/audio work and complete GPU drains. They use actual native
+CPU/raster RTL, fixed synthetic display/audio arrivals and bounded service
+implementations; they do not qualify sustained Pocket FPS or the full OS/PCM/
+interrupt workload.
+
+The 2048-word diagnostic nearly ties in total (+0.124%), despite a warm gain.
+The 16384-word capacity ceiling uses 4.376% fewer cycles in total, but is not a
+physically qualified or area-feasible selected core. Its warm peak reservation is 3642
+words. The bundle's native-v7 RTL remains the tested 512-word implementation;
+these larger diagnostic models are evidence about queue pressure, not bundled
+or deployed hardware replacements. Against the earlier qualified app
+(8,347,682 cycles), the ceiling's 8,068,806 cycles are 3.341% fewer. That comparison
+changes the app too; only the same-ELF rows isolate the architecture. This is a
+capacity ceiling for this scene and this architecture, not a universal limit
+on accelerator performance.
+
+Adaptive feed did not remove that pressure. Its warm frame has 550,944 cycles
+waiting for generated-packet queue credit; 525,251 overlap raster fragment
+work. These counters overlap CPU waits and other GPU activity. They are not
+additive savings or an FPS estimate. Publishing earlier can feed an empty GPU,
+but cannot free packet storage held behind older raster work.
+
+Correctness and evidence:
+  receipts/native/appv4-control-strict.json
+  receipts/native/appv4-candidate-strict.json
+  receipts/native/appv3-strict.json
+  reviews/adaptive-v4-conclusion.json
+  reviews/adaptive-v4-conclusion.txt
+  reviews/queue-credit-v7-appv4.json
+
+The independent native checks compare frame/depth output, ordered effective
+draws and state, Surface data and register/FCSR results. Source-cache omissions
+are tied to actual probe/fallback execution; they are not accepted merely
+because pixels match. Final receipts identify the exact selected checker
+versions and any historical supersession. Source/evidence hashes and external
+input bindings are in manifest.json. Earlier receipts retain their original
+point-in-time pending fields and remain unchanged.
+
+Focused tests also cover packet queue ownership/backpressure and the actual
+app publication policy: 760 packets/2,316,365 queue checks; 4096 status
+combinations/12,308 wait checks; 655,360 adaptive-feed cases/1,966,080 checks,
+including pointer wrap, the 127/128-word boundary, sync and DMA fallback. Those
+checks alone imply neither a speed gain nor a physical timing pass.
+
+Disposition: retain this as an unqualified source experiment. No production,
+sibling game, SD card, normal profile or save was changed. No Quartus fit or
+bitstream build was selected after the failed practical performance result.
+Any future deployment first needs a reproducible net full-frame benefit,
+strict native equivalence, physical area/timing/constraint qualification and
+an isolated trial package preserving normal profiles and saves. No further
+sweep or broader optimization is included in this bundle.

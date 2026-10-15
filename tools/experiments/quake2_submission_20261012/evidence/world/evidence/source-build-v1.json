@@ -1,0 +1,19 @@
+{
+  "label": "world-v1",
+  "elf": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/world/.obj/world-v1/app.elf",
+  "elf_sha256": "661df2c2d20963c1793878baa2e5abab0931b03add01afd956d01d5dc2ac942a",
+  "compiler": "riscv64-elf-gcc (Arch Linux Repositories) 15.2.0",
+  "files": {
+    "src/quake2/openfpga/of_gl1.c": "4a98c1b0626b24845dcf5ce1579cff112a13ff59d86198889da818a0f79fde57",
+    "src/quake2/openfpga/of_emit_q2.c": "3b4d1a807b626df045e1e39894a10e77abfc96b652ae8d5be54f65a91c5c9e2c",
+    "src/quake2/openfpga/of_emit_q2.h": "f5c1a577719aeba8e41e1374391c5d9ea992b076af2f91fe931f6f134ce274ab",
+    "tools/check_quake2_geometry.py": "b26615ad052081ef1ab8f7fe18042a430991d7ba1c0c1efbfbaab413128422fe",
+    "tools/check_quake2_renderer.py": "adfd4f3bb81249aaac9e4d212faf3259503c7a6e5043e2246efce2c8c9fa5d13",
+    "tools/tests/quake2_geometry_test.c": "46f188ff3c9177c78bf49bb4e1a83c3211e1ae1835542a974a898772706d76e3",
+    "tools/tests/quake2_renderer_test.c": "84b33ebf80d7619221f44dc8b94485b7698ed3525d05a0f10cb2d2dfd47f8c7a",
+    "tools/tests/quake2_worldpackets_test.c": "04cb3741edfdc8f94c24b647fce37326137ca063f7ff6c50b7e789408545d4b0"
+  },
+  "renderer_sanitizers": "PASS 15 groups",
+  "geometry_sanitizers": "PASS",
+  "notes": "512-word bounded cached complete worker packets; existing wire bytes retained; no RTL or sibling edits"
+}

@@ -1,0 +1,39 @@
+Native MD2 experiment native-v2 validation: PASS
+
+App SHA256: a7906705c7cc0743c03a1c61aa439c3ec71a9ae20bff5c07a01b055fff10171b
+
+CPU work (scalar estimate, not measured FPS):
+  main: 5513142.64 -> 4189813.04 cycles/frame (-24.00%); 36137.07 -> 23037.46 command words/frame
+  sound: 6590626.61 -> 4586422.28 cycles/frame (-30.41%); 45483.03 -> 25723.67 command words/frame
+  live: 5871016.52 -> 4744824.59 cycles/frame (-19.18%); 31490.00 -> 20023.03 command words/frame
+
+No native capability: complete commands/order/frame assignment, complete CPU framebuffer and sound service counts exactly match deployed world-v1 for all 600 frames.
+Actual new worker+GPU+shared CRAM versus independent integer reference: complete color and depth byte-exact in frames 20,80,180,300.
+Old command stream on new core: complete color/depth byte-exact and identical sample GPU cycle counts.
+Unuploaded cache-line padding: both poison patterns preserve exact output; all consumed frame/stream words independently verified uploaded.
+
+Map runtime demo1 to demo2 to demo1 passes: native arena returns to 44,416 bytes and same mesh addresses; retained 5.3/7.8MB texture prefixes remain byte-exact.
+GPU maximum-rate replay (actual PSRAM timing; not coupled FPS):
+  frame 20: 2564510 -> 3076766 cycles (+19.97%), native draws 17, vertices 3512, triangles 2872; worker/raster overlap 661269 cycles
+  frame 80: 3271483 -> 3812485 cycles (+16.54%), native draws 19, vertices 3765, triangles 3101; worker/raster overlap 726630 cycles
+  frame 180: 3153254 -> 3446182 cycles (+9.29%), native draws 8, vertices 1945, triangles 1562; worker/raster overlap 424839 cycles
+  frame 300: 2274280 -> 2492418 cycles (+9.59%), native draws 7, vertices 1435, triangles 1148; worker/raster overlap 344251 cycles
+
+Native fixed-point versus old floating-point renderer:
+  frame 20: 34/76800 changed color pixels, 40 changed depth pixels, 0 changed depth coverage
+  frame 80: 38/76800 changed color pixels, 58 changed depth pixels, 0 changed depth coverage
+  frame 180: 13/76800 changed color pixels, 20 changed depth pixels, 0 changed depth coverage
+  frame 300: 4/76800 changed color pixels, 11 changed depth pixels, 0 changed depth coverage
+
+Limitations:
+  Scalar CPU/cache estimates, not measured Vexii cycles or Pocket FPS.
+  Qsim does not rasterize triangle or native commands. GPU command reductions do not prove faster GPU execution.
+  Full CPU framebuffer includes HUD but excludes GPU-rendered geometry. Separate RTL validation is mandatory.
+  Native GPU timing is evaluated by maximum-rate ring replay with shared CRAM. CPU/GPU/scanout execution remains uncoupled.
+  Four sampled whole-frame RTL renders, not exhaustive game coverage.
+  Native fixed-point coefficients may change a few edge, texture or depth pixels versus the old floating-point renderer; exact comparison is against the independent integer algorithm.
+  Renderer snapshots include immutable native geometry and textures resident before frame start; initial upload latency is excluded. No live upload occurred in these four samples.
+  Shared fast-memory replay uses the actual CRAM controller/PHY and a timing-checked 100 MHz 16-bit two-die PSRAM model, not a 400 MB/s 32-bit port.
+  GPU producer publishes at maximum rate. CPU/audio/scanout traffic is disabled in these sample replays; no whole-device FPS or hardware timing qualification is claimed.
+  Uses the corrected v1 observer: every physical response checks deterministic padding poison, independent reference requires all consumed words uploaded, and two poison patterns give identical pixels/depth. Original v1 observer failure evidence remains retained separately.
+  Physical fit, timing and device deployment are tracked separately by the core integration task.

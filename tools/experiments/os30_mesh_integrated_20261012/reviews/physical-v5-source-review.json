@@ -1,0 +1,151 @@
+{
+  "status": "PASS_READ_ONLY_PHYSICAL_SOURCE_MAPPING",
+  "native": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v5",
+  "checked_native_manifest_files": 179,
+  "native_macros": [
+    "EXCLUDE_CLIP_TRI",
+    "EXCLUDE_GPU_COMMAND_DMA",
+    "EXCLUDE_GPU_LIGHT",
+    "EXCLUDE_GPU_PARAM_SPAN_LIST",
+    "EXCLUDE_GPU_XFORM_MAC",
+    "EXCLUDE_SYSREG_DIAG_READBACK",
+    "INCLUDE_CB_SPLIT_MULT",
+    "INCLUDE_CB_WINDOW2",
+    "INCLUDE_CLK90",
+    "INCLUDE_COMBINE",
+    "INCLUDE_CPU_RING",
+    "INCLUDE_DERIVE_PARALLEL_SCALE",
+    "INCLUDE_DIRECT_COLOR",
+    "INCLUDE_EARLY_Z_CAPTURE",
+    "INCLUDE_EW_STEP_PREDECODE",
+    "INCLUDE_GPU_CLAMP_FLAGS_PIPE",
+    "INCLUDE_GPU_CLAMP_PIPE",
+    "INCLUDE_GPU_MESH_FRONT",
+    "INCLUDE_GPU_RENDER_CACHE",
+    "INCLUDE_GPU_WQ16",
+    "INCLUDE_HW_MIXER",
+    "INCLUDE_PSS_SPECULATIVE_STEP",
+    "INCLUDE_SPAN_DEDICATED_MULT",
+    "INCLUDE_SPAN_LOOKAHEAD",
+    "INCLUDE_TEX_MEM",
+    "INCLUDE_TEX_QUEUE_MLAB",
+    "INCLUDE_TEX_QUEUE_RAM",
+    "INCLUDE_VERT_TRI",
+    "INCLUDE_VI_FILTER",
+    "INCLUDE_XFORM",
+    "INCLUDE_XFORM_RATIO_PIPE",
+    "INCLUDE_XFORM_VERTEX_RAM",
+    "INCLUDE_Z_BURST",
+    "INCLUDE_Z_COMPARE_PARALLEL",
+    "INCLUDE_Z_EARLY_RESTART",
+    "INCLUDE_Z_WINDOW8",
+    "INCLUDE_Z_WINDOW_PREDECODE",
+    "OF_EXPERIMENT_PSRAM32",
+    "OF_EXPERIMENT_SDRAM_STAGING",
+    "VEXII_CPU_OS30"
+  ],
+  "added_macro": [
+    "INCLUDE_GPU_MESH_FRONT"
+  ],
+  "removed_or_changed_baseline_macros": [],
+  "physical_original_sources": 56,
+  "physical_expected_sources": 66,
+  "physical_changed_common": {
+    "src/fpga/common/os30/geometry_float_cull_mem.v": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v5/frozen/src/fpga/common/geometry_float_cull_mem.v",
+      "sha256": "53163df4519861d2ffa3d115b45656a90f03e6ef869a02188d1344710931f2ac",
+      "new": true
+    },
+    "src/fpga/common/os30/geometry_import_convert.v": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v5/frozen/src/fpga/common/geometry_import_convert.v",
+      "sha256": "3beac876e469ec45ff3d3e81c9645671dcb92737d1f84dd188ca454fbbcf7526",
+      "new": true
+    },
+    "src/fpga/common/os30/geometry_mesh_command_fetch.v": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v5/frozen/src/fpga/common/geometry_mesh_command_fetch.v",
+      "sha256": "a740d2c2d961bcbe3421e7de594ca842b3c3caf2a38dff7de89ff067c9b93cf8",
+      "new": true
+    },
+    "src/fpga/common/os30/geometry_mesh_packet.v": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v5/frozen/src/fpga/common/geometry_mesh_packet.v",
+      "sha256": "9da4843b25ff77c22bac05129e0f559d1d219f4f954b11fd966ef6d3c1d2518c",
+      "new": true
+    },
+    "src/fpga/common/os30/geometry_mesh_queue.v": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v5/frozen/src/fpga/common/geometry_mesh_queue.v",
+      "sha256": "f30b8b7c01c2e5de571e7ee4a3bac2fe39e71d87faeaa57061588c1e5b0f6eb3",
+      "new": true
+    },
+    "src/fpga/common/os30/geometry_mesh_raw_frontend.v": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v5/frozen/src/fpga/common/geometry_mesh_raw_frontend.v",
+      "sha256": "61854f2d9949339c9b4c123d1b174da3828601cbf1edcbc0c410fbf854fac764",
+      "new": true
+    },
+    "src/fpga/common/os30/geometry_mesh_stream.v": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v5/frozen/src/fpga/common/geometry_mesh_stream.v",
+      "sha256": "157c3e505efe3f70591dffb2fb35de49bddf538f218df9e896a992b255d6cf8b",
+      "new": true
+    },
+    "src/fpga/common/os30/geometry_mesh_task_ctrl.v": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v5/frozen/src/fpga/common/geometry_mesh_task_ctrl.v",
+      "sha256": "899e04b44048bc94d6fe70c259c6fc144e826260fc1ecff032ba8bb890251496",
+      "new": true
+    },
+    "src/fpga/common/os30/geometry_mesh_task_engine.v": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v5/frozen/src/fpga/common/geometry_mesh_task_engine.v",
+      "sha256": "7a7a4d0d5d376d81412437f7dd9a9b2d66bdc90db7d06d456680920af1e29f7f",
+      "new": true
+    },
+    "src/fpga/common/os30/gpu_core.v": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v5/frozen/src/fpga/common/gpu_core.v",
+      "sha256": "06404eb3ecae76b46faaf4afb27d92daa05a00ac8f492790a6d13f1b0677ae8f",
+      "new": false
+    },
+    "src/fpga/common/os30/gpu_mesh_bridge.v": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v5/frozen/src/fpga/common/gpu_mesh_bridge.v",
+      "sha256": "8c02f8dacee2e4ff57d568bc9b968bb8b4109aa622739e3bf33804d39dc9cad9",
+      "new": true
+    },
+    "src/fpga/common/os30/phase10_load_alias.v": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v5/frozen/src/fpga/common/phase10_load_alias.v",
+      "sha256": "49e32c2a6a8b0128816a73647620b14f681e3441d0d305489d1c7feeb8d54882",
+      "new": false
+    }
+  },
+  "physical_top_added_only_mesh_wires_and_ports": true,
+  "physical_and_native_mesh_named_connections_identical": true,
+  "mesh_connection_count": 28,
+  "build_recipe_reviews": [
+    "Verifies every selected native source_sha256 input before staging.",
+    "Rejects removal of baseline native macros; physical baseline39 macros equal native baseline39.",
+    "Copies the qualified physical frozen tree and retains its QSF except path relocation and appended new RTL/macro/search path.",
+    "Maps existing gpu_core/phase10_load_alias into active os30 paths; adds all10 new modules including geometry_mesh_queue.",
+    "Physical top changes only guarded mesh wires and14 named ports on eachof GPU and producer; clock/reset/memory wiring otherwise unchanged.",
+    "All pins, PLL/memory-controller sources, firmware, constraints, seed3 andplacement effort3 remain qualified baseline inputs."
+  ],
+  "reset_and_fifo_review": [
+    "GPU mesh_consumer_reset = !reset_n || soft_reset || ring_reset, with physical GPU reset_n_cpu_media.",
+    "Private geometry_mesh_queue reset = geometry_reset || mesh_consumer_reset; both packet FIFO and GPU bridge discard the same consumer work.",
+    "Current mesh raw owner drains accepted source reads on consumer cancellation; raw fabric reset remains geometry startup/CRAM PLL only, and legacy raw jobs remain excluded from consumer cancellation.",
+    "MTF2 external port ABI matches MTF1; independent immutable512word queue is internal to geometry_load_alias, requiring no new top-level pin or clock.",
+    "Raw-to-packet producer completion and GPU packet consumption completion remain separate; marker metadata persists in queue after raw owner auto-ACK."
+  ],
+  "qualifications_not_done": [
+    "No physical staging directory or Quartus invocation made inthis review.",
+    "No timing/area/clock/resource pass implied; await native full-frame gain, then fit selected sources.",
+    "No card or sibling writes. Mounted Pocket path absent; deployment layout is verified against last recorded deployment, not current card inspection."
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v5/prepared.json": "3a1d634c07a4a41058aed32e6ca034d43f9e4b40946d132a76a5a33e86c9c884",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/build_pocket.py": "12007eb3e43bc743d566bae519504a9be8db1f3235227e14369a08d364abc395",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/physical-top/core_top.v": "c0ea8f4515b0ccf958359cde1ac16f3df67cb54ff1cc8a627b46fb52cb357805",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/inputs.json": "a1d09c8d78e887fe61900b632a389c82d3b79c6e861ef1d0f8d024b029311226",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/build/ap_core.qsf": "7c6473480530c65c01719b9ffad701751698313d79f9a58a930fc6505cfd4b0e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/build/ap_core.qpf": "c81d392b3e32615e566ebcf6c2a43532459605b2dd08419ff512d2b57d7cb9d0",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/abi-v2.json": "76ae0f8bb5b14d9b7f0ccfd8bdae8c759cf556a8e0cd35e3b184f2bd7d27363e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v2/evidence/app-build-v2/build-result.json": "86d70bc71fda1830a876afb878bc67895f2afa8059a91e02ac7a61ad57940b33",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/deployments/20261009T225703Z-sm64-upload.json": "5bb9eeaca0e376ca76f5d0a20a00612b2cf825c975937efbc2cc1b1336b96614",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/upload-burst/assembly/manifest.json": "1703b26bd82661f308dc21b6044a4609bf4ca8b5f64d00203c3935d59e83a0d8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/upload-burst/assembly/TEST.txt": "e38e1eca8bbca6c094f4399f554f7ab0b399bcdbf784f04267ecaef799b14424"
+  }
+}

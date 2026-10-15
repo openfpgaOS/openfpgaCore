@@ -1,0 +1,42 @@
+[
+  {
+    "attempt": "old-wrapper-v1",
+    "reason": "Copied old suite still expected AJ02 capability; stopped before functional cases.",
+    "receipt": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/tests/old-wrapper-v1/manifest.json",
+    "sha256": "6a987e9863376310e6399183e8309eed5810bb6c6ea809d9e1d92febacaba3e7",
+    "recovered_sources": {
+      "geometry_mesh_stream.v": {
+        "preserved_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/tests/history/stream_before_handshake_fix.v",
+        "sha256": "aa5a1a947c629eb35e2e0370b0a63b910616b85cf5537d4208113224fd77df10"
+      }
+    }
+  },
+  {
+    "attempt": "wrapper-v1",
+    "reason": "First GROUP exposed descriptor_start/raw_ready combinational loop; fixed launch-ready dependency before selected tests.",
+    "receipt": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/tests/wrapper-v1/manifest.json",
+    "sha256": "98b6332934d67246590ad4a41869712a2114e5015bad961ce8cfb18d333c7b8e",
+    "recovered_sources": {
+      "test_async_wrapper.cpp": {
+        "preserved_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/tests/history/test_before_priority_wait_fix.cpp",
+        "sha256": "9183aa134a4fdfdf629458d0d791c69fa9b3b1c65a36dfe2fd40ed9b2b275ddc"
+      },
+      "geometry_mesh_stream.v": {
+        "preserved_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/tests/history/stream_before_handshake_fix.v",
+        "sha256": "aa5a1a947c629eb35e2e0370b0a63b910616b85cf5537d4208113224fd77df10"
+      }
+    }
+  },
+  {
+    "attempt": "wrapper-v2",
+    "reason": "Test requested priority before first member started, a legal early grant; corrected test to await current member snapshot before expecting detachment.",
+    "receipt": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/tests/wrapper-v2/manifest.json",
+    "sha256": "c1fd314a57b663fa8616f5e5f307e7123bfa4cc2d4603a138cbfb731b3729aff",
+    "recovered_sources": {
+      "test_async_wrapper.cpp": {
+        "preserved_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/tests/history/test_before_priority_wait_fix.cpp",
+        "sha256": "9183aa134a4fdfdf629458d0d791c69fa9b3b1c65a36dfe2fd40ed9b2b275ddc"
+      }
+    }
+  }
+]

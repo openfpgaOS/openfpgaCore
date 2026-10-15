@@ -1,0 +1,26 @@
+Independent follow-up review of v2
+
+Worker v2 adds a register after native RAM, with another wait state on every
+consumer: stream reads, coefficient reads, row offset and palette. Header
+validation is split from byte-count addition and bounds checking. Valid maximum
+block size is 4 + 32*12 + 64*4 = 644 bytes; ten bits hold its size, and the
+25-bit address sum detects crossing the 16 MiB limit. Invalid wide counts are
+rejected independently before the truncated count fields can affect reads.
+The no_rw_check attribute is consistent with the state ownership: descriptor
+COPY and burst fill do not consume the RAM output, and all consumers wait for
+a new read after those writes. Client reset cancels consumption and marks any
+retained physical transaction for discard. No ABI/output change is intended.
+
+Separately reviewed the app-v2 native allocator changes. Textures grow upward
+and immutable native assets downward by reducing the texture allocation
+ceiling. Map registration fences before restoring the ceiling and advancing a
+separate native generation. Existing texture top, handles, flat texture and
+colormap survive. Retained models reupload after native generation changes.
+Different skin dimensions in one generation fall back without allocating.
+NativeUpload now validates the allocated upper region; a strictly positive
+ceiling preserves the SDK fast-memory presence flag. These changes resolve
+the two application-v1 findings in INDEPENDENT_REVIEW.txt.
+
+Physical fitting/timing and integrated application validation are owned by
+the root task. Neither this review nor focused worker tests establish physical
+qualification or a measured Pocket FPS improvement.

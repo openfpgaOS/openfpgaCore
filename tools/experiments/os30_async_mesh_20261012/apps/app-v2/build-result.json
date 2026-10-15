@@ -1,0 +1,361 @@
+{
+  "status": "PASS_BUILD_NOT_HARDWARE_QUALIFIED",
+  "command": [
+    "bash",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app-v2/tools/sdk-container.sh",
+    "-C",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app-v2/src/sm64",
+    "make",
+    "-j4",
+    "PROFILE=0",
+    "PERF_DIAG=1",
+    "GEOMETRY=1",
+    "GEOMETRY_REFERENCE=0",
+    "OBJ_DIR=/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app-v2/.obj/sm64-async-mesh-v2-perfdiag",
+    "APP_LD=../sdk/app-sdram-staging.ld",
+    "LDFLAGS=-Wl,--defsym=__of_sdram_staging=1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app-v2/.obj/sm64-async-mesh-v2-perfdiag/app.elf"
+  ],
+  "elf": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app-v2/.obj/sm64-async-mesh-v2-perfdiag/app.elf",
+  "elf_sha256": "6b1c5e48daa21f1b678b4a73f359a7a112b8a6cf92653310a4df78036c1d1c5d",
+  "elf_bytes": 13633616,
+  "source_sha256": {
+    "src/sm64/Makefile": "2d7b9ff942685d414c1d6f4d0767a5c5fa9c111a540840a612dfc03fbbac13f4",
+    "src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "6065b1a337721dfb233d03bde2862e2a0659d611c5b919faab292583030b27cf",
+    "src/sm64/sm64/src/pc/gfx/gfx_gpu.h": "6975e6d62c0f6f7e8d0b699cc785029b03f88c020f924414ae5a097af9dcab29",
+    "src/sm64/sm64/src/pc/gfx/gfx_pc.c": "91b3255e2c578a8bd3aeea4936db3357af0e17525578e140bd28ab39152761d8",
+    "src/sm64/sm64/src/pc/gfx/async_mesh_repair.c": "bac8a9d82b9b491b10008312349b1fe078ecae722fc0ce260317c0a778bb3f24",
+    "src/sm64/sm64/src/pc/gfx/async_mesh_repair.h": "0aeb6d69e84a5f5345d62f14227fea76bd2169932ec0a5960a5c3d9b63b530ef",
+    "src/sm64/pocket/perf_pocket.c": "902e83f0101f3ea932f6843e09eedff4a76520d9179762bbb1e6a96ce5fb31b9",
+    "src/sdk/include/of_gpu.h": "7e4b105e444b7307b36010da87749eff445650b6983283eeab9223e6af3dc01d",
+    "src/sdk/sdk.mk": "4a9f7779f4cef8c3798e45c1c108d8c6c2b8246fba8d1aa846a89022b0396bd9",
+    "src/sdk/app-sdram-staging.ld": "8b490f5d6095d18b94b5e2db98f95b52ed135f162f696e0f6100695447019888",
+    "tools/sdk-container.sh": "a66b9b91844460dcb62764d06233185c075f6cdd80d9d716c06ac230f8dd11a0"
+  },
+  "predecessor": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app",
+  "predecessor_source_sha256": {
+    "src/sm64/Makefile": "2d7b9ff942685d414c1d6f4d0767a5c5fa9c111a540840a612dfc03fbbac13f4",
+    "src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "bbcd3047a14e544aec16cb855fd58ba2ad751db76a4253fe8f22c5f2f84d1da6",
+    "src/sm64/sm64/src/pc/gfx/gfx_gpu.h": "6975e6d62c0f6f7e8d0b699cc785029b03f88c020f924414ae5a097af9dcab29",
+    "src/sm64/sm64/src/pc/gfx/gfx_pc.c": "91b3255e2c578a8bd3aeea4936db3357af0e17525578e140bd28ab39152761d8",
+    "src/sm64/sm64/src/pc/gfx/async_mesh_repair.c": "bac8a9d82b9b491b10008312349b1fe078ecae722fc0ce260317c0a778bb3f24",
+    "src/sm64/sm64/src/pc/gfx/async_mesh_repair.h": "0aeb6d69e84a5f5345d62f14227fea76bd2169932ec0a5960a5c3d9b63b530ef",
+    "src/sm64/pocket/perf_pocket.c": "cfcd645238d6aa6221ca96ca22e80d9e54ff602830af3bf53c1097635a1115ef"
+  },
+  "baseline": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64-v2",
+  "baseline_source_sha256": {
+    "src/sm64/Makefile": "a6c56594688f3be6308d066ae6904e80be52e37336314ba96ca64eb4351b1460",
+    "src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "c8daac5bb1442fcb93310d2e7a01f307b9b1ac612d717ef253e412024174cf05",
+    "src/sm64/sm64/src/pc/gfx/gfx_gpu.h": "5b0452081737fd970e66232ebabc2de29e16a7ecf95e7a6c035bc4a792d258c7",
+    "src/sm64/sm64/src/pc/gfx/gfx_pc.c": "49a72cfd370563bb3c283a72d35a4d32007905565778259d8cad060e87fbd503",
+    "src/sm64/pocket/perf_pocket.c": "2a01671e3d170882e7ae41f62f80d3d54e7b87c30907a3cf1b52706147f84520"
+  },
+  "segments": [
+    {
+      "address": "0x10400000",
+      "end": "0x10fe1060",
+      "filesz": 12456032,
+      "memsz": 12456032,
+      "flags": 7
+    },
+    {
+      "address": "0x10fe4000",
+      "end": "0x11357958",
+      "filesz": 0,
+      "memsz": 3619160,
+      "flags": 6
+    }
+  ],
+  "symbols": {
+    "am_repair": {
+      "address": "0x104e4200",
+      "size": 3522,
+      "kind": "T"
+    },
+    "async_armed": {
+      "address": "0x10fe0df0",
+      "size": 4,
+      "kind": "d"
+    },
+    "async_context": {
+      "address": "0x11171090",
+      "size": 112,
+      "kind": "b"
+    },
+    "async_context_valid": {
+      "address": "0x10fe0ef0",
+      "size": 4,
+      "kind": "d"
+    },
+    "async_epoch": {
+      "address": "0x10fe0ef8",
+      "size": 4,
+      "kind": "d"
+    },
+    "async_epoch_valid": {
+      "address": "0x10fe0ef4",
+      "size": 4,
+      "kind": "d"
+    },
+    "async_finished_repair_token": {
+      "address": "0x10fe0ee8",
+      "size": 4,
+      "kind": "d"
+    },
+    "async_finished_repair_valid": {
+      "address": "0x10fe0ee4",
+      "size": 4,
+      "kind": "d"
+    },
+    "async_legacy_held": {
+      "address": "0x10fe0ee0",
+      "size": 4,
+      "kind": "d"
+    },
+    "async_sequence": {
+      "address": "0x10fe0f00",
+      "size": 4,
+      "kind": "d"
+    },
+    "async_servicing": {
+      "address": "0x10fe0eec",
+      "size": 4,
+      "kind": "d"
+    },
+    "async_submitted": {
+      "address": "0x10fe0dec",
+      "size": 4,
+      "kind": "d"
+    },
+    "async_ticket": {
+      "address": "0x10fe0efc",
+      "size": 4,
+      "kind": "d"
+    },
+    "gfx_async_stats": {
+      "address": "0x11357720",
+      "size": 64,
+      "kind": "B"
+    },
+    "gfx_async_try_load": {
+      "address": "0x104d47c0",
+      "size": 1172,
+      "kind": "t"
+    },
+    "gfx_bram_stats": {
+      "address": "0x11353e4c",
+      "size": 32,
+      "kind": "B"
+    },
+    "gfx_end_frame": {
+      "address": "0x104d7140",
+      "size": 32,
+      "kind": "T"
+    },
+    "gfx_front_stats": {
+      "address": "0x11353d9c",
+      "size": 64,
+      "kind": "B"
+    },
+    "gfx_gpu_async_job": {
+      "address": "0x104e0500",
+      "size": 2656,
+      "kind": "T"
+    },
+    "gfx_gpu_async_raw_acquire": {
+      "address": "0x104dc600",
+      "size": 626,
+      "kind": "T"
+    },
+    "gfx_gpu_async_raw_release": {
+      "address": "0x104dc880",
+      "size": 136,
+      "kind": "T"
+    },
+    "gfx_gpu_async_service": {
+      "address": "0x104d8100",
+      "size": 812,
+      "kind": "T"
+    },
+    "gfx_gpu_async_supported": {
+      "address": "0x104d8080",
+      "size": 86,
+      "kind": "T"
+    },
+    "gfx_mesh_finish": {
+      "address": "0x104d3e80",
+      "size": 2324,
+      "kind": "t"
+    },
+    "gfx_mesh_lookup": {
+      "address": "0x104ce680",
+      "size": 1074,
+      "kind": "t"
+    },
+    "gfx_mesh_stats": {
+      "address": "0x113576e0",
+      "size": 64,
+      "kind": "B"
+    },
+    "gfx_queued_front_run": {
+      "address": "0x104d1d40",
+      "size": 1066,
+      "kind": "t"
+    },
+    "gfx_queued_stats": {
+      "address": "0x11353e6c",
+      "size": 64,
+      "kind": "B"
+    },
+    "gfx_run": {
+      "address": "0x104d7040",
+      "size": 248,
+      "kind": "T"
+    },
+    "gpu_async_fault": {
+      "address": "0x104d7a82",
+      "size": 16,
+      "kind": "t"
+    },
+    "gpu_async_repair_word": {
+      "address": "0x104d7ac0",
+      "size": 88,
+      "kind": "t"
+    },
+    "load_alias_controls_valid": {
+      "address": "0x10fe0dc4",
+      "size": 4,
+      "kind": "d"
+    },
+    "load_alias_copy": {
+      "address": "0x104ce600",
+      "size": 100,
+      "kind": "t"
+    },
+    "load_alias_dirty": {
+      "address": "0x10fe09e4",
+      "size": 4,
+      "kind": "d"
+    },
+    "load_alias_lighting": {
+      "address": "0x10fe0dbc",
+      "size": 4,
+      "kind": "d"
+    },
+    "load_alias_materialize": {
+      "address": "0x104ceac0",
+      "size": 306,
+      "kind": "t"
+    },
+    "load_alias_materialize_all": {
+      "address": "0x104cf7c0",
+      "size": 116,
+      "kind": "t"
+    },
+    "load_alias_present": {
+      "address": "0x10fe0dc8",
+      "size": 4,
+      "kind": "d"
+    },
+    "load_alias_scales": {
+      "address": "0x10fe0dc0",
+      "size": 4,
+      "kind": "d"
+    },
+    "load_alias_vertex_legacy": {
+      "address": "0x104cecc0",
+      "size": 1770,
+      "kind": "t"
+    },
+    "load_lazy_first": {
+      "address": "0x10fe0dcc",
+      "size": 4,
+      "kind": "d"
+    },
+    "load_lazy_slots": {
+      "address": "0x10fe0dd0",
+      "size": 4,
+      "kind": "d"
+    },
+    "sm64_async_front_capability": {
+      "address": "0x11353eb0",
+      "size": 4,
+      "kind": "B"
+    },
+    "sm64_bram_import_capability": {
+      "address": "0x11353eac",
+      "size": 4,
+      "kind": "B"
+    },
+    "sm64_mesh_front_capability": {
+      "address": "0x11353eb4",
+      "size": 4,
+      "kind": "B"
+    },
+    "sm64_queued_front_capability": {
+      "address": "0x11353e48",
+      "size": 4,
+      "kind": "B"
+    },
+    "sm64_triangle_front_capability": {
+      "address": "0x11353df0",
+      "size": 4,
+      "kind": "B"
+    }
+  },
+  "capability": "0x414a3031",
+  "capability_probe_reset_symbols": [
+    "sm64_bram_import_capability",
+    "sm64_triangle_front_capability",
+    "sm64_queued_front_capability",
+    "sm64_mesh_front_capability",
+    "sm64_async_front_capability"
+  ],
+  "abi_path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/design/abi.json",
+  "abi_sha256": "d8c933c03130aa64fa21d1867795cb5902bb673780363811948c341fb95856fe",
+  "build_script_sha256": "944c78cebefad8b6bc3ae54eaddea3afaaa62a40ab2610e0a3bf6e100c3b75ed",
+  "artifact_sha256": {
+    "final-build.log": "5e6f5da1439d52ecb9333a741df80b24ddbcabe0ac2188480c9c5c42741fa2ea",
+    "app.dis": "7f6616adc3a5faa449b1585160242573e4c2cb0ef8f8c3155c30f2bcaeea62aa",
+    "symbols.txt": "b7e7485a5948ed277f00f3a455b88927239b28520b56f833c32f2c6a0fae11b2",
+    "asset-reuse.json": "fc8fcbeefd24b06a26ede7723506b57be8ce7f727086bca0f22eb48dcd5a643f",
+    "app-v1-to-v2.patch": "36be76875bc5d79cdce2764e94101de7cad978980cd69b80ed605138f355a4d1",
+    "qualified-to-v2.patch": "9f5359f946edd0e4ce487bab9be30c5c698f1f2d69d3686f8f7343ebd18bf072"
+  },
+  "repair_source_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/async_mesh_repair.c": "bac8a9d82b9b491b10008312349b1fe078ecae722fc0ce260317c0a778bb3f24",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/async_mesh_repair.h": "0aeb6d69e84a5f5345d62f14227fea76bd2169932ec0a5960a5c3d9b63b530ef"
+  },
+  "strict_repair_flags": [
+    "-fno-fast-math",
+    "-ffp-contract=off"
+  ],
+  "stats": {
+    "0": "candidates",
+    "1": "dead_suffix_rejects",
+    "2": "material_rejects",
+    "3": "LOAD_rejects",
+    "4": "queued_jobs",
+    "5": "queued_input_triangles",
+    "6": "context_words",
+    "7": "repair_jobs",
+    "8": "repair_output_words",
+    "9": "recomputed_vertices",
+    "10": "legacy_leases",
+    "11": "lease_polls",
+    "12": "source_drain_polls",
+    "13": "protocol_faults",
+    "14": "repair_reset_cancellations",
+    "15": "absent_probes"
+  },
+  "limitations": [
+    "Only cached prepared eligible material and immutable own-slot TRI spans with a cached bounded dead-slot suffix proof enqueue async jobs. Cold or unproven spans remain canonical CPU paths.",
+    "Same 512-entry/16-probe topology/source caches as predecessor. No warm cache prepopulation. Source-pool reuse drains queued source readers, with repair service.",
+    "Legacy raw lease retains lazy canonical rows across ordinary rendering and consecutive legacy LOADs; handoff refreshes context, frame end materializes remaining rows before release.",
+    "Coarse jobs carry full context changes through ordered GPU ingress and return without synchronous raw/preflight/validation waits. Partial clipping, equal-W and arithmetic repair use immutable helper state and dedicated output insertion.",
+    "No integrated correctness/performance claim at build time. Fresh same-ELF capability-off capture and paired native replay are required."
+  ],
+  "packaged": false,
+  "deployed": false,
+  "physical_build": false
+}

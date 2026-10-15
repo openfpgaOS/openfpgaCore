@@ -1,0 +1,49 @@
+{
+  "status": "PASS",
+  "checks": 442190,
+  "tasks": 8192,
+  "draws": 7328,
+  "indexed": 963,
+  "direct": 6365,
+  "clipped": 2444,
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/run_host.py": "d5933c76caf09a312ff10a2478f106ebceb5d9dc8710fcb5a7836ad4765802f3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/test_host.c": "fb2dc645a0df4f54db481ffdec797d943f098b4c57fcab614233ba8f48c31245",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/async_mesh_repair.c": "bac8a9d82b9b491b10008312349b1fe078ecae722fc0ce260317c0a778bb3f24",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/async_mesh_repair.h": "0aeb6d69e84a5f5345d62f14227fea76bd2169932ec0a5960a5c3d9b63b530ef"
+  },
+  "commands": [
+    {
+      "argv": [
+        "cc",
+        "-std=c11",
+        "-O2",
+        "-g",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-Wno-misleading-indentation",
+        "-ffp-contract=off",
+        "-fno-fast-math",
+        "-fsanitize=address,undefined",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/async_mesh_repair.c",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/test_host.c",
+        "-lm",
+        "-o",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/host-v1/test"
+      ],
+      "returncode": 0,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/host-v1/test"
+      ],
+      "returncode": 0,
+      "log_sha256": "3e7e08cf1895f19da2c01953390069179a219a7e24934f28a3984b0f3163f6af"
+    }
+  ],
+  "binary_sha256": "a7ec81f603a10588a72a32b9bf1b2b745162b687ec026ae2b59d910b75c4078b",
+  "scope": "Bounds/format/cancellation-prefix/FENV tests. Exact arithmetic uses the separate actual CPU differential.",
+  "sanitizers": "ASan+UBSan; leak detector disabled because ptrace cannot support LSan and helper performs no allocation"
+}

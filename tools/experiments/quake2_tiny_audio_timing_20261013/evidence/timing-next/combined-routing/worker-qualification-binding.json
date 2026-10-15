@@ -1,0 +1,10 @@
+{
+  "passed": true,
+  "worker_sha256": "dc82691f019420352905292bb60d71943d989a42e4b2608feeefa218fe8f50f9",
+  "receipt": "docs/measurements/quake2-tiny-audio-20261013/timing-next/worker-staged/gates-v2/receipt.json",
+  "receipt_sha256": "d086083354f0b6c8fc0858c814b47417d4d95ed2459501819b7093e46ece5cf6",
+  "four_configuration_cycles": 27163742,
+  "directed_pause_cycles": 10444712,
+  "directed_coverage": "52 mode/stage pairs plus all11 native MAC columns paused17 clocks.",
+  "initial_harness_note": "gates-v1 expected historical dead states47-50, causing only a test coverage assertion. gates-v2 corrects reachable coverage. No RTL modifications or equivalence failure."
+}

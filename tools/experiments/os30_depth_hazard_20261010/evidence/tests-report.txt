@@ -1,0 +1,14 @@
+Depth-read hazard focused verification: PASS
+
+The source-bound queue test executed 152,255 cycles and 723,153 checks against an independent full-address logical FIFO. It exercised simultaneous push/pop, wrapping, a pending enqueue committed and popped on the same edge, same-word and same-line hazards, conservative XOR aliases, all holding-register guards, hard/soft reset, and queue preservation when only the command ring resets.
+
+The unchanged real render cache passed 477,748 checks with its exact native 512-line configuration. The separate guarded-read-priority prototype passed 645,637 checks. Both used independently merged byte-mask memory and delayed downstream visibility until in-order B. Coverage includes dirty same-set evictions, external AW/W stalls, delayed posted writes, same-line refills, full cache flush, and a local cache reset while a posted write remains uncommitted.
+
+The priority prototype additionally passed 500 concurrent disjoint-line read-first cases, with inactive address ports poisoned after request acceptance, and six explicit write-first cases covering boundary crossings, maximum 256-word bursts, and same-line masked writes. Unaligned requests were tested only as combinational arbitration guards, never issued as unsupported memory traffic.
+
+Reproduce from the repository root (use a new --out name if an output directory already exists):
+  python3 docs/measurements/os30-psram32-20261009/depth-hazard-v1/tests/run_queue.py --out queue-recheck
+  python3 docs/measurements/os30-psram32-20261009/depth-hazard-v1/tests/run_cache.py --out cache-recheck
+  python3 docs/measurements/os30-psram32-20261009/depth-hazard-v1/tests/run_cache_priority.py --out priority-recheck
+
+Each manifest records exact source, extracted-wrapper if applicable, executable hashes, command, and result. The queue controls/query tag and downstream memory are test inputs. These are local ordering tests; whole-GPU pipeline wiring, frame correctness and performance are qualified separately by the parent experiment. No physical timing result is inferred.

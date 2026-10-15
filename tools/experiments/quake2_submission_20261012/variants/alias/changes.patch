@@ -1,0 +1,415 @@
+--- a/src/quake2/openfpga/of_emit_q2.c
++++ b/src/quake2/openfpga/of_emit_q2.c
+@@ -86,6 +86,60 @@
+ static ofq2_tri_state_t ofq2_tristate_cur;
+ static qboolean ofq2_tristate_valid;
+ static qboolean ofq2_tristate_dirty = true;
++
++/* A caller-owned opaque alias draw may append complete 0x4E packets to one
++ * reservation. Keep the cursor in the command owner, after triangle math;
++ * never expose it to the renderer or allocate another payload buffer. */
++static qboolean ofq2_tri_batch_active;
++static uint32_t *ofq2_tri_batch_start, *ofq2_tri_batch_cursor, *ofq2_tri_batch_end;
++
++static void
++ofq2_tri_batch_commit(void)
++{
++	if (ofq2_tri_batch_start)
++		_gpu_ring_commit((uint32_t)(ofq2_tri_batch_cursor - ofq2_tri_batch_start));
++	ofq2_tri_batch_start = ofq2_tri_batch_cursor = ofq2_tri_batch_end = NULL;
++}
++
++void
++OFQ2_EndOpaqueTriBatch(void)
++{
++	ofq2_tri_batch_commit();
++	ofq2_tri_batch_active = false;
++}
++
++void
++OFQ2_BeginOpaqueTriBatch(void)
++{
++	/* No nested reservations. Unsupported hardware still follows the usual
++	 * refusal in DrawVertTriRGBPacked, without reserving or committing words. */
++	if (ofq2_tri_batch_active) __builtin_trap();
++	ofq2_tri_batch_active = true;
++}
++
++static void __attribute__((noinline))
++ofq2_tri_batch_refill(void)
++{
++	ofq2_tri_batch_commit();
++	/* Only wait for ONE actual triangle. A larger chunk uses capacity that
++	 * is already known to be free, so an eight-triangle reservation cannot
++	 * introduce an earlier/longer hardware wait or discard a short tail. */
++	uint32_t available = _gpu_ring_free_known() >> 2;
++	uint32_t staging = OF_GPU_COMMAND_STREAM_BATCH_WORDS - _gpu_cmd_words;
++	if (available > staging) available = staging;
++	if (available < 18u)
++	{
++		_gpu_stream_reserve_words(18u);
++		available = _gpu_ring_free_known() >> 2;
++		staging = OF_GPU_COMMAND_STREAM_BATCH_WORDS - _gpu_cmd_words;
++		if (available > staging) available = staging;
++	}
++	uint32_t words = available >= 144u ? 144u : available >= 72u ? 72u :
++		available >= 36u ? 36u : 18u;
++	_gpu_stream_reserve_words(words);
++	ofq2_tri_batch_start = ofq2_tri_batch_cursor = _gpu_ring_claim();
++	ofq2_tri_batch_end = ofq2_tri_batch_start + words;
++}
+ 
+ /* 0x50 object-state shadow: the matrix + projection consts are frame-constant
+  * for the world (only q29_shift varies per surface), so SetObjectState skips
+@@ -1114,8 +1168,17 @@
+ 	if (of_has_feature(OF_HW_GPU_VERT_TRI) && of_has_feature(OF_HW_GPU_VCOLOR))
+ #endif
+ 	{
+-		_gpu_stream_reserve_words(18u);
+-		uint32_t *w = _gpu_ring_claim();
++		uint32_t *w;
++		if (ofq2_tri_batch_active)
++		{
++			if (ofq2_tri_batch_cursor == ofq2_tri_batch_end) ofq2_tri_batch_refill();
++			w = ofq2_tri_batch_cursor;
++		}
++		else
++		{
++			_gpu_stream_reserve_words(18u);
++			w = _gpu_ring_claim();
++		}
+ 		w[0] = ((uint32_t)GPU_CMD_DRAW_VERT_TRI_RGB << 24) | 17u;
+ 		/* Keep this fixed payload inline: the target libc copy call costs
+ 		 * more than its seventeen aligned word loads/stores. */
+@@ -1124,7 +1187,8 @@
+ 		w[9] = words[8]; w[10] = words[9]; w[11] = words[10]; w[12] = words[11];
+ 		w[13] = words[12]; w[14] = words[13]; w[15] = words[14]; w[16] = words[15];
+ 		w[17] = words[16];
+-		_gpu_ring_commit(18u);
++		if (ofq2_tri_batch_active) ofq2_tri_batch_cursor = w + 18;
++		else _gpu_ring_commit(18u);
+ 	}
+ 	ofq2_pending = true;
+ 	return 1;
+--- a/src/quake2/openfpga/of_emit_q2.h
++++ b/src/quake2/openfpga/of_emit_q2.h
+@@ -308,6 +308,10 @@
+  * test). Needs a 0x4A surface state armed; gate on OFQ2_CAP_VERT_TRI_RGB. */
+ /* Final 17-word 0x4E payload; all words are required. */
+ int OFQ2_DrawVertTriRGBPacked(const uint32_t words[17]);
++/* Exclusive scope for one opaque alias draw. Only DrawVertTriRGBPacked may
++ * issue commands until End; end before changing state, kicking, or waiting. */
++void OFQ2_BeginOpaqueTriBatch(void);
++void OFQ2_EndOpaqueTriBatch(void);
+ int OFQ2_DrawVertTriRGB(const int16_t x[3], const int16_t y[3],
+ 		const int32_t s[3], const int32_t t[3], const int32_t zi[3],
+ 		const uint16_t rgb[3], const int32_t depth[3]);
+--- a/src/quake2/openfpga/of_gl1.c
++++ b/src/quake2/openfpga/of_gl1.c
+@@ -2619,9 +2619,16 @@
+ 	ofgl_va_vertex.stride = 4 * sizeof(float);
+ 	if (ofgl_begin3d(&tex, &tw, &th))
+ 	{
++		/* This loop has no GPU state changes for opaque aliases. Clipping
++		 * can expand a triangle but retains its surface state. Diagnostics may
++		 * print through the console, so keep them outside the exclusive scope. */
++		int submission_batch = !ofgl_blend_on &&
++			(!ofgl_bisect_cv || !ofgl_bisect_cv->value);
++		if (submission_batch) OFQ2_BeginOpaqueTriBatch();
+ 		for (int g = 0; g + 3 <= count; g += 3)
+ 			ofgl_alias_tri(indices[g], indices[g + 1], indices[g + 2],
+ 				(const byte *)source_indices, index_stride, tw, th);
++		if (submission_batch) OFQ2_EndOpaqueTriBatch();
+ 		ofgl_end3d();
+ 	}
+ 	ofgl_va_vertex = saved;
+--- /dev/null
++++ b/tools/check_quake2_opaque_batch.py
+@@ -0,0 +1,25 @@
++#!/usr/bin/env python3
++"""Bounded capacity and ordering checks using actual opaque-batch owner code."""
++import hashlib,json,os,re,subprocess,tempfile
++from pathlib import Path
++ROOT=Path(__file__).resolve().parents[1]
++source=ROOT/'src/quake2/openfpga/of_emit_q2.c'
++s=source.read_text()
++names=['ofq2_tri_batch_commit','OFQ2_EndOpaqueTriBatch','OFQ2_BeginOpaqueTriBatch','ofq2_tri_batch_refill','OFQ2_DrawVertTriRGBPacked']
++def extract(name):
++    m=re.search(r'(?m)^(?:static )?(?:void|int)(?: __attribute__\(\(noinline\)\))?\n'+name+r'\([^;]*?\)\n\{',s)
++    assert m,name
++    mask=re.sub(r'/\*.*?\*/|//[^\n]*|"(?:\\.|[^"\\])*"',lambda m:' '*len(m[0]),s,flags=re.S)
++    end=s.index('{',m.start())+1;depth=1
++    while depth:
++        depth+=(mask[end]=='{')-(mask[end]=='}');end+=1
++    return s[m.start():end]
++with tempfile.TemporaryDirectory(prefix='q2-opaque-') as tmp:
++    path=Path(tmp);(path/'opaque_functions.inc').write_text('\n'.join(extract(n) for n in names))
++    exe=path/'test'
++    cmd=[os.environ.get('CC','cc'),'-std=c11','-O1','-g','-fsanitize=address,undefined','-fno-omit-frame-pointer','-fno-pie','-no-pie','-I'+tmp,str(ROOT/'tools/tests/quake2_opaque_batch_test.c'),'-o',str(exe)]
++    subprocess.run(cmd,check=True)
++    r=subprocess.run([str(exe)],capture_output=True,text=True,env=dict(os.environ,ASAN_OPTIONS='detect_leaks=0',UBSAN_OPTIONS='halt_on_error=1'))
++    print(r.stdout+r.stderr,end='');r.check_returncode()
++    result={'passed':True,'command':cmd,'stdout':r.stdout,'sha256':{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in [source,Path(__file__),ROOT/'tools/tests/quake2_opaque_batch_test.c']}}
++    (ROOT/'evidence/opaque-batch-v1.json').write_text(json.dumps(result,indent=2)+'\n')
+--- /dev/null
++++ b/tools/tests/quake2_opaque_batch_test.c
+@@ -0,0 +1,133 @@
++/* Actual batch owner and packet writer against a capacity-bounded ring oracle. */
++#include <assert.h>
++#include <stdint.h>
++#include <stddef.h>
++#include <stdbool.h>
++#include <stdio.h>
++#include <string.h>
++typedef int qboolean;
++#define OFQ2_CAP_VERT_TRI_RGB 1u
++#define OF_HW_GPU_VERT_TRI 2u
++#define OF_HW_GPU_VCOLOR 4u
++#define GPU_CMD_DRAW_VERT_TRI_RGB 0x4eu
++#define OF_GPU_COMMAND_STREAM_BATCH_WORDS 4095u
++static qboolean ofq2_tri_batch_active, ofq2_tristate_valid, ofq2_tristate_dirty, ofq2_pending;
++static uint32_t *ofq2_tri_batch_start, *ofq2_tri_batch_cursor, *ofq2_tri_batch_end;
++static uint32_t buffers[2][4096], stream[65536], expected[65536];
++static uint32_t * _gpu_batch_buf;
++static unsigned _gpu_cmd_words, free_words, reserved, submissions, commits, waits, flushes;
++static unsigned output_words, expected_words, active_buffer, low_free_requests;
++static unsigned supports = 1, features = 6;
++static int OFQ2_Supports(unsigned cap) { return supports & cap; }
++static int of_has_feature(unsigned cap) { return (features & cap) != 0; }
++static unsigned _gpu_ring_free_known(void) { return free_words * 4; }
++static void publish(void)
++{
++    assert(!ofq2_tri_batch_start); /* owner must commit first */
++    assert(output_words + _gpu_cmd_words < 65536);
++    memcpy(stream + output_words, _gpu_batch_buf, _gpu_cmd_words * 4);
++    output_words += _gpu_cmd_words;
++    _gpu_cmd_words = 0;
++    active_buffer ^= 1;
++    _gpu_batch_buf = buffers[active_buffer];
++    ++flushes;
++}
++static void _gpu_stream_reserve_words(unsigned n)
++{
++    assert(n && n <= 144 && _gpu_batch_buf);
++    ++submissions;
++    /* No speculative wait for a group larger than the available capacity. */
++    if (free_words < n) { assert(n == 18); ++low_free_requests; }
++    if (_gpu_cmd_words + n > 4095) publish();
++    if (free_words < n) { publish(); free_words = 4095; ++waits; }
++    assert(_gpu_cmd_words + n <= 4095 && n <= free_words);
++    reserved = n;
++}
++static uint32_t *_gpu_ring_claim(void) { assert(reserved); return _gpu_batch_buf + _gpu_cmd_words; }
++static void _gpu_ring_commit(unsigned n)
++{
++    assert(n <= reserved && n <= free_words && _gpu_cmd_words + n <= 4095);
++    assert(n % 18 == 0);
++    assert(_gpu_batch_buf[4095] == 0xdeadbeef);
++    _gpu_cmd_words += n; free_words -= n; reserved = 0; ++commits;
++}
++#include "opaque_functions.inc"
++static void reset(unsigned free, unsigned staged)
++{
++    assert(!ofq2_tri_batch_active && !ofq2_tri_batch_start);
++    memset(buffers, 0, sizeof buffers);
++    buffers[0][4095] = buffers[1][4095] = 0xdeadbeef;
++    active_buffer = 0; _gpu_batch_buf = buffers[0];
++    free_words = free; _gpu_cmd_words = staged;
++    output_words = expected_words = staged;
++    memset(stream, 0, sizeof stream); memset(expected, 0, sizeof expected);
++    // staged prefix belongs to earlier commands, so it is part of the oracle
++    output_words = 0;
++    reserved = submissions = commits = waits = flushes = low_free_requests = 0;
++    ofq2_tristate_valid = 1; ofq2_tristate_dirty = ofq2_pending = 0;
++    supports = 1; features = 6;
++}
++static void draw(unsigned number)
++{
++    uint32_t payload[17];
++    expected[expected_words++] = 0x4e000011;
++    for (unsigned i=0;i<17;i++) expected[expected_words++] = payload[i] = 0xab120000 ^ (number*67+i);
++    assert(OFQ2_DrawVertTriRGBPacked(payload));
++}
++int main(void)
++{
++    unsigned cases = 0, checks = 0;
++    const unsigned free_cases[] = {0,1,17,18,19,35,36,37,71,72,73,143,144,145,4095};
++    const unsigned stage_cases[] = {0,1,18,3950,3951,3952,4059,4077,4078,4094,4095};
++    for(unsigned f=0;f<sizeof free_cases/sizeof *free_cases;f++)
++    for(unsigned s=0;s<sizeof stage_cases/sizeof *stage_cases;s++)
++    for(unsigned n=0;n<=37;n++)
++    {
++        reset(free_cases[f],stage_cases[s]);
++        OFQ2_BeginOpaqueTriBatch();
++        for(unsigned i=0;i<n;i++) draw(i);
++        OFQ2_EndOpaqueTriBatch();
++        assert(!ofq2_tri_batch_active && !ofq2_tri_batch_start);
++        publish();
++        assert(output_words==expected_words && !memcmp(stream,expected,expected_words*4));
++        assert(ofq2_pending == (n!=0));
++        ++cases; checks += expected_words;
++    }
++    reset(4095,0);
++    OFQ2_BeginOpaqueTriBatch();
++    for(unsigned i=0;i<65;i++) draw(i);
++    OFQ2_EndOpaqueTriBatch();
++    assert(submissions==9 && commits==9 && !waits);
++    publish(); assert(output_words==expected_words && !memcmp(stream,expected,expected_words*4));
++    // Non-batched calls retain immediate per-command bookkeeping.
++    reset(4095,0); for(unsigned i=0;i<17;i++) draw(i);
++    assert(submissions==17 && commits==17);
++    publish(); assert(output_words==expected_words && !memcmp(stream,expected,expected_words*4));
++    // Every capability/state refusal must leave an empty scope inert.
++    for(unsigned refusal=0;refusal<5;refusal++)
++    {
++        reset(4095,0); OFQ2_BeginOpaqueTriBatch();
++        if(refusal==0) supports=0;
++        if(refusal==1) ofq2_tristate_valid=0;
++        if(refusal==2) ofq2_tristate_dirty=1;
++        if(refusal==3) features=2;
++        if(refusal==4) features=4;
++        uint32_t payload[17] = {0};
++        int rc = OFQ2_DrawVertTriRGBPacked(payload);
++        assert(rc == (refusal>=3)); // preserve existing raw-feature fall-through behavior
++        OFQ2_EndOpaqueTriBatch();
++        assert(!submissions && !commits && !_gpu_cmd_words && !ofq2_tri_batch_active);
++    }
++    // Scope boundaries do not change stream order, and partial chunks return
++    // every unused slot rather than publishing garbage or leaving a hole.
++    reset(4095,0);
++    for(unsigned scope=0;scope<80;scope++)
++    {
++        OFQ2_BeginOpaqueTriBatch();
++        for(unsigned i=0;i<scope%13;i++) draw(scope*32+i);
++        OFQ2_EndOpaqueTriBatch();
++        draw(scope*32+31);
++    }
++    publish(); assert(output_words==expected_words && !memcmp(stream,expected,expected_words*4));
++    printf("PASS: %u bounded capacity/partial/empty scopes; %u word checks; 65 triangles use 9 reserve/commit pairs; refusal and mixed-scope ordering\n",cases,checks);
++}
+--- a/tools/tests/quake2_renderer_test.c
++++ b/tools/tests/quake2_renderer_test.c
+@@ -25,6 +25,7 @@
+ static int gpu_init_ok = 1, gpu_rgb = 1;
+ static int gpu_geometry;
+ static int pending_menu_quad;
++static int opaque_scope, opaque_begin_calls, opaque_end_calls, opaque_scoped_draws;
+ 
+ void R_ApplyGLBuffer(void)
+ {
+@@ -36,7 +37,7 @@
+ 	ofgl_Enable(GL_TEXTURE_2D);
+ }
+ 
+-void Com_Printf(const char *fmt, ...) { (void)fmt; }
++void Com_Printf(const char *fmt, ...) { assert(!opaque_scope); (void)fmt; }
+ cvar_t *Cvar_Get(const char *name, const char *value, int flags)
+ {
+ 	int i = !strcmp(name, "ofgl_bisect");
+@@ -90,10 +91,12 @@
+ 	return cap == OFQ2_CAP_VERT_TRI_RGB ? gpu_rgb : 1;
+ }
+ int OFQ2_HasFastTexMem(void) { return fast_textures; }
+-void OFQ2_Finish(void) { finishes++; }
++void OFQ2_Finish(void) { assert(!opaque_scope); finishes++; }
+ void OFQ2_Shutdown(void) { OFQ2_Finish(); }
+-void OFQ2_Kick(void) { }
+-void OFQ2_KickNow(void) { }
++void OFQ2_BeginOpaqueTriBatch(void) { assert(!opaque_scope); opaque_scope = 1; ++opaque_begin_calls; }
++void OFQ2_EndOpaqueTriBatch(void) { assert(opaque_scope); opaque_scope = 0; ++opaque_end_calls; }
++void OFQ2_Kick(void) { assert(!opaque_scope); }
++void OFQ2_KickNow(void) { assert(!opaque_scope); }
+ void OFQ2_BindFramebuffer(uint8_t *fb, int stride) { (void)fb; (void)stride; }
+ void OFQ2_CacheClean(const void *p, uint32_t n) { (void)p; (void)n; }
+ void OFQ2_TexCreate(ofq2_texture_t *t, const void *p, uint16_t w, uint16_t h, uint32_t n)
+@@ -102,12 +105,12 @@
+ 	t->flags = fast_textures ? 1 : 0;
+ 	(void)p; (void)n;
+ }
+-void OFQ2_TexBindDomain(const ofq2_texture_t *t) { (void)t; }
++void OFQ2_TexBindDomain(const ofq2_texture_t *t) { assert(!opaque_scope); (void)t; }
+ void OFQ2_ClearRect(uint8_t *p, int stride, int w, int h, uint8_t c)
+ {
+ 	for (int y = 0; y < h; y++) memset(p + y * stride, c, w);
+ }
+-int OFQ2_SetTriState(const ofq2_tri_state_t *s) { state = *s; return 1; }
++int OFQ2_SetTriState(const ofq2_tri_state_t *s) { assert(!opaque_scope); state = *s; return 1; }
+ static int geometry_draws;
+ static int geometry_uploads;
+ static int geometry_clip_draws, geometry_attempts, geometry_fail_at;
+@@ -169,6 +172,7 @@
+ 
+ int OFQ2_DrawVertTriRGBPacked(const uint32_t words[17])
+ {
++	if (opaque_scope) ++opaque_scoped_draws;
+ 	int16_t x[3], y[3]; int32_t s[3], t[3], zi[3], depth[3]; uint16_t rgb[3];
+ 	for (int i = 0; i < 3; i++)
+ 	{
+@@ -990,6 +994,59 @@
+ 	ofgl_DisableClientState(GL_TEXTURE_COORD_ARRAY);
+ }
+ 
++
++static void test_opaque_alias_scope(void)
++{
++	float positions[3][4] = {{-1,-1,-8,0}, {1,-1,-8,0}, {-1,1,-8,0}};
++	int sources[3] = {0,1,2};
++	GLushort indices[3] = {0,1,2};
++	ofgl_MatrixMode(GL_PROJECTION); ofgl_LoadIdentity();
++	ofgl_Frustumf(-1, 1, -0.75f, 0.75f, 1, 4096);
++	ofgl_MatrixMode(GL_MODELVIEW); ofgl_LoadIdentity();
++	ofgl_Viewport(0,0,320,240);
++	ofgl_EnableClientState(GL_VERTEX_ARRAY);
++	ofgl_DisableClientState(GL_COLOR_ARRAY);
++	ofgl_DisableClientState(GL_TEXTURE_COORD_ARRAY);
++	ofgl_Disable(GL_TEXTURE_2D); ofgl_Disable(GL_BLEND); ofgl_Disable(GL_CULL_FACE);
++	ofgl_Color4f(1,1,1,1);
++	ofgl_bisect_cv->value = 0;
++	int begin = opaque_begin_calls, end = opaque_end_calls, scoped = opaque_scoped_draws;
++	draws = 0;
++	OFGL_DrawAliasElements(sources, sizeof(int), &positions[0][0], indices, 3);
++	assert(draws == 1 && opaque_begin_calls == begin+1 && opaque_end_calls == end+1);
++	assert(opaque_scoped_draws == scoped+1 && !opaque_scope);
++	int16_t saved_x[3], saved_y[3]; int32_t saved_z[3];
++	memcpy(saved_x, triangle_x[0], sizeof saved_x); memcpy(saved_y, triangle_y[0], sizeof saved_y);
++	memcpy(saved_z, triangle_depth[0], sizeof saved_z);
++	// Diagnostic exclusion is an independent path through the same emitter.
++	ofgl_bisect_cv->value = 1; ofgl_dbg_big = 20;
++	draws = 0;
++	OFGL_DrawAliasElements(sources, sizeof(int), &positions[0][0], indices, 3);
++	assert(draws == 1 && opaque_begin_calls == begin+1 && opaque_scoped_draws == scoped+1);
++	assert(!memcmp(saved_x,triangle_x[0],sizeof saved_x));
++	assert(!memcmp(saved_y,triangle_y[0],sizeof saved_y));
++	assert(!memcmp(saved_z,triangle_depth[0],sizeof saved_z));
++	ofgl_bisect_cv->value = 0;
++	ofgl_Enable(GL_BLEND); ofgl_Color4f(1,1,1,0.5f); draws = 0;
++	OFGL_DrawAliasElements(sources, sizeof(int), &positions[0][0], indices, 3);
++	assert(draws == 1 && opaque_begin_calls == begin+1 && alpha_seen[0] == 128);
++	ofgl_Disable(GL_BLEND); ofgl_Color4f(1,1,1,1);
++	// A near-plane crossing expands one source triangle into two; both stay
++	// under the one opaque state and scope, with identical clipping math.
++	positions[0][2] = -0.5f; draws = 0; scoped = opaque_scoped_draws;
++	OFGL_DrawAliasElements(sources, sizeof(int), &positions[0][0], indices, 3);
++	assert(draws >= 2 && opaque_scoped_draws == scoped+draws && !opaque_scope);
++	assert(opaque_begin_calls == begin+2 && opaque_end_calls == end+2);
++	// Completely culled and rejected calls must not leave a held cursor.
++	for (int i=0;i<3;i++) positions[i][2] = 8;
++	draws = 0;
++	OFGL_DrawAliasElements(sources, sizeof(int), &positions[0][0], indices, 3);
++	assert(!draws && !opaque_scope && opaque_begin_calls == begin+3 && opaque_end_calls == end+3);
++	OFGL_DrawAliasElements(NULL, sizeof(int), &positions[0][0], indices, 3);
++	assert(!opaque_scope && opaque_begin_calls == begin+3);
++	ofgl_DisableClientState(GL_VERTEX_ARRAY);
++}
++
+ int main(int argc, char **argv)
+ {
+ 	test_video_modes();
+@@ -1019,6 +1076,7 @@
+ 		test_projection_matrix_cache();
+ 		test_draw_bounds();
+ 		test_hud_compositing();
++		test_opaque_alias_scope();
+ 	}
+ 	ofgl_lm_page(0);
+ 	RI_ShutdownContext();

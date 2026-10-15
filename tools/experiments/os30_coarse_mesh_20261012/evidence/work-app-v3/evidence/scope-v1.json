@@ -1,0 +1,38 @@
+{
+  "status": "PASS_SOURCE_DELTA_ONLY",
+  "predecessor": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v2",
+  "changes": [
+    "src/sm64/sm64/src/pc/gfx/gfx_gpu.c",
+    "src/sm64/pocket/perf_pocket.c"
+  ],
+  "change": "One of_gpu_kick_now after the complete38-word GROUP commit; single-JOB behavior and all cache/admission/ownership/repair code unchanged.",
+  "input_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v2/src/sm64/Makefile": "2d7b9ff942685d414c1d6f4d0767a5c5fa9c111a540840a612dfc03fbbac13f4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v2/src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "d658d6d87219941b2d6b4bc413055bf29c736388031a7942f98c52ed32fb5e25",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v2/src/sm64/sm64/src/pc/gfx/gfx_gpu.h": "8c499dcf1a1202e84f56cc6b89eb69ebe12ebde980ea6056f853db3d09cdd816",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v2/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "3e5df211b1571fab257d1ad4286096c4badd64e4c515428af3f9f6a41041a7df",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v2/src/sm64/sm64/src/pc/gfx/async_mesh_repair.c": "bac8a9d82b9b491b10008312349b1fe078ecae722fc0ce260317c0a778bb3f24",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v2/src/sm64/sm64/src/pc/gfx/async_mesh_repair.h": "0aeb6d69e84a5f5345d62f14227fea76bd2169932ec0a5960a5c3d9b63b530ef",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v2/src/sm64/pocket/perf_pocket.c": "3bd520fa2ecbbe606396541d42f11052ba3c828678623fce75da3da210f37641",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v2/src/sdk/include/of_gpu.h": "7e4b105e444b7307b36010da87749eff445650b6983283eeab9223e6af3dc01d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v2/src/sdk/sdk.mk": "4a9f7779f4cef8c3798e45c1c108d8c6c2b8246fba8d1aa846a89022b0396bd9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v2/src/sdk/app-sdram-staging.ld": "8b490f5d6095d18b94b5e2db98f95b52ed135f162f696e0f6100695447019888",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v2/tools/sdk-container.sh": "a66b9b91844460dcb62764d06233185c075f6cdd80d9d716c06ac230f8dd11a0",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v3/src/sm64/Makefile": "2d7b9ff942685d414c1d6f4d0767a5c5fa9c111a540840a612dfc03fbbac13f4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v3/src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "b4018e719dada1f54c07a2b7beadc114e431c0bfba6624efa159ae64fe89b145",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v3/src/sm64/sm64/src/pc/gfx/gfx_gpu.h": "8c499dcf1a1202e84f56cc6b89eb69ebe12ebde980ea6056f853db3d09cdd816",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v3/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "3e5df211b1571fab257d1ad4286096c4badd64e4c515428af3f9f6a41041a7df",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v3/src/sm64/sm64/src/pc/gfx/async_mesh_repair.c": "bac8a9d82b9b491b10008312349b1fe078ecae722fc0ce260317c0a778bb3f24",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v3/src/sm64/sm64/src/pc/gfx/async_mesh_repair.h": "0aeb6d69e84a5f5345d62f14227fea76bd2169932ec0a5960a5c3d9b63b530ef",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v3/src/sm64/pocket/perf_pocket.c": "83aee0d117c528f6a7d4d50f77efb70cf2bed9bb865d10650685f511863945d3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v3/src/sdk/include/of_gpu.h": "7e4b105e444b7307b36010da87749eff445650b6983283eeab9223e6af3dc01d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v3/src/sdk/sdk.mk": "4a9f7779f4cef8c3798e45c1c108d8c6c2b8246fba8d1aa846a89022b0396bd9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v3/src/sdk/app-sdram-staging.ld": "8b490f5d6095d18b94b5e2db98f95b52ed135f162f696e0f6100695447019888",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v3/tools/sdk-container.sh": "a66b9b91844460dcb62764d06233185c075f6cdd80d9d716c06ac230f8dd11a0"
+  },
+  "tests": {
+    "priority_checks": 277118,
+    "cache_checks": 139255
+  },
+  "no_timing_claim": true
+}

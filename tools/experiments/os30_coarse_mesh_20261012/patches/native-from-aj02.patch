@@ -1,0 +1,501 @@
+--- a/frozen/src/fpga/common/geometry_async_mesh.v
++++ b/frozen/src/fpga/common/geometry_async_mesh.v
+@@ -1,4 +1,4 @@
+-// AJ02: sole raw engine, autonomous ordered mesh jobs, head-only CPU repair.
++// AJ03: sole raw engine, autonomous ordered mesh jobs, head-only CPU repair.
+ module geometry_async_mesh (
+  input wire clk,reset,
+  input wire reg_wr,input wire [9:0] reg_addr,input wire [31:0] reg_wdata,input wire [3:0] reg_wstrb,
+@@ -25,6 +25,15 @@
+  reg lease_pending,lease_granted,lease_release_pending;
+  reg context_open;
+  reg [4:0] context_next;
++ localparam G_IDLE=0,G_FETCH_WAIT=1,G_FETCH=2,G_RESTORE_WAIT=3,G_RESTORE_PRIME=4,G_RESTORE_APPLY=5,G_LAUNCH=6,G_MEMBER=7;
++ reg [2:0] group_state;
++ reg group_active;
++ reg [5:0] group_count,group_index;
++ reg [31:0] group_first_seq,group_pointer,group_vertex;
++ reg [1:0] descriptor_pair_index;
++ reg [4:0] restore_index;
++ wire descriptor_busy,descriptor_done,descriptor_error,descriptor_valid;
++ wire [31:0] descriptor_w0,descriptor_w1;
+  reg [31:0] lease_target,lease_ticket,granted_ticket,epoch;
+  reg repair_pending,repair_end_pending;
+  reg [31:0] repair_token,repair_ack;
+@@ -47,19 +56,37 @@
+  // its JOB before legacy may overwrite the shared matrix/scalar context.
+  wire context_allowed=!output_pending&&!active&&!pending&&!aborting&&!lease_granted&&!stream_busy&&!view_active&&!protocol_error&&!mesh_consumer_reset&&
+    (context_open||(!lease_pending&&!acquire_request));
+- assign mesh_ctx_ready=context_allowed;
+- assign mesh_job_ready=context_allowed&&!mesh_ctx_valid;
++ assign mesh_ctx_ready=context_allowed&&!group_active;
++ assign mesh_job_ready=context_allowed&&!mesh_ctx_valid&&!group_active;
+  wire ctx_take=mesh_ctx_valid&&mesh_ctx_ready;
+  wire ctx_order_good=context_open?(context_next<28&&mesh_ctx_index==context_next):(mesh_ctx_index==0);
+  wire job_take=mesh_job_valid&&mesh_job_ready;
++ wire group_request=mesh_job_control[31];
++ wire group_take=job_take&&group_request;
++ wire group_idle_raw=!output_pending&&!active&&!pending&&!aborting&&!lease_granted&&!lease_pending&&!acquire_request&&stream_raw_ready&&!view_active&&!protocol_error&&!mesh_consumer_reset;
++ wire descriptor_start=group_active&&group_state==G_FETCH_WAIT&&group_idle_raw&&!context_open;
++ wire descriptor_pair_take=group_active&&group_state==G_FETCH&&descriptor_valid&&!mesh_consumer_reset;
++ wire restore_begin=group_active&&group_state==G_RESTORE_WAIT&&group_idle_raw&&!context_open;
++ wire restore_apply=group_active&&group_state==G_RESTORE_APPLY&&!mesh_consumer_reset;
++ wire member_take=(job_take&&!group_request)||(group_active&&group_state==G_LAUNCH&&context_allowed);
++ wire [31:0] member_seq=group_active?group_first_seq+{26'b0,group_index}:mesh_job_seq;
++ wire [31:0] member_vertex=group_active?group_vertex:mesh_job_vertex;
++ wire [31:0] member_vtx_w0=group_active?vtx_w0:mesh_job_vtx_w0;
++ wire [31:0] member_commands=group_active?command_source:mesh_job_commands;
++ wire [31:0] member_control=group_active?configuration:mesh_job_control;
++ wire [31:0] member_cpu_vertex=group_active?cpu_vertex:mesh_job_cpu_vertex;
++ wire [31:0] member_cpu_commands=group_active?cpu_commands:mesh_job_cpu_commands;
++ wire context_apply=(ctx_take&&ctx_order_good)||restore_apply;
++ wire [4:0] context_apply_index=restore_apply?restore_index:mesh_ctx_index;
++ wire [31:0] context_apply_data=restore_apply?view_read_data:mesh_ctx_data;
+  wire legacy_write=full_write&&lease_granted&&!active&&!pending&&!aborting;
+  wire old_start=legacy_write&&reg_addr==10'h002&&reg_wdata[0];
+  wire task_start=pending&&!view_active&&stream_ready&&!aborting&&!(mesh_consumer_reset&&!legacy);
+  assign raw_start=task_start;
+  wire matrix_legacy=legacy_write&&reg_addr[9:4]==6'h04;
+- wire matrix_we=matrix_legacy||(ctx_take&&ctx_order_good&&mesh_ctx_index<16);
+- wire [3:0] matrix_addr=matrix_legacy?reg_addr[3:0]:mesh_ctx_index[3:0];
+- wire [31:0] matrix_data=matrix_legacy?reg_wdata:mesh_ctx_data;
++ wire matrix_we=matrix_legacy||(context_apply&&context_apply_index<16);
++ wire [3:0] matrix_addr=matrix_legacy?reg_addr[3:0]:context_apply_index[3:0];
++ wire [31:0] matrix_data=matrix_legacy?reg_wdata:context_apply_data;
+  wire consumer_cancel=mesh_consumer_reset;
+  wire validate_start=active&&!legacy&&preflight&&live_count!=0&&!repair_pending&&!validation_started&&!packet_busy&&!view_active&&!aborting;
+  wire publish_start=output_pending&&packet_validated&&!packet_published&&!repair_pending&&!view_active&&!aborting;
+@@ -74,14 +101,27 @@
+    (repair_pending&&repair_end_pending&&!view_active)||
+    (aborting&&fallback&&!fetch_busy);
+  wire alias_allowed=(lease_granted&&!active&&!pending)||(repair_pending&&!repair_end_pending&&!aborting);
+- assign view_block=!alias_allowed||old_start||task_start||job_take;
+- wire matrix_diag=repair_pending&&repair_index<16&&!view_active&&!repair_end_pending;
+- wire [7:0] stream_view_addr=matrix_diag?{4'b0,repair_index[3:0]}:view_read_addr;
+- wire bad_job=!context_open||context_next!=28||!(&matrix_valid)||mesh_job_seq==0||mesh_job_seq==completed_serial||mesh_job_control[31:10]!=0||mesh_job_control[7]||
+-  mesh_job_control[6:0]==0||mesh_job_control[6:0]>64||mesh_job_flags[31:19]!=0||mesh_job_alpha>255||
+-  mesh_job_vtx_w0[7:1]!={1'b0,mesh_job_vtx_w0[17:12]};
+- geometry_mesh_stream #(.SOURCE_MIN_ADDRESS(32'h00000000),.SOURCE_END_ADDRESS(33'h001000000)) mesh(
+-  .clk(clk),.reset(reset),.cancel(aborting),.consumer_reset(consumer_cancel),.matrix_diag_read(matrix_diag),
++ assign view_block=!alias_allowed||old_start||task_start||member_take||descriptor_busy;
++ wire restore_read=group_active&&(group_state==G_RESTORE_PRIME||group_state==G_RESTORE_APPLY);
++ wire matrix_diag=restore_read||(repair_pending&&repair_index<16&&!view_active&&!repair_end_pending);
++ wire [7:0] stream_view_addr=restore_read?{3'b0,restore_index}:matrix_diag?{4'b0,repair_index[3:0]}:view_read_addr;
++ wire bad_job=!context_open||context_next!=28||!(&matrix_valid)||member_seq==0||member_seq==completed_serial||member_control[31:10]!=0||member_control[7]||
++  member_control[6:0]==0||member_control[6:0]>64||(group_active?flags_rgb[31:19]:mesh_job_flags[31:19])!=0||
++  (group_active?alpha:mesh_job_alpha)>255||member_vtx_w0[7:1]!={1'b0,member_vtx_w0[17:12]};
++ wire [32:0] group_last_seq={1'b0,mesh_job_seq}+{1'b0,mesh_job_vtx_w0}-1'b1;
++ wire [32:0] group_source_end={1'b0,mesh_job_vertex}+({1'b0,mesh_job_vtx_w0}<<4)+({1'b0,mesh_job_vtx_w0}<<3);
++ wire bad_group=!context_open||context_next!=28||!(&matrix_valid)||mesh_job_seq==0||mesh_job_seq==completed_serial||
++  mesh_job_control!=32'h80000000||mesh_job_vtx_w0==0||mesh_job_vtx_w0>32||group_last_seq[32]||
++  (|mesh_job_vertex[2:0])||group_source_end>33'h001000000||mesh_job_flags[31:19]!=0||mesh_job_alpha>255;
++ wire member_complete=(stream_done&&!legacy&&!snapshot_detached&&!aborting&&!mesh_consumer_reset)||
++  (output_pending&&packet_done&&packet_published&&!packet_error&&!mesh_consumer_reset);
++ wire final_member=!group_active||group_index+1'b1==group_count;
++ geometry_mesh_stream #(.GROUP_SUPPORT(1),.SOURCE_MIN_ADDRESS(32'h00000000),.SOURCE_END_ADDRESS(33'h001000000)) mesh(
++   .clk(clk),.reset(reset),.cancel(aborting),.consumer_reset(consumer_cancel),.matrix_diag_read(matrix_diag),
++  .shadow_we(ctx_take&&ctx_order_good),.shadow_addr(mesh_ctx_index),.shadow_data(mesh_ctx_data),
++  .descriptor_start(descriptor_start),.descriptor_source(group_pointer),.descriptor_busy(descriptor_busy),
++  .descriptor_done(descriptor_done),.descriptor_error(descriptor_error),.descriptor_valid(descriptor_valid),
++  .descriptor_ready(group_state==G_FETCH&&!mesh_consumer_reset),.descriptor_w0(descriptor_w0),.descriptor_w1(descriptor_w1),
+   .task_valid(task_start),.task_load_only(legacy),.task_ready(stream_ready),.raw_ready(stream_raw_ready),.task_serial(descriptor_serial),
+   .task_vtx_w0(legacy?(32'h01000000|({26'b0,count}<<12)|({26'b0,count}<<1)):vtx_w0),
+   .task_vtx_w1(source_base),.task_command_count(legacy?7'b0:configuration[6:0]),.task_cull_mode(configuration[9:8]),
+@@ -117,7 +157,7 @@
+   case(reg_addr)
+    10'h000:reg_rdata=32'h4c4f4405;
+    10'h001:reg_rdata={23'b0,&matrix_valid,config_error,dma_error,all_inside,unsupported,success,completed,active};
+-   10'h020:reg_rdata=32'h414a3032;
++   10'h020:reg_rdata=32'h414a3033;
+    10'h021:reg_rdata={25'b0,repair_ready,success,lease_granted,lease_pending,mesh_job_fault,repair_pending,active&&!legacy};
+    10'h022:reg_rdata=descriptor_serial;10'h023:reg_rdata=completed_serial;
+    10'h024:reg_rdata={23'b0,success,4'b0,(packet_error?4'd12:reason)};
+@@ -133,6 +173,7 @@
+    output_pending<=0;snapshot_detached<=0;output_serial<=0;
+    active<=0;pending<=0;legacy<=0;completed<=0;success<=0;config_error<=0;aborting<=0;protocol_error<=0;raw_seen<=0;validation_started<=0;
+    descriptor_serial<=0;vtx_w0<=0;command_source<=0;configuration<=0;flags_rgb<=0;uofs<=0;vofs<=0;cpu_vertex<=0;cpu_commands<=0;alpha<=0;completed_serial<=0;
++   group_state<=G_IDLE;group_active<=0;group_count<=0;group_index<=0;group_first_seq<=0;group_pointer<=0;group_vertex<=0;descriptor_pair_index<=0;restore_index<=0;
+    context_open<=0;context_next<=0;lease_pending<=0;lease_granted<=0;lease_release_pending<=0;lease_target<=0;lease_ticket<=0;granted_ticket<=0;epoch<=0;
+    repair_pending<=0;repair_end_pending<=0;repair_token<=0;repair_ack<=0;repair_index<=0;
+    view_valid<=0;view_count<=0;mesh_job_done<=0;
+@@ -151,12 +192,12 @@
+    if(stream_done)begin
+     active<=0;pending<=0;aborting<=0;repair_pending<=0;repair_end_pending<=0;
+     if(!legacy&&!snapshot_detached&&!aborting&&!mesh_consumer_reset)begin
+-     completed_serial<=output_serial;mesh_job_done<=1;output_pending<=0;validation_started<=0;
++     completed_serial<=output_serial;mesh_job_done<=final_member;output_pending<=0;validation_started<=0;
+     end
+     if(!raw_seen)completed<=1;
+    end
+    if(output_pending&&packet_done&&packet_published&&!packet_error&&!mesh_consumer_reset)begin
+-    completed_serial<=output_serial;mesh_job_done<=1;output_pending<=0;validation_started<=0;
++    completed_serial<=output_serial;mesh_job_done<=final_member;output_pending<=0;validation_started<=0;
+     // Do not alter active/legacy/completed/success/view: a newer CPU LOAD may own them.
+    end
+    if(lease_pending&&!context_open&&!active&&!pending&&stream_raw_ready&&!view_active&&!aborting&&!protocol_error&&!mesh_bridge_fault&&!mesh_consumer_reset)begin
+@@ -182,15 +223,15 @@
+     endcase
+    end
+    if(ctx_take&&!ctx_order_good)protocol_error<=1;
+-   if(ctx_take&&ctx_order_good)begin
+-    context_open<=1;context_next<=mesh_ctx_index+1'b1;
+-    if(mesh_ctx_index<16)matrix_valid[mesh_ctx_index[3:0]]<=1;
+-    else case(mesh_ctx_index)
+-     16:aspect<=mesh_ctx_data;17:cx<=mesh_ctx_data;18:cy<=mesh_ctx_data;19:cz<=mesh_ctx_data;
+-     20:ambient<=mesh_ctx_data[23:0];21:diffuse<=mesh_ctx_data[23:0];
+-     22:begin scale_u<=mesh_ctx_data[15:0];scale_v<=mesh_ctx_data[31:16];end
+-     23:begin lit<=mesh_ctx_data[0];if(mesh_ctx_data>1)protocol_error<=1;end
+-     24:projection_cx<=mesh_ctx_data;25:projection_cy<=mesh_ctx_data;26:projection_hw<=mesh_ctx_data;27:projection_hh<=mesh_ctx_data;
++   if(context_apply)begin
++    context_open<=1;context_next<=context_apply_index+1'b1;
++    if(context_apply_index<16)matrix_valid[context_apply_index[3:0]]<=1;
++    else case(context_apply_index)
++     16:aspect<=context_apply_data;17:cx<=context_apply_data;18:cy<=context_apply_data;19:cz<=context_apply_data;
++     20:ambient<=context_apply_data[23:0];21:diffuse<=context_apply_data[23:0];
++     22:begin scale_u<=context_apply_data[15:0];scale_v<=context_apply_data[31:16];end
++     23:begin lit<=context_apply_data[0];if(context_apply_data>1)protocol_error<=1;end
++     24:projection_cx<=context_apply_data;25:projection_cy<=context_apply_data;26:projection_hw<=context_apply_data;27:projection_hh<=context_apply_data;
+      default:protocol_error<=1;
+     endcase
+    end
+@@ -203,21 +244,56 @@
+      12:lit<=reg_wdata[0];default:;
+     endcase
+    end
+-   if(job_take||old_start)begin
++   if(group_take)begin
++    context_open<=0;context_next<=0;
++    if(bad_group)protocol_error<=1;
++    else begin
++     group_active<=1;group_state<=G_FETCH_WAIT;group_count<=mesh_job_vtx_w0[5:0];group_index<=0;
++     group_first_seq<=mesh_job_seq;group_pointer<=mesh_job_vertex;
++     flags_rgb<=mesh_job_flags;uofs<=mesh_job_uofs;vofs<=mesh_job_vofs;alpha<=mesh_job_alpha;
++    end
++   end
++   if(descriptor_start)begin group_state<=G_FETCH;descriptor_pair_index<=0;end
++   if(descriptor_pair_take)begin
++    case(descriptor_pair_index)
++     0:begin group_vertex<=descriptor_w0;vtx_w0<=descriptor_w1;end
++     1:begin command_source<=descriptor_w0;configuration<=descriptor_w1;end
++     2:begin cpu_vertex<=descriptor_w0;cpu_commands<=descriptor_w1;end
++     default:protocol_error<=1;
++    endcase
++    descriptor_pair_index<=descriptor_pair_index+1'b1;
++   end
++   if(group_active&&group_state==G_FETCH&&descriptor_done)begin
++    if(descriptor_error||descriptor_pair_index!=3)protocol_error<=1;
++    else group_state<=G_RESTORE_WAIT;
++   end
++   if(restore_begin)begin context_open<=1;context_next<=0;restore_index<=0;group_state<=G_RESTORE_PRIME;end
++   if(group_active&&group_state==G_RESTORE_PRIME)group_state<=G_RESTORE_APPLY;
++   if(restore_apply)begin
++    if(restore_index==27)group_state<=G_LAUNCH;
++    else begin restore_index<=restore_index+1'b1;group_state<=G_RESTORE_PRIME;end
++   end
++   if(member_complete&&group_active)begin
++    if(final_member)begin group_active<=0;group_state<=G_IDLE;end
++    else begin group_index<=group_index+1'b1;group_pointer<=group_pointer+24;group_state<=G_FETCH_WAIT;end
++   end
++   if(member_take||old_start)begin
+     legacy<=old_start;completed<=0;success<=0;raw_seen<=0;view_valid<=0;view_count<=0;validation_started<=0;
+     repair_pending<=0;repair_end_pending<=0;aborting<=0;config_error<=!(&matrix_valid);
+-    if(job_take)begin
+-     context_open<=0;context_next<=0;output_pending<=1;snapshot_detached<=0;output_serial<=mesh_job_seq;
+-     descriptor_serial<=mesh_job_seq;source_base<=mesh_job_vertex;vtx_w0<=mesh_job_vtx_w0;command_source<=mesh_job_commands;
+-     configuration<=mesh_job_control;flags_rgb<=mesh_job_flags;uofs<=mesh_job_uofs;vofs<=mesh_job_vofs;
+-     cpu_vertex<=mesh_job_cpu_vertex;cpu_commands<=mesh_job_cpu_commands;alpha<=mesh_job_alpha;
++    if(member_take)begin
++     context_open<=0;context_next<=0;output_pending<=1;snapshot_detached<=0;output_serial<=member_seq;
++     descriptor_serial<=member_seq;source_base<=member_vertex;vtx_w0<=member_vtx_w0;command_source<=member_commands;
++     configuration<=member_control;cpu_vertex<=member_cpu_vertex;cpu_commands<=member_cpu_commands;
++     if(group_active)group_state<=G_MEMBER;
++     else begin flags_rgb<=mesh_job_flags;uofs<=mesh_job_uofs;vofs<=mesh_job_vofs;alpha<=mesh_job_alpha;end
+     end
+-    if(job_take&&bad_job)begin protocol_error<=1;active<=0;pending<=0;output_pending<=0;end
++    if(member_take&&bad_job)begin protocol_error<=1;active<=0;pending<=0;output_pending<=0;end
+     else if(old_start&&!(&matrix_valid))begin completed<=1;active<=0;pending<=0;end
+     else begin active<=1;pending<=1;end
+    end
+    if(mesh_consumer_reset)begin
+     epoch<=epoch+1'b1;repair_token<=repair_token+1'b1;protocol_error<=0;repair_pending<=0;repair_end_pending<=0;
++    group_active<=0;group_state<=G_IDLE;
+     completed_serial<=0;lease_pending<=0;context_open<=0;context_next<=0;output_pending<=0;snapshot_detached<=0;validation_started<=0;
+     if(active&&!legacy)begin aborting<=1;pending<=0;end
+     // A granted legacy lease belongs to CPU raw DMA, not the GPU consumer.
+@@ -227,6 +303,8 @@
+  end
+ `ifndef SYNTHESIS
+  always @(posedge clk)if(!reset&&!mesh_consumer_reset)begin
++  if(restore_apply&&lease_granted)$fatal(1,"AJ03 restore under legacy ownership");
++  if(descriptor_start&&lease_granted)$fatal(1,"AJ03 descriptor fetch under legacy ownership");
+   if(lease_granted&&context_open)$fatal(1,"AJ02 lease interrupted context");
+   if(lease_granted&&active&&!legacy)$fatal(1,"AJ02 lease interrupted async raw owner");
+   if(lease_granted&&output_pending&&!snapshot_detached)$fatal(1,"AJ02 lease before immutable snapshot");
+--- a/frozen/src/fpga/common/geometry_mesh_raw_frontend.v
++++ b/frozen/src/fpga/common/geometry_mesh_raw_frontend.v
+@@ -1,11 +1,12 @@
+ // Private LOAD + exact cull integration. Original vertex DMA, transform,
+ // lighting and triangle culling share the baseline FMA and raw memories. This is not
+ // yet the command-ring/RUN/legacy-packet frontend. Results require valid_slots.
+-module geometry_mesh_raw_frontend #(parameter EXTERNAL_FMA=0,parameter CAPTURE_CONTEXT=1,parameter USE_OWNERSHIP=0,parameter ENABLE_INVALIDATE=0,parameter EXTERNAL_DMA=0,
++module geometry_mesh_raw_frontend #(parameter CONTEXT_SHADOW=0,parameter EXTERNAL_FMA=0,parameter CAPTURE_CONTEXT=1,parameter USE_OWNERSHIP=0,parameter ENABLE_INVALIDATE=0,parameter EXTERNAL_DMA=0,
+  parameter [31:0] SOURCE_MIN_ADDRESS=32'h10000000,
+  parameter [32:0] SOURCE_END_ADDRESS=33'h014000000) (
+  input wire clk,reset,
+  input wire matrix_diag_read,
++ input wire shadow_we,input wire [4:0] shadow_addr,input wire [31:0] shadow_data,
+  input wire slot_invalidate,input wire [31:0] invalidate_mask,
+  input wire matrix_we,input wire [3:0] matrix_addr,input wire [31:0] matrix_data,
+  input wire start,input wire [31:0] job_base,input wire [5:0] count,input wire [4:0] dest,
+@@ -69,9 +70,10 @@
+  wire [1:0] c_reject;
+  wire [5:0] c_clip;
+  wire [31:0] c_cross;
+- geometry_raw_load #(.EXTERNAL_FMA(1),.CAPTURE_CONTEXT(CAPTURE_CONTEXT),.ENABLE_INVALIDATE(ENABLE_INVALIDATE),.EXTERNAL_DMA(EXTERNAL_DMA),
++ geometry_raw_load #(.CONTEXT_SHADOW(CONTEXT_SHADOW),.EXTERNAL_FMA(1),.CAPTURE_CONTEXT(CAPTURE_CONTEXT),.ENABLE_INVALIDATE(ENABLE_INVALIDATE),.EXTERNAL_DMA(EXTERNAL_DMA),
+   .SOURCE_MIN_ADDRESS(SOURCE_MIN_ADDRESS),.SOURCE_END_ADDRESS(SOURCE_END_ADDRESS)) raw (
+-  .clk(clk),.reset(reset),.matrix_diag_read(matrix_diag_read),.matrix_we(matrix_we&&idle),.matrix_addr(matrix_addr),.matrix_data(matrix_data),
++  .clk(clk),.reset(reset),.matrix_diag_read(matrix_diag_read),
++  .shadow_we(shadow_we&&idle),.shadow_addr(shadow_addr),.shadow_data(shadow_data),.matrix_we(matrix_we&&idle),.matrix_addr(matrix_addr),.matrix_data(matrix_data),
+   .slot_invalidate(slot_invalidate&&idle&&!raw_busy),.invalidate_mask(invalidate_mask),
+   .start(start&&idle),.job_base(job_base),.count(count),.dest(dest),
+   .aspect(aspect),.coefficient_x(coefficient_x),.coefficient_y(coefficient_y),.coefficient_z(coefficient_z),
+--- a/frozen/src/fpga/common/geometry_mesh_stream.v
++++ b/frozen/src/fpga/common/geometry_mesh_stream.v
+@@ -7,12 +7,16 @@
+ // VALIDATE runs a complete no-output pass; publication waits the matching ring marker.
+ // Ordinary cancel after publication is ignored. consumer_reset discards the packet
+ // together with its GPU consumer, while the raw master and command fetch drain.
+-module geometry_mesh_stream #(
++module geometry_mesh_stream #(parameter GROUP_SUPPORT=0,
+  parameter [31:0] SOURCE_MIN_ADDRESS=32'h10000000,
+  parameter [32:0] SOURCE_END_ADDRESS=33'h014000000
+ )(
+  input wire clk,reset,cancel,consumer_reset,
+  input wire matrix_diag_read,
++ input wire shadow_we,input wire [4:0] shadow_addr,input wire [31:0] shadow_data,
++ input wire descriptor_start,input wire [31:0] descriptor_source,
++ output wire descriptor_busy,descriptor_done,descriptor_error,descriptor_valid,
++ input wire descriptor_ready,output wire [31:0] descriptor_w0,descriptor_w1,
+  input wire task_valid,task_load_only,output wire task_ready,output wire raw_ready,
+  input wire [31:0] task_serial,task_vtx_w0,task_vtx_w1,
+  input wire [6:0] task_command_count,input wire [1:0] task_cull_mode,
+@@ -44,12 +48,23 @@
+  wire command_valid,command_ready;wire [31:0] command_w0,command_w1;
+  wire raw_arvalid,raw_rready;wire [31:0] raw_araddr;wire [7:0] raw_arlen;
+  wire fetch_arvalid,fetch_rready,fetch_done;wire [31:0] fetch_araddr;wire [7:0] fetch_arlen;
++ reg descriptor_owner;
++ wire descriptor_begin=GROUP_SUPPORT&&descriptor_start;
++ wire fetch_selected=fetch_started||descriptor_owner;
+  reg fetch_started,validation_started,publication_started,packet_complete,engine_load_only;
+  wire packet_store_we,packet_raw_read_active;
+  wire [8:0] packet_store_addr;
+  wire [15:0] packet_store_wdata,packet_store_rdata;
+  reg [31:0] command_source;reg [6:0] command_count;
+- wire fetch_start=engine_busy&&command_ready&&!fetch_started&&!cancel;
++ wire fetch_start=engine_busy&&command_ready&&!fetch_started&&!descriptor_owner&&!cancel;
++ wire fetch_command_valid;wire [31:0] fetch_w0,fetch_w1;
++ assign descriptor_busy=descriptor_owner||descriptor_begin;
++ assign descriptor_done=descriptor_owner&&fetch_done;
++ assign descriptor_error=descriptor_owner&&fetch_error;
++ assign descriptor_valid=descriptor_owner&&fetch_command_valid;
++ assign descriptor_w0=fetch_w0;assign descriptor_w1=fetch_w1;
++ assign command_valid=fetch_command_valid&&!descriptor_owner;
++ assign command_w0=fetch_w0;assign command_w1=fetch_w1;
+  wire packet_take=packet_validate&&preflight_valid&&!validation_started&&!cancel&&!consumer_reset;
+  wire publish_take=packet_publish&&packet_validated&&!publication_started&&!consumer_reset;
+  // Validation snapshots all converted vertices into the survivor M10K.
+@@ -60,21 +75,23 @@
+  wire safe_ack=task_ack&&!fetch_busy&&(engine_load_only||!packet_busy||packet_snapshot_valid);
+  wire packet_reset=reset||consumer_reset||
+    ((cancel||safe_ack)&&!packet_snapshot_valid);
+- assign raw_ready=engine_ready&&!fetch_busy&&!cancel;
+- assign task_ready=raw_ready&&(!packet_busy||task_load_only);
+- assign busy=engine_busy||fetch_busy||packet_busy;
++ assign raw_ready=engine_ready&&!fetch_busy&&!descriptor_owner&&!cancel;
++ assign task_ready=raw_ready&&!descriptor_begin&&(!packet_busy||task_load_only);
++ assign busy=engine_busy||fetch_busy||descriptor_owner||packet_busy;
+  assign preflight_valid=engine_preflight&&!fetch_busy&&!fetch_error;
+  assign fallback_valid=engine_fallback&&!fetch_busy&&(engine_load_only||!packet_busy);
+  assign fallback_reason=fetch_started&&fetch_error?4'd3:engine_reason;
+  assign done=engine_done;
+- assign m_arvalid=fetch_started?fetch_arvalid:raw_arvalid;
+- assign m_araddr=fetch_started?fetch_araddr:raw_araddr;
+- assign m_arlen=fetch_started?fetch_arlen:raw_arlen;
+- assign m_rready=fetch_started?fetch_rready:raw_rready;
++ assign m_arvalid=fetch_selected?fetch_arvalid:raw_arvalid;
++ assign m_araddr=fetch_selected?fetch_araddr:raw_araddr;
++ assign m_arlen=fetch_selected?fetch_arlen:raw_arlen;
++ assign m_rready=fetch_selected?fetch_rready:raw_rready;
+  wire [7:0] packet_view_addr;wire [5:0] packet_list_addr;
+  always @(posedge clk)begin
+-  if(reset)begin fetch_started<=0;validation_started<=0;publication_started<=0;packet_complete<=0;engine_load_only<=0;command_source<=0;command_count<=0;end
++  if(reset)begin descriptor_owner<=0;fetch_started<=0;validation_started<=0;publication_started<=0;packet_complete<=0;engine_load_only<=0;command_source<=0;command_count<=0;end
+   else begin
++   if(descriptor_begin)descriptor_owner<=1;
++   if(descriptor_owner&&fetch_done)descriptor_owner<=0;
+    if(task_valid&&task_ready)begin
+     fetch_started<=0;engine_load_only<=task_load_only;
+     if(!task_load_only)begin validation_started<=0;publication_started<=0;packet_complete<=0;end
+@@ -88,16 +105,18 @@
+    if(engine_done)fetch_started<=0;
+   end
+  end
+- geometry_mesh_command_fetch #(.SOURCE_MIN_ADDRESS(SOURCE_MIN_ADDRESS),.SOURCE_END_ADDRESS(SOURCE_END_ADDRESS)) fetch(.clk(clk),.reset(reset),.start(fetch_start),
+-  .cancel(engine_cancel||engine_fallback),.source(command_source),.count(command_count),
++ geometry_mesh_command_fetch #(.SOURCE_MIN_ADDRESS(SOURCE_MIN_ADDRESS),.SOURCE_END_ADDRESS(SOURCE_END_ADDRESS)) fetch(.clk(clk),.reset(reset),.start(fetch_start||descriptor_begin),
++  .cancel(descriptor_owner?(cancel||consumer_reset):(engine_cancel||engine_fallback)),
++  .source(descriptor_begin?descriptor_source:command_source),.count(descriptor_begin?7'd3:command_count),
+   .busy(fetch_busy),.done(fetch_done),.error(fetch_error),
+-  .command_valid(command_valid),.command_ready(command_ready),.command_w0(command_w0),.command_w1(command_w1),
+-  .m_arvalid(fetch_arvalid),.m_arready(m_arready&&fetch_started),.m_araddr(fetch_araddr),.m_arlen(fetch_arlen),
+-  .m_rvalid(m_rvalid&&fetch_started),.m_rready(fetch_rready),.m_rdata(m_rdata),.m_rresp(m_rresp),.m_rlast(m_rlast));
+- geometry_mesh_task_engine #(.SOURCE_MIN_ADDRESS(SOURCE_MIN_ADDRESS),.SOURCE_END_ADDRESS(SOURCE_END_ADDRESS)) engine(
++  .command_valid(fetch_command_valid),.command_ready(descriptor_owner?descriptor_ready:command_ready),.command_w0(fetch_w0),.command_w1(fetch_w1),
++  .m_arvalid(fetch_arvalid),.m_arready(m_arready&&fetch_selected),.m_araddr(fetch_araddr),.m_arlen(fetch_arlen),
++  .m_rvalid(m_rvalid&&fetch_selected),.m_rready(fetch_rready),.m_rdata(m_rdata),.m_rresp(m_rresp),.m_rlast(m_rlast));
++ geometry_mesh_task_engine #(.CONTEXT_SHADOW(GROUP_SUPPORT),.SOURCE_MIN_ADDRESS(SOURCE_MIN_ADDRESS),.SOURCE_END_ADDRESS(SOURCE_END_ADDRESS)) engine(
+   .clk(clk),
+   .reset(reset),
+   .cancel(engine_cancel),.matrix_diag_read(matrix_diag_read&&!packet_owned),
++  .shadow_we(shadow_we),.shadow_addr(shadow_addr),.shadow_data(shadow_data),
+   .task_valid(task_valid&&task_ready),
+   .task_load_only(task_load_only),
+   .task_ready(engine_ready),
+@@ -124,10 +143,10 @@
+   .scale_u(scale_u),
+   .scale_v(scale_v),
+   .m_arvalid(raw_arvalid),
+-  .m_arready(m_arready&&!fetch_started),
++  .m_arready(m_arready&&!fetch_selected),
+   .m_araddr(raw_araddr),
+   .m_arlen(raw_arlen),
+-  .m_rvalid(m_rvalid&&!fetch_started),
++  .m_rvalid(m_rvalid&&!fetch_selected),
+   .m_rready(raw_rready),
+   .m_rdata(m_rdata),
+   .m_rresp(m_rresp),
+--- a/frozen/src/fpga/common/geometry_mesh_task_engine.v
++++ b/frozen/src/fpga/common/geometry_mesh_task_engine.v
+@@ -5,12 +5,13 @@
+ // Scalar context is latched at task acceptance. Matrix writes are accepted
+ // only while task_ready and task_valid==0; sixteen initialized words are needed.
+ // reset is FABRIC reset, shared with AXI responder. cancel never resets DMA.
+-module geometry_mesh_task_engine #(
++module geometry_mesh_task_engine #(parameter CONTEXT_SHADOW=0,
+  parameter [31:0] SOURCE_MIN_ADDRESS=32'h10000000,
+  parameter [32:0] SOURCE_END_ADDRESS=33'h014000000
+ )(
+  input wire clk,reset,cancel,
+  input wire matrix_diag_read,
++ input wire shadow_we,input wire [4:0] shadow_addr,input wire [31:0] shadow_data,
+  input wire task_valid,task_load_only,output wire task_ready,
+  input wire [31:0] task_serial,task_vtx_w0,task_vtx_w1,
+  input wire [6:0] task_command_count,input wire [1:0] task_cull_mode,
+@@ -82,9 +83,10 @@
+   .fallback_valid(fallback_valid),.fallback_reason(fallback_reason),.serial(serial),.owned_mask(owned_mask),.used_mask(used_mask),
+   .live_count(live_count),.checked_count(checked_count),.clip_rejected(clip_rejected),.cull_rejected(cull_rejected),
+   .task_ack(task_ack),.ack_serial(ack_serial),.done(done));
+- geometry_mesh_raw_frontend #(.CAPTURE_CONTEXT(0),.USE_OWNERSHIP(1),
++ geometry_mesh_raw_frontend #(.CONTEXT_SHADOW(CONTEXT_SHADOW),.CAPTURE_CONTEXT(0),.USE_OWNERSHIP(1),
+   .SOURCE_MIN_ADDRESS(SOURCE_MIN_ADDRESS),.SOURCE_END_ADDRESS(SOURCE_END_ADDRESS)) frontend(
+-  .clk(clk),.reset(reset),.matrix_diag_read(matrix_diag_read),.slot_invalidate(1'b0),.invalidate_mask(32'b0),
++  .clk(clk),.reset(reset),.matrix_diag_read(matrix_diag_read),
++  .shadow_we(shadow_we&&c_task_ready&&!task_valid),.shadow_addr(shadow_addr),.shadow_data(shadow_data),.slot_invalidate(1'b0),.invalidate_mask(32'b0),
+   .matrix_we(matrix_we&&c_task_ready&&!task_valid),.matrix_addr(matrix_addr),.matrix_data(matrix_data),
+   .start(load_start),.job_base(load_base),.count(load_count),.dest(load_dest),
+   .aspect(held_aspect),.coefficient_x(held_cx),.coefficient_y(held_cy),.coefficient_z(held_cz),
+--- a/frozen/src/fpga/common/geometry_raw_load.v
++++ b/frozen/src/fpga/common/geometry_raw_load.v
+@@ -4,11 +4,12 @@
+ // row7=clip mask. Successful LOADs replace only dest..dest+count-1.
+ // Fog alpha, texture generation, RUN submission and
+ // integration with the CPU/GPU/fabric are explicitly outside this component.
+-module geometry_raw_load #(parameter EXTERNAL_FMA=0,parameter CAPTURE_CONTEXT=1,parameter ENABLE_INVALIDATE=0,parameter EXTERNAL_DMA=0,
++module geometry_raw_load #(parameter CONTEXT_SHADOW=0,parameter EXTERNAL_FMA=0,parameter CAPTURE_CONTEXT=1,parameter ENABLE_INVALIDATE=0,parameter EXTERNAL_DMA=0,
+  parameter [31:0] SOURCE_MIN_ADDRESS=32'h10000000,
+  parameter [32:0] SOURCE_END_ADDRESS=33'h014000000) (
+  input wire clk,reset,
+  input wire matrix_diag_read,
++ input wire shadow_we,input wire [4:0] shadow_addr,input wire [31:0] shadow_data,
+  input wire slot_invalidate,input wire [31:0] invalidate_mask,
+  input wire matrix_we,input wire [3:0] matrix_addr,input wire [31:0] matrix_data,
+  input wire start,input wire [31:0] job_base,input wire [5:0] count,input wire [4:0] dest,
+@@ -154,7 +155,10 @@
+  end
+  always @*begin
+   attribute_write_address=0;attribute_write_data=0;attribute_write_bytes=0;
+-  if(matrix_we&&!busy)begin
++  if(CONTEXT_SHADOW&&shadow_we&&!busy)begin
++   attribute_write_address={2'b11,shadow_addr};
++   attribute_write_data=shadow_data;attribute_write_bytes=4'b1111;
++  end else if(!CONTEXT_SHADOW&&matrix_we&&!busy)begin
+    attribute_write_address={3'b110,matrix_addr};
+    attribute_write_data=matrix_data;attribute_write_bytes=4'b1111;
+   end else if(word_valid && raw_word==4)begin
+--- a/frozen/src/fpga/common/gpu_mesh_job_front.v
++++ b/frozen/src/fpga/common/gpu_mesh_job_front.v
+@@ -1,4 +1,4 @@
+-// AJ02 ordered context/job expansion. One producer, one ordinary output FIFO.
++// AJ03 ordered context/job expansion. One producer, one ordinary output FIFO.
+ `default_nettype none
+ module gpu_mesh_job_front #(parameter ADDR_BITS=12, parameter QUEUE_BITS=9)(
+  input wire clk,reset_n,enable,soft_reset,ring_reset,
+@@ -22,7 +22,7 @@
+  reg [31:0] header;
+  reg [12:0] remaining;
+  reg [4:0] context_index;
+- reg context_pending;
++ reg context_pending,group_fields;
+  (* ramstyle="M10K, no_rw_check" *) reg [31:0] queue[0:(1<<QUEUE_BITS)-1];
+  wire input_empty=input_rdptr==input_wrptr;
+  wire [ADDR_BITS-1:0] used=output_wrptr-output_rdptr;
+@@ -50,7 +50,7 @@
+  always @(posedge clk)begin
+   if(!reset_n||soft_reset||ring_reset)begin
+    input_rdptr<=(reset_n&&soft_reset&&!ring_reset)?input_wrptr:0;
+-   output_wrptr<=0;context_pending<=0;state<=HEADER;field_index<=0;header<=0;remaining<=0;context_index<=0;fault<=0;
++   output_wrptr<=0;context_pending<=0;group_fields<=0;state<=HEADER;field_index<=0;header<=0;remaining<=0;context_index<=0;fault<=0;
+    mesh_job_seq<=0;mesh_job_vertex<=0;mesh_job_vtx_w0<=0;mesh_job_commands<=0;
+    mesh_job_control<=0;mesh_job_flags<=0;mesh_job_uofs<=0;mesh_job_vofs<=0;
+    mesh_job_cpu_vertex<=0;mesh_job_cpu_commands<=0;mesh_job_alpha<=0;
+@@ -62,12 +62,15 @@
+    else if(running)case(state)
+     HEADER:if(take)begin
+      header<=input_data;remaining<=input_data[12:0];field_index<=0;
+-     if(context_pending&&input_data[31:24]!=8'h64)begin state<=FAULT;fault<=1;end
++     if(context_pending&&input_data[31:24]!=8'h64&&input_data[31:24]!=8'h65)begin state<=FAULT;fault<=1;end
+      else if(input_data[31:24]==8'h63)begin
+       if(input_data!=32'h6300001d)begin state<=FAULT;fault<=1;end
+       else begin state<=CTX_BASE;context_pending<=1;end
+      end else if(input_data[31:24]==8'h64)begin
+-      if(input_data!=32'h6400000b||!context_pending)begin state<=FAULT;fault<=1;end else begin state<=FIELDS;context_pending<=0;end
++      if(input_data!=32'h6400000b||!context_pending)begin state<=FAULT;fault<=1;end else begin state<=FIELDS;context_pending<=0;group_fields<=0;end
++     end else if(input_data[31:24]==8'h65)begin
++      if(input_data!=32'h65000007||!context_pending)begin state<=FAULT;fault<=1;end
++      else begin state<=FIELDS;context_pending<=0;group_fields<=1;mesh_job_control<=32'h80000000;mesh_job_commands<=0;mesh_job_cpu_vertex<=0;mesh_job_cpu_commands<=0;end
+      end else state<=PASS_HEADER;
+     end
+     PASS_HEADER:if(emit)state<=remaining==0?HEADER:COPY;
+@@ -78,13 +81,19 @@
+     end
+     CTX_DATA:if(take)begin context_index<=context_index+1'b1;remaining<=remaining-1'b1;if(remaining==1)state<=HEADER;end
+     FIELDS:if(take)begin
+-     case(field_index)
++     if(group_fields)case(field_index)
++      0:mesh_job_seq<=input_data;1:mesh_job_vertex<=input_data;2:mesh_job_vtx_w0<=input_data;
++      3:mesh_job_flags<=input_data;4:mesh_job_uofs<=input_data;5:mesh_job_vofs<=input_data;6:mesh_job_alpha<=input_data;
++     endcase
++     else case(field_index)
+       0:mesh_job_seq<=input_data;1:mesh_job_vertex<=input_data;2:mesh_job_vtx_w0<=input_data;
+       3:mesh_job_commands<=input_data;4:mesh_job_control<=input_data;5:mesh_job_flags<=input_data;
+       6:mesh_job_uofs<=input_data;7:mesh_job_vofs<=input_data;8:mesh_job_cpu_vertex<=input_data;
+       9:mesh_job_cpu_commands<=input_data;10:mesh_job_alpha<=input_data;
+      endcase
+-     field_index<=field_index+1'b1;if(field_index==10)state<=REQUEST;
++     field_index<=field_index+1'b1;if(field_index==(group_fields?6:10))state<=REQUEST;
++     // Bit31 is an internal GROUP tag, never legal in an ordinary JOB.
++     if(!group_fields&&field_index==4&&input_data[31])begin state<=FAULT;fault<=1;end
+     end
+     REQUEST:if(mesh_job_fault)begin fault<=1;state<=FAULT;end
+      else if(mesh_job_ready)state<=mesh_job_done?HEADER:STREAM;

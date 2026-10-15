@@ -1,0 +1,95 @@
+Shared DSP A ownership routing
+=============================
+
+Parent: guard87c75d462db6bbb08635f10ccc8fdf021a7a68cfcb12358bffa594c2d533f6d3.
+Candidate:57258b3a4a76c75f3619661dd052fdc5c3ae5716f455c8830eafe00234a1f72e.
+No palette, audio, CPU, Dock, clock or worker changes are included here.
+
+Motivation
+----------
+The worker-arithmetic seed2 slow85 report has state.S_FRAG_PIPE to dsp_a[21]
+at -1.356ns. Seven logic levels and11.410ns data delay include8.903ns of
+interconnect (78%). The state bit has117 fanout and passes through the
+existing PSS owner gate before the DSP operand mux. This candidate removes
+that owner input for A; it does not claim a measured timing gain yet.
+
+Actual edit
+-----------
+With INCLUDE_SPAN_DEDICATED_MULT, the existing pss_dsp_a_write predicate
+selects pss_dsp_a_data without state==S_FRAG_PIPE && persp_active. All
+operand defaults, all B writes, all subsequent A/B overrides, reset
+behavior, registers, arithmetic and state transitions remain identical.
+Without that macro, the original ownership condition remains byte-for-byte.
+
+Source-level equivalence argument (not a formal-tool proof)
+----------------------------------------------------------
+dsp_a is read only by the registered signed32x32 product dsp_p. Thus it is
+sufficient to show every cycle's product is identical. Let Aold/Anew be the
+old/new registered operand and B be their unchanged registered B operand.
+The invariant is B==0 || Aold==Anew. It implies exact64-bit products, including
+all signed extrema and overflow behavior.
+
+Hard reset writes identical zero A/B operands. Soft reset holds the operands,
+which preserves the invariant. The ordinary housekeeping block assigns B=0
+each active cycle. If no later B write fires, a speculative difference in A
+therefore preserves the invariant, with product exactly zero.
+
+The only nonzero B writers under dedicated span multiplication are:
+
+* PSS: eight launch classes ADV_ISSUE, ADV_TAIL_ST_CAPTURE, NR_MUL_X,
+  NR_MUL_Y, MUL, FINAL, SLOPE_PREP and SLOPE_DIV_COMMIT. Their complete
+  conditions are exactly pss_dsp_a_write, additionally qualified by the
+  original main state and persp_active. Whenever B is launched, both old
+  and new versions therefore assign identical pss_dsp_a_data.
+* Derive: raw-vertex product0/1/2, determinant, both plane numerators,
+  reciprocal high/optional low scale and origin. Each B assignment has
+  its original A assignment in the same branch, later than housekeeping.
+* Transform/light: matrix MAC, camera-X/Y projection, X/Y viewport scale,
+  normal dot and light modulation. Each B write likewise has its A write
+  in the same branch, later than housekeeping, including both viewport
+  compile-time alternatives.
+
+Span address/attribute tasks are enclosed by !INCLUDE_SPAN_DEDICATED_MULT
+and issue no shared operands in this configuration. This is why the guard
+is mandatory: legacy span attribute launches can omit A and rely on its
+coordinate default. Those schedules retain the original code.
+
+Nonblocking assignment order makes every later paired launch override the
+speculative housekeeping A value. There is no new register, pipeline stage,
+valid/ready logic or resource arbitration. Since every product remains exact,
+all consumers see identical values even without relying on whether a given
+product is architecturally consumed. All other functional RTL is unchanged.
+
+Evidence
+--------
+operand-control-v1 checks33,554,432 control combinations in actual Verilog:
+all64 PSS codes (including illegal ones), all32 tail/divisor values, both
+prune/Q29 choices, speculative/const-Z choices, owner/perspective/later
+override choices and reset/soft-reset. The A predicate is extracted from
+the candidate; an independent case decoder represents the original B launch
+conditions. Full-width operand data varies through the corpus. This is an
+exhaustive finite control enumeration with sampled data, not an exhaustive
+enumeration of every32-bit data value. The algebra above covers the data
+independence of the equivalence.
+
+check_operands.py also regenerates a validation-only shadow of all26 actual
+DSP-A assignment sites. Each mirrored assignment has its exact original
+surrounding control, including restoring the original PSS ownership gate.
+During actual GPU replay it asserts Aold==Anew whenever B!=0 on every clock.
+The sole difference between the test model and candidate is this observation
+state/assertion; the ordinary candidate is replayed independently as well.
+
+Sixteen actual-GPU replays (eight scenes, paced and unpaced) checked:
+  74,153,842 clocks
+  3,773,736 nonzero-B operand pairs, all exactly equal
+  7,836 differing idle A operands, every one with B==0
+
+Both unmodified candidate and instrumented shadow produce exactly the
+reference color/depth output, counters, cycles and fences for all16 runs.
+Receipts: full-gpu-v1/receipt.json, operand-shadow-gpu-v1/receipt.json,
+operand-shadow-summary.json, operand-control-v1/receipt.json.
+
+These captures use the existing native6 GPU/memory fixture and validated
+workerf535bc90. They do not measure physical SDRAM, restored-audio scheduling,
+Pocket behavior, power, Fmax or gameplay FPS. All features and cycle timing
+are preserved at RTL. Physical timing/area must be measured in a later fit.

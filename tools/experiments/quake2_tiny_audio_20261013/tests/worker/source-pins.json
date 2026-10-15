@@ -1,0 +1,7 @@
+{
+  "baseline_path": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-geometry/divisor-preload/gpu_geometry_worker.v",
+  "baseline_sha256": "ec474a5e04a8053fc0eea8c1034cc18f4580aeabb21816ce7acc2f700b24fd15",
+  "candidate_path": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/gpu_geometry_worker.v",
+  "candidate_sha256": "e0f4ffbd20f2a20ab416543a0e9d830d7ec6b4d8d55df094479428b67f933fbb",
+  "changes": "Replace modular free-space zero test with typed capacity equality and put lookahead increment before take_input mux. Retains previously qualified divisor preload; no new registers or cycles."
+}

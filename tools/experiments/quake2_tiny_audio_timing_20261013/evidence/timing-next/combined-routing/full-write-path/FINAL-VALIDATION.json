@@ -1,0 +1,59 @@
+{
+  "passed": true,
+  "source_fingerprint": "137732747968e79220d96264f77c64de84e3d2a19b4961e466d9fecbea35c582",
+  "source_file_count": 128,
+  "changed_source": {
+    "src/fpga/common/os30/gpu_core.v": "5359411b9af35fd4619da978c3f508997ae1c0a2ba3281512c50c5a1d1e4e217",
+    "src/fpga/common/gpu_geometry_worker.v": "dc82691f019420352905292bb60d71943d989a42e4b2608feeefa218fe8f50f9"
+  },
+  "source_unchanged": true,
+  "control_evidence_unchanged": true,
+  "results": [
+    {
+      "name": "control-observed",
+      "passed": true,
+      "transcript_exact": true,
+      "input_pins_sha256": "5d15551209a85d750a942ebbf120dc6236c12b64cd1aa55879f6cdf9d19fbd64",
+      "dumps_sha256": {
+        "quiet-color.bin": "c838411c1545865f8931ac7d079351cc978f06f248346d7bd2474db23f17fd6b",
+        "quiet-depth.bin": "e8f3004816febbfe1411a6caa2c7f3ab94cbf8d6e9666a6f381519956048d041",
+        "contended-color.bin": "c838411c1545865f8931ac7d079351cc978f06f248346d7bd2474db23f17fd6b",
+        "contended-depth.bin": "e8f3004816febbfe1411a6caa2c7f3ab94cbf8d6e9666a6f381519956048d041",
+        "all-word-writes.bin": "2f98bcb058f059d26b5dfcccc060aec81a68f6bd8431b766fd4452c400c3f591"
+      },
+      "physical_word_write_records": 19442
+    },
+    {
+      "name": "candidate-observed",
+      "passed": true,
+      "transcript_exact": true,
+      "input_pins_sha256": "1c36041b0d6a57558dd557c4f810a3f4bf174536639dee4ce7593cabcc3ef474",
+      "dumps_sha256": {
+        "quiet-color.bin": "c838411c1545865f8931ac7d079351cc978f06f248346d7bd2474db23f17fd6b",
+        "quiet-depth.bin": "e8f3004816febbfe1411a6caa2c7f3ab94cbf8d6e9666a6f381519956048d041",
+        "contended-color.bin": "c838411c1545865f8931ac7d079351cc978f06f248346d7bd2474db23f17fd6b",
+        "contended-depth.bin": "e8f3004816febbfe1411a6caa2c7f3ab94cbf8d6e9666a6f381519956048d041",
+        "all-word-writes.bin": "2f98bcb058f059d26b5dfcccc060aec81a68f6bd8431b766fd4452c400c3f591"
+      },
+      "physical_word_write_records": 19442
+    }
+  ],
+  "full_buffers_byte_exact": true,
+  "all_word_writes_cycle_address_data_mask_length_exact": true,
+  "old_complete_transcript_exact": true,
+  "reference_cycles": 738914,
+  "total_cycles": 1791183,
+  "original_reference_sha256": "b10bdf60c9ee5962d2491a6477c28f0ea452ebb713f6b310b631adf0330cf6d7",
+  "recipe_sha256": "13cc9790f84d7917ac1765be4adc72b12dedd66b8bc4e2addf20d249166f00dc",
+  "elapsed_seconds": 22.61041235923767,
+  "warning": "One inherited refresh interval1701 cycles versus limit1700 appears identically in both runs and prior control. No claim of physical DRAM retention/timing closure.",
+  "scope": "Rebind the pinned real-GPU/arbiter/slave contention fixture to staged RTL.\n\nThis preserves synthetic CPU/bridge/audio/scanout aggressors and the inherited\nsplit-DQ MiSTer SDRAM model. It is not actual CPU/mixer/Pocket-PHY simulation.\nTwo fresh builds add only passive dumps of all physical word-write commands\nand complete quiet/contended color/depth buffers, so cross-version equivalence\nis checked byte-for-byte rather than inferred from image hashes.\n",
+  "limitations": [
+    "CPU/audio/bridge/scanout traffic is synthetic. No actual CPU core or audio mixer is instantiated.",
+    "The inherited controller model is split-DQ MiSTer io_sdram_test, not Pocket PHY.",
+    "Fast-texture/native-mesh external ports are tied idle; this directed0x4E/clear test exercises the raster/write path. Native/particle worker jobs are covered in the separate fullGPU capture and worker lockstep gates.",
+    "No Dock/output-video, whole-device FPS, audio PCM or physical timing claim."
+  ],
+  "quartus_launched": false,
+  "deployed": false
+}

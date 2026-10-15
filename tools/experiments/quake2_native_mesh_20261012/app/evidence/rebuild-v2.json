@@ -1,0 +1,11 @@
+{
+  "passed": true,
+  "variant": "native-v2",
+  "fresh_stage": "/tmp/q2-native-v2-package-rebuild-20261012",
+  "elf_sha256": "a7906705c7cc0743c03a1c61aa439c3ec71a9ae20bff5c07a01b055fff10171b",
+  "source_date_epoch": 1791806400,
+  "compiler": "riscv64-elf-gcc (Arch Linux Repositories) 15.2.0",
+  "renderer_host": "PASS17groups",
+  "geometry_host": "PASS including map lifecycle",
+  "textures_host": "PASS"
+}

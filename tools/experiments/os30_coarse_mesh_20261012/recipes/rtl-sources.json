@@ -1,0 +1,20 @@
+[
+  "geometry_mesh_task_ctrl.v",
+  "geometry_mesh_raw_frontend.v",
+  "geometry_mesh_task_engine.v",
+  "geometry_float_cull_mem.v",
+  "geometry_raw_load.v",
+  "geometry_transform_light.v",
+  "GeometryFmaProbe.v",
+  "phase10_raw_vtx_dma.v",
+  "geometry_float_batch_recip.v",
+  "phase10_float_recip2.v",
+  "geometry_color_rtz.v",
+  "geometry_mesh_stream.v",
+  "geometry_mesh_packet.v",
+  "geometry_mesh_command_fetch.v",
+  "geometry_import_convert.v",
+  "phase10_load_alias.v",
+  "geometry_async_mesh.v",
+  "gpu_mesh_job_front.v"
+]

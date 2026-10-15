@@ -1,0 +1,20 @@
+{
+  "status": "PASS_FROZEN_APP_ADMISSION_LIFETIME_AND_REPAIR_REVIEW",
+  "elf_sha256": "c85c2ce24e9e08128fd6e4109876678be0b2ba362ad5e048dcb4bcbb197e4c28",
+  "repair_assembly": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/review/repair-service-v1.asm",
+  "repair_dataflow": "Stack words12..44 are immutable vertex0{x,y,invW}, vertex1{x,y,invW}, vertex2{x,y,invW}; center uses vertex1; four FMSUB differences, two products and ordered product0-product1 subtraction match positive-W CPU culling.",
+  "rounding_and_flags": "All nine arithmetic instructions explicitly RNE. Both front/back comparisons are pinned FLE, preserving ordered NaN semantics despite -ffast-math. Caller FCSR is saved before arithmetic and restored before serial/ACK writes.",
+  "admission": "Actual extracted collection loop passes independent 20,003-stream test, atomic TRI2, count64, global-to-local indices and ownership/hash gates. Hardware metadata has its own real LOAD SCAN test.",
+  "lifetime": "Actual lazy copy/materialize/all/triangle/fog/pre-G_VTX block passes existing eager-reference 8,000-load test after inserting a no-side-effect release stub. GPU ownership and release order separately tested on actual hardware. Queued path reloads all later CPU cache slots conservatively; CLAIM is reused only for the current generation and explicit RELEASE is emitted before G_VTX/frame end.",
+  "limits": [
+    "This app review does not establish native full-frame correctness or speed; root owns matched replay comparison.",
+    "Native arithmetic extraction tests operand values and flag behavior; actual service MMIO transport is covered by worker tests and final ELF read/write ordering inspection."
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/app-build/app.dis": "c3f3829a0b25cb99908d8d3597678393cb3cc6e1d271f891825fd29565ec5303",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64/.obj/sm64-queued-front-perfdiag/app.elf": "c85c2ce24e9e08128fd6e4109876678be0b2ba362ad5e048dcb4bcbb197e4c28",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/repair-cpu-v1/manifest.json": "c7ec8ef7ef55a5555468d330be850d2078cf3b2fc6a65861e58c105b3c010ccf",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/admission-v1/manifest.json": "383cd77d66dc5092ac4abfb975bbc26e155dc26c527a97f99e5d97aaebe2e7c2",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/lazy-v1/report.json": "adecf2dd62891b30e1537f157649da343b5726e24873ab63403c41f6690a6d77"
+  }
+}

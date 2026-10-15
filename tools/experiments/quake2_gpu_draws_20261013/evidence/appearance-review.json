@@ -1,0 +1,16 @@
+{
+  "scope": "Engineering review for an experimental Quake2 particle path; not a device test or a claim of identical legacy appearance.",
+  "reviewed_panel": "validation/image-comparisons/particles-v5-main-v2/frame_00148.png",
+  "panel_sha256": "58706547d45e55553191c0e96baefceae2515b313af648917caa2743b5e3df2e",
+  "decision": "Accept localized fixed-point particle sampling changes for the experimental build.",
+  "observations": [
+    "The largest measured change is confined to the blood particle cloud; the scene, weapon, model, and framing match.",
+    "Across all eight measured frames the maximum changed count is252 of76800 pixels, and projected vertex positions differ by at most1/16pixel.",
+    "Color/alpha values and particle order/count are preserved; texture sampling at the changed pixels can differ visibly at close inspection.",
+    "General scene geometry, resolution and particle effects have not been reduced."
+  ],
+  "pocket_appearance_tested": false,
+  "maximum_changed_pixels": 252,
+  "total_pixels": 76800,
+  "legacy_pixel_exact": false
+}

@@ -1,0 +1,142 @@
+Experiment release index — 2026-10-14
+====================================
+
+Current selected Quake2 pair
+---------------------------
+The retained OS30 release is the complete 1–30 sweep in
+quake2_tiny_audio_sweep_20261013: full CPU ISA, 64 KiB instruction cache,
+64 KiB data cache, 32-voice audio, and unchanged Dock/video support.
+
+Core SHA256:
+  7c7021e65b0bf02b5522be9b184bb9e36497f989f403149b9f98fe1ebbe82551
+App SHA256:
+  10581bdb05e98c87dcd08abb2798549267793920f6c91e1c6be964b0dd9fb636
+Frozen 128-file core-source fingerprint:
+  f3685d901a8688ff9c62cb9e4259a61d04e45fe646532ebc6c744e617df81b1b
+
+Selected seed 16 has a worst-corner restricted main Fmax estimate of
+90.69 MHz. The configured clock is 100 MHz; this is not 100 MHz closure.
+Resources are 17,995 ALMs, 1,848 LABs, 308 M10Ks and 42 DSPs.
+The qualified complete source/evidence/payload bundle is preserved as
+release/os30-quake2/qualification.tar.gz. Its release manifest and verifier
+are maintained there; this index does not replace their checks.
+
+The original unpacked sweep package is ignored by one exact path rule,
+avoiding a duplicate copy of the same full reports and payloads in Git.
+No original files were moved or deleted. The historical package README
+records its state when assembled. A later rollback restored this I64
+core on 2026-10-14 after the user reported a 10–20% slowdown with I32.
+The local rollback receipt is:
+  docs/measurements/os30-icache32-20261013/
+    hardware-regression-20261014/last-deployment.json
+
+SM64 retains its separately qualified b1083c26... core and normal
+fff132a5... application in the sibling SM64 repository. This Quake2
+core removes an unused Quake2 combiner feature and must not be treated
+as an SM64 replacement. No compatibility or new timing qualification
+for os20/os25 follows from these OS30 experiments.
+
+Historical folders
+------------------
+The following statuses describe each final local report. "Superseded"
+does not invalidate a historical result; it means it is not the current
+release pair. Source-only and component test success are not FPGA fit,
+physical timing, hardware gameplay or universal image-equivalence claims.
+
+os30_async_mesh_20261012 — REJECTED, no net gain.
+  AJ01 native simulation passed, but the selected total interval was
+  12.15% slower than its same-ELF control. No physical fit/deployment.
+
+os30_bram_import_20261010 — REJECTED, no net gain.
+  Direct BRAM transfer worked; warm replay was 0.767% slower. No fit.
+
+os30_coarse_mesh_20261012 — REJECTED, NO_GAIN.
+  AJ03 source/test/evidence bundle; no physical qualification.
+
+os30_depth_hazard_20261010 — REJECTED, negligible frame-time gain.
+  Bounded depth-hazard/priority experiments; no Quartus/deployment.
+
+os30_mesh_front_20261010 — COMPONENT PROTOTYPE ONLY.
+  Mesh-task RTL, producer and synthetic tests; real application integration,
+  complete raster behavior and physical fit remain outside its qualification.
+
+os30_mesh_integrated_20261012 — REJECTED FOR PROMOTION.
+  Native-v7 / F18–F19 integration did not demonstrate a net benefit for
+  practical 512-word queues. No selected physical build or bitstream.
+
+os30_priority_mesh_20261012 — REJECTED, no net gain.
+  AJ02 reduced one CPU-wait component, but the final warm interval was
+  1.197% slower than the qualified same-ELF control. No fit/deployment.
+
+os30_psram32_20261009 — HISTORICAL ENTRY-POINT NOTE.
+  Its build.py is explicitly an earlier helper, not a production entry point.
+  Matching experimental sources and delivery evidence live in the isolated
+  ignored measurement worktree named in its README.
+
+os30_queued_front_20261010 — REJECTED, effectively tied or slower.
+  QGF1 preserved bounded rendering; larger FIFO was within 0.0075% of
+  control. Source-only; no physical qualification.
+
+os30_triangle_front_20261010 — REJECTED, slower.
+  TFP1/BIM2 preflight variants were correct in bounded tests but slower.
+  No FPGA fit, timing or hardware qualification.
+
+quake2_submission_20261012 — REJECTED, negligible model gains.
+  CPU packet/alias submission alternatives; no FPGA change or deployment.
+
+quake2_native_mesh_20261012 — SUPERSEDED historical device trial.
+  Selected app-v3/core-v4 MD2 native offload, temporary silent audio.
+  Earlier core variants include rejected timing/capacity alternatives.
+
+quake2_native_followup_20261012 — SUPERSEDED historical device trial.
+  Busy-area CPU/MAC/read-window improvements; temporary silent audio.
+
+quake2_native_batching_20261012 — SUPERSEDED historical device trial.
+  Native5 software batching with unchanged native4 FPGA; silent audio.
+
+quake2_gpu_draws_20261013 — SUPERSEDED native6 particle offload.
+  Canonical fixed-point particle path and reviewed localized differences
+  from legacy floating point. Quake2-only, intentionally silent core.
+
+quake2_tiny_audio_20261013 — UNQUALIFIED source-only full sweep.
+  Restored audio implementation and all 30 original seed results.
+  No seed exceeded 90 MHz; best estimate 87.97 MHz, selected seed null.
+  No release bitstream was exported from this package.
+
+quake2_tiny_audio_timing_20261013 — SUPERSEDED qualified targeted trial.
+  General full-ISA/full-audio source 9a4e8b06..., seed 1 at 90.07 MHz.
+  This targeted-seed result is not a new full 30-seed sweep.
+
+quake2_tiny_audio_sweep_20261013 — CURRENT retained Quake2 I64 release.
+  Source f3685d90..., all 30 seeds, selected seed 16 as recorded above.
+  Complete immutable bundle is archived under release/os30-quake2.
+
+Local evidence and Git scope
+---------------------------
+Source, patches, build/test recipes, manifests and concise outcome receipts
+remain versionable for historical review. Duplicate source archives,
+generated ELFs/bitstreams and large raw sweep payloads remain on disk,
+ignored by exact package-scoped rules. Existing global *.rpt exclusions
+continue to apply.
+
+LOCAL_EVIDENCE_20261014.json records every local-only original file with
+size and SHA256, plus per-folder counts and original inventory digests.
+All 9,145 original files (703,156,989 bytes) were rehashed after curation
+and remained byte-identical. Of these, 7,122 files (651,871,028 bytes)
+are local-only; 2,023 files (51,285,961 bytes) remain versionable.
+The inventory itself and this index are additional review files.
+
+Check retained local payloads without running tests, builds or deployment:
+  python3 -B tools/experiments/verify_local_evidence.py
+
+A fresh Git checkout of a historical experiment is intentionally not a
+complete historical package. Its old verifier/staging commands may require
+the ignored archives or raw reports pinned in its original manifest.
+Restore those exact local payloads before using such commands. The current
+release archive is complete and has its own standalone verification path.
+No game ROM/PAK assets or proprietary tool model code were added by cleanup.
+
+The later I32 cache-size experiment is not the retained release after the
+hardware regression. I64 RAM repacking and other pending measurement trees
+are not promoted by this cleanup. No build, sweep, deployment or commit was
+performed as part of the experiment curation.

@@ -1,0 +1,87 @@
+{
+  "input_pak": "/tmp/quake2-gpu-20261011/bench/inputs/main/data/pak0.pak",
+  "scope": "All BSPs present in public demo fixture; extra BSP polygon hunk bytes only, not total model/heap. Warps and n outside3..32 unchanged. RV32 old/new world structs120/128; glpoly132; GL poly alignment8 then Hunk32. No guarantee arbitrary larger map fits remaining heap.",
+  "maps": [
+    {
+      "map": "maps/demo1.bsp",
+      "bsp_sha256": "ee13d2e5448d990ced8ca7b0595722518c5221feab68d5a07e2a291391da6457",
+      "cacheable_polygons": 7803,
+      "counts": {
+        "4": 3825,
+        "3": 684,
+        "5": 1523,
+        "6": 997,
+        "7": 403,
+        "8": 199,
+        "11": 10,
+        "10": 52,
+        "9": 94,
+        "12": 9,
+        "13": 2,
+        "15": 2,
+        "17": 1,
+        "14": 2
+      },
+      "old_cache_bytes": 1677300,
+      "new_cache_bytes": 1911252,
+      "extra_cache_bytes": 233952,
+      "old_polygon_hunk_bytes": 2983232,
+      "new_polygon_hunk_bytes": 3258624,
+      "extra_rounded_hunk_bytes": 275392
+    },
+    {
+      "map": "maps/demo2.bsp",
+      "bsp_sha256": "56ce71f8bf1cb5e65056ce62f8a3a4627553016be38a450992dd50a2dd8b44fc",
+      "cacheable_polygons": 9001,
+      "counts": {
+        "5": 1357,
+        "7": 359,
+        "4": 5209,
+        "11": 24,
+        "3": 457,
+        "6": 1091,
+        "9": 97,
+        "10": 81,
+        "8": 305,
+        "12": 9,
+        "13": 4,
+        "20": 1,
+        "19": 1,
+        "15": 1,
+        "14": 5
+      },
+      "old_cache_bytes": 1934560,
+      "new_cache_bytes": 2204328,
+      "extra_cache_bytes": 269768,
+      "old_polygon_hunk_bytes": 3454016,
+      "new_polygon_hunk_bytes": 3772032,
+      "extra_rounded_hunk_bytes": 318016
+    },
+    {
+      "map": "maps/demo3.bsp",
+      "bsp_sha256": "d32bc0daf3f35c8fcf201f80da12572478e276d8ce1251c6ea83183b747953a8",
+      "cacheable_polygons": 9193,
+      "counts": {
+        "9": 92,
+        "4": 4849,
+        "5": 1730,
+        "6": 1196,
+        "8": 279,
+        "3": 573,
+        "7": 399,
+        "10": 48,
+        "13": 3,
+        "11": 15,
+        "12": 4,
+        "16": 3,
+        "15": 2
+      },
+      "old_cache_bytes": 1975240,
+      "new_cache_bytes": 2250528,
+      "extra_cache_bytes": 275288,
+      "old_polygon_hunk_bytes": 3518848,
+      "new_polygon_hunk_bytes": 3841088,
+      "extra_rounded_hunk_bytes": 322240
+    }
+  ]
+}

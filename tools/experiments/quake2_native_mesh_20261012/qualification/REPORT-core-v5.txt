@@ -1,0 +1,10 @@
+Native mesh core v5 timing-refinement qualification: PASS
+
+App SHA256: 44f668ef55af64b579f3800d57567b7da7a2b3f9e16c325976d021d9237595b4
+Worker SHA256: 27fdcfc565b3232186bc5febfb84cd084aca054bdc8d4429e0d125d656b0f19b
+
+Ten full GPU replays: six final-app frames plus four legacy-command frames.
+All complete output bytes, GPU cycle counts, worker counters and physical-memory transaction counters are identical to the prior v2 worker.
+Only changed source: gpu_geometry_worker.v, EMIT index[2:0] and equivalent input-pointer/full-queue decode.
+App CPU, sound-gate and map-lifetime qualification remain unchanged; see REPORT-v3.txt.
+Physical fit/timing are separate.

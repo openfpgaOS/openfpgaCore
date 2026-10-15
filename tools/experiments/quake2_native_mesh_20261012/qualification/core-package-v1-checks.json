@@ -1,0 +1,16 @@
+{
+  "passed": true,
+  "checks": {
+    "reject '../escape'": true,
+    "reject '/absolute'": true,
+    "reject 'a/../b'": true,
+    "reject 'a//b'": true,
+    "reject 'a/./b'": true,
+    "reject '.'": true,
+    "existing destination rejected without modification": true,
+    "build recipe equals original physical fit recipe": true,
+    "all 127 prepared source files match fit input pins": true,
+    "inventory, source archive, fit pins and forward/reverse patch verify": true
+  },
+  "manifest_sha256": "5d7aa02cd99174310070646bf5a5f5c42d2ba704f39a9be4996b7a53ddded20b"
+}

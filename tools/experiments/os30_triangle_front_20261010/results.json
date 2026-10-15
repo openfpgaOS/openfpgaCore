@@ -1,0 +1,140 @@
+{
+  "status": "CORRECT_NATIVE_PROTOTYPE_REJECTED_FOR_PERFORMANCE",
+  "best_version": 2,
+  "latest_version": 3,
+  "pairs": [
+    {
+      "version": 1,
+      "baseline": [
+        {
+          "cycles": 4026645,
+          "retired": 1975853,
+          "upload_words": 23036
+        },
+        {
+          "cycles": 4413309,
+          "retired": 2149575,
+          "upload_words": 23000
+        }
+      ],
+      "candidate": [
+        {
+          "cycles": 4267308,
+          "retired": 2121208,
+          "upload_words": 18542
+        },
+        {
+          "cycles": 4633417,
+          "retired": 2293526,
+          "upload_words": 18452
+        }
+      ],
+      "cycle_change_percent": [
+        5.976762292181204,
+        4.987368888061083
+      ],
+      "correctness": [
+        "PASS_TFP_APP_BASELINE_FUNCTIONAL_ORACLE",
+        "PASS_TFP_APP_IMPORT_FUNCTIONAL_AND_DRAW_SEMANTICS"
+      ]
+    },
+    {
+      "version": 2,
+      "baseline": [
+        {
+          "cycles": 3935317,
+          "retired": 1934726,
+          "upload_words": 23036
+        },
+        {
+          "cycles": 4329312,
+          "retired": 2107552,
+          "upload_words": 23000
+        }
+      ],
+      "candidate": [
+        {
+          "cycles": 4024027,
+          "retired": 1951925,
+          "upload_words": 19178
+        },
+        {
+          "cycles": 4408243,
+          "retired": 2127688,
+          "upload_words": 19112
+        }
+      ],
+      "cycle_change_percent": [
+        2.2542021392431666,
+        1.8231765231981445
+      ],
+      "correctness": [
+        "PASS_TFP_APP_BASELINE_FUNCTIONAL_ORACLE",
+        "PASS_TFP_APP_IMPORT_FUNCTIONAL_AND_DRAW_SEMANTICS"
+      ]
+    },
+    {
+      "version": 3,
+      "baseline": [
+        {
+          "cycles": 3981433,
+          "retired": 1933008,
+          "upload_words": 23036
+        },
+        {
+          "cycles": 4370891,
+          "retired": 2108535,
+          "upload_words": 23000
+        }
+      ],
+      "candidate": [
+        {
+          "cycles": 4086870,
+          "retired": 1936039,
+          "upload_words": 19178
+        },
+        {
+          "cycles": 4460109,
+          "retired": 2112469,
+          "upload_words": 19214
+        }
+      ],
+      "cycle_change_percent": [
+        2.6482173629444494,
+        2.041185652993871
+      ],
+      "correctness": [
+        "PASS_TFP_APP_BASELINE_FUNCTIONAL_ORACLE",
+        "PASS_TFP_APP_IMPORT_FUNCTIONAL_AND_DRAW_SEMANTICS"
+      ]
+    }
+  ],
+  "physical_fit_qualified": false,
+  "deployed": false,
+  "full_seed_sweep": false,
+  "limitations": [
+    "Two fixed native intervals, not sustained hardware FPS.",
+    "New command path remains synchronous preflight plus CPU draw-job publication."
+  ],
+  "evidence_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/performance-v1.json": "083eece4ca8ef3a0c29d45b75e9ba5f6fdb3900e504316687023fab79c498e8b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/review/baseline-v1.json": "12a4bb5e9e2ddc5f957ba303a2d367cb3a3a951adb165ed24dedd094e4aaa35b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/review/front-v1.json": "5370a53d42f680bdbd58a3a8dc31051407a3e8f64b93b0a9a2baecb597c28134",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/performance-v2.json": "7bac357338821a3b55d30268dc9e8b86ff73a2aff9faa818c9ae4fe3b3fdc41b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/review/baseline-v2.json": "18daada69bf42e34591325ae01f6a85931a041f31afdcb9eab948c6860057db4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/review/front-v2.json": "6c58d98fabab89242100113e64bffd681d64cc03c67f9ae6f5c4a2df035e8f8a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/performance-v3.json": "967475b4aeea4af65b15978752c204e2d6a108e42be42cb60ea67043c70c272e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/review/baseline-v3.json": "5d967a7fc16d87c78ad4c32d8efac9090e41f1c0feeb1ad1d97b7d2f67514456",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/review/front-v3.json": "9bc87130a3267f3bc0f1547d4640be851b1b26d7977dfd0e3ae127ce170df496",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/abi.json": "f0c4b4858612395eba016c925c5f9599ba73f85cca1d4c8a224181ba3a1d8e80",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/REPORT.txt": "e82ee2db205f09a53c916a923788ad8b615993a50d769023a49a7e5885ecb26c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/native-v1/prepared.json": "4ae35eea803f3fa32219fce821afed20713357be24daa165c6367297af362759",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/native-v1/build.json": "9432734b73b9fb991e4ec61899c624029f34630d1602709c3e48e4de958d0a8d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/app-build/build-result.json": "b3d4accc7ac45bde52769f406db8283c4f2a4d873296a2fc98404ebe982d78d3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/app-build-v2/build-result.json": "1043de0ab42a3f1940c76dd54399a0f19739d0b0e5d3af0fc1c0220c495f88ff",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/app-build-v3/build-result.json": "b4605c805cd166ef6948d70b28f8931f2b139ceade0a10289c3e8c20d19e7cd0",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/review/app-overhead-and-banks-v1.json": "455e9e797caa885e7796097b74ed80b9d3d88acea730f965493dcb57ce498439",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/review/final-elf-v2-cull-dag.json": "d99ec56448487b867fb93e7a1e4c03942d76df24d31d7a6e384437b0cfbac726",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/review/final-elf-v3-cull-dag.json": "abdc0b62c70f615e6f522705d793d1072b9bbaad63eed45453f0e6267e9999db"
+  }
+}

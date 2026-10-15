@@ -1,0 +1,64 @@
+QGF1 queued geometry experiment — 2026-10-10
+
+Outcome: correct asynchronous triangle front end, no net frame-time improvement.
+Keep the existing simple core. No Quartus build, timing claim, deployment or seed sweep.
+
+What is implemented
+The CPU queues immutable triangle runs and can continue display-list work. Hardware
+performs exact culling, converts referenced vertices, and writes ordinary GPU vertex
+and draw packets into a separate BRAM FIFO. Snapshot banks can be released before
+rasterization consumes those values. Rare unsupported cull arithmetic can be repaired
+from immutable operands without restoring old renderer globals. Ownership, reset,
+queue pressure and exact rounding are tested. Raw vertex LOAD completion is still
+synchronous; admission, context setup and unsupported rendering remain on the CPU.
+
+Matched native frame intervals (cycles; positive delta is slower)
+Variant                         Baseline cold/warm       Candidate cold/warm      Warm delta
+v1 app, output FIFO512           4,023,610 / 4,395,563    4,104,599 / 4,469,437     +1.681%
+v2 app, output FIFO512           3,980,965 / 4,366,717    4,032,356 / 4,401,461     +0.796%
+v2 app, output FIFO2048          3,980,965 / 4,366,717    3,986,680 / 4,367,046     +0.0075%
+
+App v2 reduces repair polling while keeping all required wait hooks. Each comparison
+uses the same exact ELF and fresh captured fixture for both models. The larger FIFO
+is a simulation-only capacity counterfactual with the original 4096-word ingress.
+It reduces warm CPU instructions by 2.94% and ingress words by 19.66%, yet does not
+improve frame time. It is not an area-qualified core.
+
+Why the saved work does not become a speedup
+The queue really overlaps CPU and GPU work, but conservative CPU admission/context
+setup, publication and retained fallback paths consume the savings. The 512-word
+output FIFO is full for 1,275,716 warm cycles; 2048 words reduces that to 862,604.
+Most snapshot contention coincides with output backpressure. FMA admission waits
+are only about 3,000 warm cycles, so another FMA or faster snapshot copying is not
+the indicated fix. Extra instruction fetches, MMIO and changed cache-flush scheduling
+also offset saved arithmetic. These counters overlap and are not additive savings.
+Persistent global vertex slots would remove few copies: survivor materialization
+accounts for only 71 of 3,388 materialized vertices in the first queued warm trace.
+
+Correctness
+All completed candidates match exact color/depth, every physical color-buffer history,
+final surface pool, FP/FCSR and architectural state apart from the expected timestamp.
+The independent audit checks all 1,708 indexed draws with both load-time projection
+state and draw-time material/object state, side-effect order, immutable snapshot use,
+final empty queues and error-free memory traffic. Unit suites include real metadata,
+shared FMA/reset, FIFO pressure/wrap, natural arithmetic repair, actual C admission,
+8,000-load lazy lifetime, and 2,405 arithmetic executions on the current native CPU.
+The 2048-word worker separately passes 84,608 checks including wrap/full pressure.
+
+The first incomplete queued-v1 replay is excluded. It restored a legacy ring pointer
+into two independent queues. The corrected fixture preserves the drained output queue
+and restores only the input position, without adding host clock edges. Frozen evidence
+is retained. The later passive observer also corrects the queue occupancy calculation.
+
+Physical and deployment state
+An isolated 512-word physical source recipe is prepared and statically reviewed, but
+not built. Its nominal snapshot/output RAM demand uses the four spare M10Ks; ALM fit
+and timing are unqualified. The 2048-word FIFO has not been fitted or rebalanced against
+ingress BRAM. No production source, sibling game folder, SD card or bitstream changed.
+
+Limits
+Two deterministic native intervals with synthetic display/audio and bounded services
+are not sustained device FPS. The results do not rule out all memory bottlenecks.
+They establish that this queued geometry path, even with more buffering, has not earned
+a replacement for the simpler core. Source patches and reproduction evidence are kept
+in tools/experiments/os30_queued_front_20261010 for review and further development.

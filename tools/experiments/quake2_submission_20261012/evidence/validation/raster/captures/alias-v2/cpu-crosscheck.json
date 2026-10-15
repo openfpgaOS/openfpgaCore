@@ -1,0 +1,8 @@
+{
+  "passed": true,
+  "command_prefix_exact": true,
+  "full_width_cpu_framebuffer_prefix_exact": true,
+  "frames": 302,
+  "capture_elf_sha256": "bcb3e95bb8745811375628188c5b66aa5aa1122b99a78dce0a3c2f9cc23e87d9",
+  "bench_elf_sha256": "bcb3e95bb8745811375628188c5b66aa5aa1122b99a78dce0a3c2f9cc23e87d9"
+}

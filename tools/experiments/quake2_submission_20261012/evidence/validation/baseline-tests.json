@@ -1,0 +1,13 @@
+{
+  "passed": true,
+  "checks": {
+    "baseline-renderer-tests.log": {
+      "exit_code": 0,
+      "log_sha256": "4f3654801ddc79cb26e02be414f3028beed797d8e02729d29960382af540d6dc"
+    },
+    "baseline-geometry-tests.log": {
+      "exit_code": 0,
+      "log_sha256": "1e251892c9f48029b8b744249037c105a4e32ef3ab1bf118cb6552ac60443301"
+    }
+  }
+}

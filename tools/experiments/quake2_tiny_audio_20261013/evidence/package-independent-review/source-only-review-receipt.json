@@ -1,0 +1,82 @@
+{
+  "passed": true,
+  "frozen_sha256": "f63613efe348448c45af303972d6804a41d15724ac3a716f17eff4b40e6eb2d3",
+  "source_files": 128,
+  "source_and_recipe_drift": false,
+  "app_source_files": 731,
+  "unchanged_baseline_source_art": [
+    "src/quake2/stuff/icon/Quake2.png",
+    "src/quake2/stuff/models/crosshair/skin.pcx",
+    "src/quake2/stuff/models/crosshair/tris.md2"
+  ],
+  "proprietary_pak_or_map_assets": [],
+  "duplicate_release_binaries": [],
+  "current_release_artifacts": [
+    "app/app.elf"
+  ],
+  "evidence_plan_files": 199,
+  "settings": {
+    "global_setting": {
+      "effective": "AREA",
+      "assignments": [
+        "SPEED",
+        "AREA",
+        "SPEED",
+        "AREA"
+      ]
+    },
+    "instance_assignments": [
+      "set_instance_assignment -name OPTIMIZATION_TECHNIQUE SPEED -to ic|cpu|cpu"
+    ],
+    "physical_synthesis": {
+      "PHYSICAL_SYNTHESIS_COMBO_LOGIC": {
+        "effective": "OFF",
+        "assignments": [
+          "OFF",
+          "ON",
+          "OFF"
+        ]
+      },
+      "PHYSICAL_SYNTHESIS_EFFORT": {
+        "effective": "NORMAL",
+        "assignments": [
+          "NORMAL",
+          "FAST",
+          "NORMAL"
+        ]
+      }
+    },
+    "cpu_combo_scope": {
+      "present": true,
+      "target": "ic|cpu|cpu",
+      "effective": "ON",
+      "assignments": [
+        {
+          "target": "ic|cpu|cpu",
+          "value": "ON"
+        }
+      ]
+    }
+  },
+  "checks": [
+    "all30-current-format-reparse-and-selection-with-failed-seed-and-bad-hold",
+    "source-only-audit-rejects-eligible-computed-seed",
+    "source-only-assembler-rejects-eligible-computed-seed",
+    "default-qualified-full-assembly-still-verifies-with-one-selected-artifact",
+    "portable-omitted-unselected-binaries-reparse-identically",
+    "tampered-selection-rejected",
+    "selected-bitstream-tamper-rejected",
+    "omitted-artifact-digest-tamper-rejected"
+  ],
+  "actual_sweep_modified": false,
+  "limitation": "Disposable synthetic eligible seed only. Real outcomes remain unqualified unless the unchanged timing/resource gate selects one; source-only is an explicitly separate null-selection export.",
+  "file_sha256": {
+    "docs/measurements/quake2-tiny-audio-20261013/package-independent-review/check_source_only.py": "4d9bc7dc3d29e0c337ff40ef380c0dae09d65f77e5e10d1ed80ea533ba90042f",
+    "docs/measurements/quake2-tiny-audio-20261013/assemble_package.py": "51ec2ac0c51bc40e0671fa7592246995c0995eae426ff072a34bb0240bf0102f",
+    "docs/measurements/quake2-tiny-audio-20261013/prepare_package_evidence.py": "b2c1c14b289f706d81d8d1d8a664325fcf58832e3f44906d3e3a9b48b5dc2712",
+    "docs/measurements/quake2-tiny-audio-20261013/package-evidence-plan.json": "dfea312f88c9f2cdc55775dfe07eb13027cbcabb836a1451236790729868c48c",
+    "tools/experiments/quake2_tiny_audio_20261013/package.py": "a75be47998af65041c0c78568f528e6f27b650b0924dbbb5bc5ae3ce830e705b",
+    "tools/experiments/quake2_tiny_audio_20261013/audit_sweep.py": "c4354055f82fae19dc3c3ea712b04b0af82b277d48294f759f0147e6e0cd43ab",
+    "tools/experiments/quake2_tiny_audio_20261013/timing_results.py": "192828cad6b134c0f6cacfd484611e1ec9db5ab27cf379974bd737296d4f110b"
+  }
+}

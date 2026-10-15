@@ -1,0 +1,922 @@
+{
+  "status": "PASS_PASSIVE_GROUP_PUBLICATION_TIMING",
+  "phases": {
+    "1": {
+      "groups": 12,
+      "unuploaded_after_next_CPU_call": 11,
+      "head_to_group_take": {
+        "sum_per_group_latencies": 1186669,
+        "median": 84884,
+        "max": 239208
+      },
+      "head_to_first_raw": {
+        "sum_per_group_latencies": 1191997,
+        "median": 88745,
+        "max": 239329
+      },
+      "publish_to_group_take": {
+        "sum_per_group_latencies": 889218,
+        "median": 4585,
+        "max": 223899
+      },
+      "group_take_to_first_raw": {
+        "sum_per_group_latencies": 5328,
+        "median": 121,
+        "max": 3861
+      },
+      "known_staged_delay_before_upload": {
+        "sum_per_group_latencies": 22945,
+        "median": 2114,
+        "max": 3314
+      },
+      "known_staged_delay_before_publish": {
+        "sum_per_group_latencies": 25749,
+        "median": 2360,
+        "max": 3555
+      },
+      "publish_to_legacy_acquire": {
+        "sum_per_group_latencies": 4077,
+        "median": 266,
+        "max": 780
+      },
+      "known_staged_delay_union_cycles": 25749,
+      "idle_empty_within_delay_union_bounds": [
+        6254,
+        13420
+      ]
+    },
+    "2": {
+      "groups": 14,
+      "unuploaded_after_next_CPU_call": 14,
+      "head_to_group_take": {
+        "sum_per_group_latencies": 1686381,
+        "median": 96416,
+        "max": 307109
+      },
+      "head_to_first_raw": {
+        "sum_per_group_latencies": 1690893,
+        "median": 96559,
+        "max": 307230
+      },
+      "publish_to_group_take": {
+        "sum_per_group_latencies": 1497190,
+        "median": 82701,
+        "max": 296039
+      },
+      "group_take_to_first_raw": {
+        "sum_per_group_latencies": 4512,
+        "median": 121,
+        "max": 2895
+      },
+      "known_staged_delay_before_upload": {
+        "sum_per_group_latencies": 28376,
+        "median": 1909,
+        "max": 3642
+      },
+      "known_staged_delay_before_publish": {
+        "sum_per_group_latencies": 32219,
+        "median": 2187,
+        "max": 3900
+      },
+      "publish_to_legacy_acquire": {
+        "sum_per_group_latencies": 6020,
+        "median": 392,
+        "max": 940
+      },
+      "known_staged_delay_union_cycles": 32219,
+      "idle_empty_within_delay_union_bounds": [
+        2813,
+        6293
+      ]
+    }
+  },
+  "groups": [
+    {
+      "phase": 1,
+      "firstseq": 1,
+      "members": 12,
+      "CPU_call": 10,
+      "CPU_call_cycle": 355799,
+      "next_CPU_call_cycle": 436838,
+      "context_upload_start": 440152,
+      "GROUP_upload_start": 440308,
+      "GROUP_upload_end": 440363,
+      "publish_cycle": 440393,
+      "group_take_cycle": 440683,
+      "first_member_take": 444543,
+      "first_raw_start": 444544,
+      "head_to_group_take": 84884,
+      "head_to_first_raw": 88745,
+      "publish_to_group_take": 290,
+      "group_take_to_first_raw": 3861,
+      "group_unuploaded_after_next_CPU_call": true,
+      "known_staged_delay_before_upload": 3314,
+      "known_staged_delay_before_publish": 3555,
+      "idle_empty_during_known_staged_delay_bounds": [
+        0,
+        0
+      ],
+      "overlap_during_known_staged_delay": {
+        "worker_without_job": 3555,
+        "raster_state_IDLE": 2
+      },
+      "next_legacy_acquire_cycle": 440659,
+      "publish_to_legacy_acquire": 266
+    },
+    {
+      "phase": 1,
+      "firstseq": 15,
+      "members": 7,
+      "CPU_call": 27,
+      "CPU_call_cycle": 866656,
+      "next_CPU_call_cycle": 894478,
+      "context_upload_start": 896008,
+      "GROUP_upload_start": 896164,
+      "GROUP_upload_end": 896223,
+      "publish_cycle": 896253,
+      "group_take_cycle": 1033975,
+      "first_member_take": 1034139,
+      "first_raw_start": 1034140,
+      "head_to_group_take": 167319,
+      "head_to_first_raw": 167484,
+      "publish_to_group_take": 137722,
+      "group_take_to_first_raw": 165,
+      "group_unuploaded_after_next_CPU_call": true,
+      "known_staged_delay_before_upload": 1530,
+      "known_staged_delay_before_publish": 1775,
+      "idle_empty_during_known_staged_delay_bounds": [
+        0,
+        0
+      ],
+      "overlap_during_known_staged_delay": {
+        "worker_without_job": 1775
+      },
+      "next_legacy_acquire_cycle": 897020,
+      "publish_to_legacy_acquire": 767
+    },
+    {
+      "phase": 1,
+      "firstseq": 22,
+      "members": 6,
+      "CPU_call": 29,
+      "CPU_call_cycle": 907866,
+      "next_CPU_call_cycle": 922289,
+      "context_upload_start": 923423,
+      "GROUP_upload_start": 923606,
+      "GROUP_upload_end": 923655,
+      "publish_cycle": 923685,
+      "group_take_cycle": 1134080,
+      "first_member_take": 1134266,
+      "first_raw_start": 1134267,
+      "head_to_group_take": 226214,
+      "head_to_first_raw": 226401,
+      "publish_to_group_take": 210395,
+      "group_take_to_first_raw": 187,
+      "group_unuploaded_after_next_CPU_call": true,
+      "known_staged_delay_before_upload": 1134,
+      "known_staged_delay_before_publish": 1396,
+      "idle_empty_during_known_staged_delay_bounds": [
+        0,
+        0
+      ],
+      "overlap_during_known_staged_delay": {
+        "worker_without_job": 1396
+      },
+      "next_legacy_acquire_cycle": 923886,
+      "publish_to_legacy_acquire": 201
+    },
+    {
+      "phase": 1,
+      "firstseq": 28,
+      "members": 3,
+      "CPU_call": 33,
+      "CPU_call_cycle": 953766,
+      "next_CPU_call_cycle": 967144,
+      "context_upload_start": 968817,
+      "GROUP_upload_start": 968996,
+      "GROUP_upload_end": 969045,
+      "publish_cycle": 969075,
+      "group_take_cycle": 1192974,
+      "first_member_take": 1193094,
+      "first_raw_start": 1193095,
+      "head_to_group_take": 239208,
+      "head_to_first_raw": 239329,
+      "publish_to_group_take": 223899,
+      "group_take_to_first_raw": 121,
+      "group_unuploaded_after_next_CPU_call": true,
+      "known_staged_delay_before_upload": 1673,
+      "known_staged_delay_before_publish": 1931,
+      "idle_empty_during_known_staged_delay_bounds": [
+        0,
+        0
+      ],
+      "overlap_during_known_staged_delay": {
+        "worker_without_job": 1931,
+        "raster_state_IDLE": 3
+      },
+      "next_legacy_acquire_cycle": 969855,
+      "publish_to_legacy_acquire": 780
+    },
+    {
+      "phase": 1,
+      "firstseq": 31,
+      "members": 9,
+      "CPU_call": 35,
+      "CPU_call_cycle": 977061,
+      "next_CPU_call_cycle": 995211,
+      "context_upload_start": 997039,
+      "GROUP_upload_start": 997201,
+      "GROUP_upload_end": 997264,
+      "publish_cycle": 997294,
+      "group_take_cycle": 1196539,
+      "first_member_take": 1196659,
+      "first_raw_start": 1196660,
+      "head_to_group_take": 219478,
+      "head_to_first_raw": 219599,
+      "publish_to_group_take": 199245,
+      "group_take_to_first_raw": 121,
+      "group_unuploaded_after_next_CPU_call": true,
+      "known_staged_delay_before_upload": 1828,
+      "known_staged_delay_before_publish": 2083,
+      "idle_empty_during_known_staged_delay_bounds": [
+        0,
+        0
+      ],
+      "overlap_during_known_staged_delay": {
+        "worker_without_job": 2083
+      },
+      "next_legacy_acquire_cycle": 997766,
+      "publish_to_legacy_acquire": 472
+    },
+    {
+      "phase": 1,
+      "firstseq": 41,
+      "members": 9,
+      "CPU_call": 68,
+      "CPU_call_cycle": 1320447,
+      "next_CPU_call_cycle": 1342472,
+      "context_upload_start": 1344641,
+      "GROUP_upload_start": 1344797,
+      "GROUP_upload_end": 1344832,
+      "publish_cycle": 1344878,
+      "group_take_cycle": 1345227,
+      "first_member_take": 1345357,
+      "first_raw_start": 1345358,
+      "head_to_group_take": 24780,
+      "head_to_first_raw": 24911,
+      "publish_to_group_take": 349,
+      "group_take_to_first_raw": 131,
+      "group_unuploaded_after_next_CPU_call": true,
+      "known_staged_delay_before_upload": 2169,
+      "known_staged_delay_before_publish": 2406,
+      "idle_empty_during_known_staged_delay_bounds": [
+        1016,
+        2406
+      ],
+      "overlap_during_known_staged_delay": {
+        "raster_state_IDLE": 2406,
+        "worker_without_job": 2406
+      },
+      "next_legacy_acquire_cycle": 1345441,
+      "publish_to_legacy_acquire": 563
+    },
+    {
+      "phase": 1,
+      "firstseq": 50,
+      "members": 20,
+      "CPU_call": 72,
+      "CPU_call_cycle": 1382440,
+      "next_CPU_call_cycle": 1416587,
+      "context_upload_start": 1418918,
+      "GROUP_upload_start": 1419074,
+      "GROUP_upload_end": 1419133,
+      "publish_cycle": 1419163,
+      "group_take_cycle": 1422929,
+      "first_member_take": 1423065,
+      "first_raw_start": 1423066,
+      "head_to_group_take": 40489,
+      "head_to_first_raw": 40626,
+      "publish_to_group_take": 3766,
+      "group_take_to_first_raw": 137,
+      "group_unuploaded_after_next_CPU_call": true,
+      "known_staged_delay_before_upload": 2331,
+      "known_staged_delay_before_publish": 2576,
+      "idle_empty_during_known_staged_delay_bounds": [
+        629,
+        2576
+      ],
+      "overlap_during_known_staged_delay": {
+        "raster_state_IDLE": 2576,
+        "worker_without_job": 2576
+      },
+      "next_legacy_acquire_cycle": 1419304,
+      "publish_to_legacy_acquire": 141
+    },
+    {
+      "phase": 1,
+      "firstseq": 70,
+      "members": 8,
+      "CPU_call": 82,
+      "CPU_call_cycle": 1694173,
+      "next_CPU_call_cycle": 1711349,
+      "context_upload_start": 1712701,
+      "GROUP_upload_start": 1712857,
+      "GROUP_upload_end": 1712892,
+      "publish_cycle": 1712938,
+      "group_take_cycle": 1812469,
+      "first_member_take": 1812589,
+      "first_raw_start": 1812590,
+      "head_to_group_take": 118296,
+      "head_to_first_raw": 118417,
+      "publish_to_group_take": 99531,
+      "group_take_to_first_raw": 121,
+      "group_unuploaded_after_next_CPU_call": true,
+      "known_staged_delay_before_upload": 1352,
+      "known_staged_delay_before_publish": 1589,
+      "idle_empty_during_known_staged_delay_bounds": [
+        0,
+        0
+      ],
+      "overlap_during_known_staged_delay": {
+        "raster_state_IDLE": 1589
+      },
+      "next_legacy_acquire_cycle": 1713193,
+      "publish_to_legacy_acquire": 255
+    },
+    {
+      "phase": 1,
+      "firstseq": 78,
+      "members": 7,
+      "CPU_call": 93,
+      "CPU_call_cycle": 1918641,
+      "next_CPU_call_cycle": 1933130,
+      "context_upload_start": 1936098,
+      "GROUP_upload_start": 1936343,
+      "GROUP_upload_end": 1936413,
+      "publish_cycle": 1936435,
+      "group_take_cycle": 1939571,
+      "first_member_take": 1939691,
+      "first_raw_start": 1939692,
+      "head_to_group_take": 20930,
+      "head_to_first_raw": 21051,
+      "publish_to_group_take": 3136,
+      "group_take_to_first_raw": 121,
+      "group_unuploaded_after_next_CPU_call": true,
+      "known_staged_delay_before_upload": 2968,
+      "known_staged_delay_before_publish": 3305,
+      "idle_empty_during_known_staged_delay_bounds": [
+        2335,
+        3305
+      ],
+      "overlap_during_known_staged_delay": {
+        "raster_state_IDLE": 3305,
+        "worker_without_job": 3305
+      },
+      "next_legacy_acquire_cycle": 1936717,
+      "publish_to_legacy_acquire": 282
+    },
+    {
+      "phase": 1,
+      "firstseq": 85,
+      "members": 2,
+      "CPU_call": 101,
+      "CPU_call_cycle": 1992384,
+      "next_CPU_call_cycle": 1999013,
+      "context_upload_start": 2001545,
+      "GROUP_upload_start": 2001701,
+      "GROUP_upload_end": 2001756,
+      "publish_cycle": 2001786,
+      "group_take_cycle": 2004833,
+      "first_member_take": 2004953,
+      "first_raw_start": 2004954,
+      "head_to_group_take": 12449,
+      "head_to_first_raw": 12570,
+      "publish_to_group_take": 3047,
+      "group_take_to_first_raw": 121,
+      "group_unuploaded_after_next_CPU_call": true,
+      "known_staged_delay_before_upload": 2532,
+      "known_staged_delay_before_publish": 2773,
+      "idle_empty_during_known_staged_delay_bounds": [
+        1618,
+        2773
+      ],
+      "overlap_during_known_staged_delay": {
+        "raster_state_IDLE": 2773,
+        "worker_without_job": 2773
+      },
+      "next_legacy_acquire_cycle": 2001961,
+      "publish_to_legacy_acquire": 175
+    },
+    {
+      "phase": 1,
+      "firstseq": 87,
+      "members": 4,
+      "CPU_call": 112,
+      "CPU_call_cycle": 2094113,
+      "next_CPU_call_cycle": 2104688,
+      "context_upload_start": 2106802,
+      "GROUP_upload_start": 2106958,
+      "GROUP_upload_end": 2107019,
+      "publish_cycle": 2107048,
+      "group_take_cycle": 2110301,
+      "first_member_take": 2110421,
+      "first_raw_start": 2110422,
+      "head_to_group_take": 16188,
+      "head_to_first_raw": 16309,
+      "publish_to_group_take": 3253,
+      "group_take_to_first_raw": 121,
+      "group_unuploaded_after_next_CPU_call": true,
+      "known_staged_delay_before_upload": 2114,
+      "known_staged_delay_before_publish": 2360,
+      "idle_empty_during_known_staged_delay_bounds": [
+        656,
+        2360
+      ],
+      "overlap_during_known_staged_delay": {
+        "raster_state_IDLE": 2360,
+        "worker_without_job": 2360
+      },
+      "next_legacy_acquire_cycle": 2107223,
+      "publish_to_legacy_acquire": 175
+    },
+    {
+      "phase": 1,
+      "firstseq": 97,
+      "members": 2,
+      "CPU_call": 189,
+      "CPU_call_cycle": 2788356,
+      "next_CPU_call_cycle": 2800583,
+      "context_upload_start": 2799943,
+      "GROUP_upload_start": 2800126,
+      "GROUP_upload_end": 2800175,
+      "publish_cycle": 2800205,
+      "group_take_cycle": 2804790,
+      "first_member_take": 2804910,
+      "first_raw_start": 2804911,
+      "head_to_group_take": 16434,
+      "head_to_first_raw": 16555,
+      "publish_to_group_take": 4585,
+      "group_take_to_first_raw": 121,
+      "group_unuploaded_after_next_CPU_call": false
+    },
+    {
+      "phase": 2,
+      "firstseq": 99,
+      "members": 3,
+      "CPU_call": 288,
+      "CPU_call_cycle": 5032242,
+      "next_CPU_call_cycle": 5063032,
+      "context_upload_start": 5066030,
+      "GROUP_upload_start": 5066183,
+      "GROUP_upload_end": 5066246,
+      "publish_cycle": 5066276,
+      "group_take_cycle": 5079962,
+      "first_member_take": 5080082,
+      "first_raw_start": 5080083,
+      "head_to_group_take": 47720,
+      "head_to_first_raw": 47841,
+      "publish_to_group_take": 13686,
+      "group_take_to_first_raw": 121,
+      "group_unuploaded_after_next_CPU_call": true,
+      "known_staged_delay_before_upload": 2998,
+      "known_staged_delay_before_publish": 3244,
+      "idle_empty_during_known_staged_delay_bounds": [
+        0,
+        0
+      ],
+      "overlap_during_known_staged_delay": {
+        "worker_without_job": 3244
+      },
+      "next_legacy_acquire_cycle": 5067044,
+      "publish_to_legacy_acquire": 768
+    },
+    {
+      "phase": 2,
+      "firstseq": 106,
+      "members": 6,
+      "CPU_call": 314,
+      "CPU_call_cycle": 5418991,
+      "next_CPU_call_cycle": 5437235,
+      "context_upload_start": 5439372,
+      "GROUP_upload_start": 5439547,
+      "GROUP_upload_end": 5439596,
+      "publish_cycle": 5439626,
+      "group_take_cycle": 5700879,
+      "first_member_take": 5700999,
+      "first_raw_start": 5701000,
+      "head_to_group_take": 281888,
+      "head_to_first_raw": 282009,
+      "publish_to_group_take": 261253,
+      "group_take_to_first_raw": 121,
+      "group_unuploaded_after_next_CPU_call": true,
+      "known_staged_delay_before_upload": 2137,
+      "known_staged_delay_before_publish": 2391,
+      "idle_empty_during_known_staged_delay_bounds": [
+        0,
+        0
+      ],
+      "overlap_during_known_staged_delay": {
+        "worker_without_job": 2391
+      },
+      "next_legacy_acquire_cycle": 5440018,
+      "publish_to_legacy_acquire": 392
+    },
+    {
+      "phase": 2,
+      "firstseq": 114,
+      "members": 2,
+      "CPU_call": 320,
+      "CPU_call_cycle": 5491881,
+      "next_CPU_call_cycle": 5497630,
+      "context_upload_start": 5499138,
+      "GROUP_upload_start": 5499294,
+      "GROUP_upload_end": 5499329,
+      "publish_cycle": 5499376,
+      "group_take_cycle": 5795415,
+      "first_member_take": 5795535,
+      "first_raw_start": 5795536,
+      "head_to_group_take": 303534,
+      "head_to_first_raw": 303655,
+      "publish_to_group_take": 296039,
+      "group_take_to_first_raw": 121,
+      "group_unuploaded_after_next_CPU_call": true,
+      "known_staged_delay_before_upload": 1508,
+      "known_staged_delay_before_publish": 1746,
+      "idle_empty_during_known_staged_delay_bounds": [
+        0,
+        0
+      ],
+      "overlap_during_known_staged_delay": {
+        "worker_without_job": 1746
+      },
+      "next_legacy_acquire_cycle": 5499785,
+      "publish_to_legacy_acquire": 409
+    },
+    {
+      "phase": 2,
+      "firstseq": 116,
+      "members": 3,
+      "CPU_call": 324,
+      "CPU_call_cycle": 5524730,
+      "next_CPU_call_cycle": 5535173,
+      "context_upload_start": 5537069,
+      "GROUP_upload_start": 5537248,
+      "GROUP_upload_end": 5537297,
+      "publish_cycle": 5537327,
+      "group_take_cycle": 5831839,
+      "first_member_take": 5831959,
+      "first_raw_start": 5831960,
+      "head_to_group_take": 307109,
+      "head_to_first_raw": 307230,
+      "publish_to_group_take": 294512,
+      "group_take_to_first_raw": 121,
+      "group_unuploaded_after_next_CPU_call": true,
+      "known_staged_delay_before_upload": 1896,
+      "known_staged_delay_before_publish": 2154,
+      "idle_empty_during_known_staged_delay_bounds": [
+        0,
+        0
+      ],
+      "overlap_during_known_staged_delay": {
+        "worker_without_job": 2154
+      },
+      "next_legacy_acquire_cycle": 5538267,
+      "publish_to_legacy_acquire": 940
+    },
+    {
+      "phase": 2,
+      "firstseq": 119,
+      "members": 9,
+      "CPU_call": 326,
+      "CPU_call_cycle": 5546176,
+      "next_CPU_call_cycle": 5557648,
+      "context_upload_start": 5559104,
+      "GROUP_upload_start": 5559266,
+      "GROUP_upload_end": 5559337,
+      "publish_cycle": 5559367,
+      "group_take_cycle": 5835416,
+      "first_member_take": 5835536,
+      "first_raw_start": 5835537,
+      "head_to_group_take": 289240,
+      "head_to_first_raw": 289361,
+      "publish_to_group_take": 276049,
+      "group_take_to_first_raw": 121,
+      "group_unuploaded_after_next_CPU_call": true,
+      "known_staged_delay_before_upload": 1456,
+      "known_staged_delay_before_publish": 1719,
+      "idle_empty_during_known_staged_delay_bounds": [
+        0,
+        0
+      ],
+      "overlap_during_known_staged_delay": {
+        "worker_without_job": 1719
+      },
+      "next_legacy_acquire_cycle": 5560189,
+      "publish_to_legacy_acquire": 822
+    },
+    {
+      "phase": 2,
+      "firstseq": 129,
+      "members": 9,
+      "CPU_call": 359,
+      "CPU_call_cycle": 5837844,
+      "next_CPU_call_cycle": 5850246,
+      "context_upload_start": 5851287,
+      "GROUP_upload_start": 5851479,
+      "GROUP_upload_end": 5851537,
+      "publish_cycle": 5851559,
+      "group_take_cycle": 5934260,
+      "first_member_take": 5934402,
+      "first_raw_start": 5934403,
+      "head_to_group_take": 96416,
+      "head_to_first_raw": 96559,
+      "publish_to_group_take": 82701,
+      "group_take_to_first_raw": 143,
+      "group_unuploaded_after_next_CPU_call": true,
+      "known_staged_delay_before_upload": 1041,
+      "known_staged_delay_before_publish": 1313,
+      "idle_empty_during_known_staged_delay_bounds": [
+        0,
+        0
+      ],
+      "overlap_during_known_staged_delay": {
+        "worker_without_job": 1313,
+        "raster_state_IDLE": 5
+      },
+      "next_legacy_acquire_cycle": 5851780,
+      "publish_to_legacy_acquire": 221
+    },
+    {
+      "phase": 2,
+      "firstseq": 138,
+      "members": 4,
+      "CPU_call": 366,
+      "CPU_call_cycle": 5948721,
+      "next_CPU_call_cycle": 5953994,
+      "context_upload_start": 5956196,
+      "GROUP_upload_start": 5956352,
+      "GROUP_upload_end": 5956407,
+      "publish_cycle": 5956437,
+      "group_take_cycle": 5959726,
+      "first_member_take": 5959868,
+      "first_raw_start": 5959869,
+      "head_to_group_take": 11005,
+      "head_to_first_raw": 11148,
+      "publish_to_group_take": 3289,
+      "group_take_to_first_raw": 143,
+      "group_unuploaded_after_next_CPU_call": true,
+      "known_staged_delay_before_upload": 2202,
+      "known_staged_delay_before_publish": 2443,
+      "idle_empty_during_known_staged_delay_bounds": [
+        0,
+        0
+      ],
+      "overlap_during_known_staged_delay": {
+        "worker_without_job": 2443,
+        "raster_state_IDLE": 11
+      },
+      "next_legacy_acquire_cycle": 5956633,
+      "publish_to_legacy_acquire": 196
+    },
+    {
+      "phase": 2,
+      "firstseq": 142,
+      "members": 4,
+      "CPU_call": 369,
+      "CPU_call_cycle": 5995377,
+      "next_CPU_call_cycle": 6012288,
+      "context_upload_start": 6014197,
+      "GROUP_upload_start": 6014389,
+      "GROUP_upload_end": 6014446,
+      "publish_cycle": 6014475,
+      "group_take_cycle": 6112807,
+      "first_member_take": 6112927,
+      "first_raw_start": 6112928,
+      "head_to_group_take": 117430,
+      "head_to_first_raw": 117551,
+      "publish_to_group_take": 98332,
+      "group_take_to_first_raw": 121,
+      "group_unuploaded_after_next_CPU_call": true,
+      "known_staged_delay_before_upload": 1909,
+      "known_staged_delay_before_publish": 2187,
+      "idle_empty_during_known_staged_delay_bounds": [
+        0,
+        0
+      ],
+      "overlap_during_known_staged_delay": {},
+      "next_legacy_acquire_cycle": 6014683,
+      "publish_to_legacy_acquire": 208
+    },
+    {
+      "phase": 2,
+      "firstseq": 146,
+      "members": 2,
+      "CPU_call": 373,
+      "CPU_call_cycle": 6059939,
+      "next_CPU_call_cycle": 6064456,
+      "context_upload_start": 6065528,
+      "GROUP_upload_start": 6065709,
+      "GROUP_upload_end": 6066055,
+      "publish_cycle": 6066084,
+      "group_take_cycle": 6164401,
+      "first_member_take": 6164521,
+      "first_raw_start": 6164522,
+      "head_to_group_take": 104462,
+      "head_to_first_raw": 104583,
+      "publish_to_group_take": 98317,
+      "group_take_to_first_raw": 121,
+      "group_unuploaded_after_next_CPU_call": true,
+      "known_staged_delay_before_upload": 1072,
+      "known_staged_delay_before_publish": 1628,
+      "idle_empty_during_known_staged_delay_bounds": [
+        0,
+        0
+      ],
+      "overlap_during_known_staged_delay": {
+        "raster_state_IDLE": 1
+      },
+      "next_legacy_acquire_cycle": 6066289,
+      "publish_to_legacy_acquire": 205
+    },
+    {
+      "phase": 2,
+      "firstseq": 149,
+      "members": 6,
+      "CPU_call": 387,
+      "CPU_call_cycle": 6208605,
+      "next_CPU_call_cycle": 6215512,
+      "context_upload_start": 6217174,
+      "GROUP_upload_start": 6217339,
+      "GROUP_upload_end": 6217374,
+      "publish_cycle": 6217420,
+      "group_take_cycle": 6280521,
+      "first_member_take": 6280641,
+      "first_raw_start": 6280642,
+      "head_to_group_take": 71916,
+      "head_to_first_raw": 72037,
+      "publish_to_group_take": 63101,
+      "group_take_to_first_raw": 121,
+      "group_unuploaded_after_next_CPU_call": true,
+      "known_staged_delay_before_upload": 1662,
+      "known_staged_delay_before_publish": 1908,
+      "idle_empty_during_known_staged_delay_bounds": [
+        0,
+        0
+      ],
+      "overlap_during_known_staged_delay": {
+        "worker_without_job": 1908,
+        "raster_state_IDLE": 6
+      },
+      "next_legacy_acquire_cycle": 6218082,
+      "publish_to_legacy_acquire": 662
+    },
+    {
+      "phase": 2,
+      "firstseq": 155,
+      "members": 7,
+      "CPU_call": 398,
+      "CPU_call_cycle": 6321725,
+      "next_CPU_call_cycle": 6335436,
+      "context_upload_start": 6339078,
+      "GROUP_upload_start": 6339257,
+      "GROUP_upload_end": 6339306,
+      "publish_cycle": 6339336,
+      "group_take_cycle": 6339723,
+      "first_member_take": 6342617,
+      "first_raw_start": 6342618,
+      "head_to_group_take": 17998,
+      "head_to_first_raw": 20893,
+      "publish_to_group_take": 387,
+      "group_take_to_first_raw": 2895,
+      "group_unuploaded_after_next_CPU_call": true,
+      "known_staged_delay_before_upload": 3642,
+      "known_staged_delay_before_publish": 3900,
+      "idle_empty_during_known_staged_delay_bounds": [
+        0,
+        405
+      ],
+      "overlap_during_known_staged_delay": {
+        "raster_state_IDLE": 3900,
+        "worker_without_job": 3900
+      },
+      "next_legacy_acquire_cycle": 6339731,
+      "publish_to_legacy_acquire": 395
+    },
+    {
+      "phase": 2,
+      "firstseq": 162,
+      "members": 2,
+      "CPU_call": 406,
+      "CPU_call_cycle": 6388564,
+      "next_CPU_call_cycle": 6393203,
+      "context_upload_start": 6396421,
+      "GROUP_upload_start": 6396577,
+      "GROUP_upload_end": 6396632,
+      "publish_cycle": 6396662,
+      "group_take_cycle": 6399720,
+      "first_member_take": 6399840,
+      "first_raw_start": 6399841,
+      "head_to_group_take": 11156,
+      "head_to_first_raw": 11277,
+      "publish_to_group_take": 3058,
+      "group_take_to_first_raw": 121,
+      "group_unuploaded_after_next_CPU_call": true,
+      "known_staged_delay_before_upload": 3218,
+      "known_staged_delay_before_publish": 3459,
+      "idle_empty_during_known_staged_delay_bounds": [
+        2172,
+        3459
+      ],
+      "overlap_during_known_staged_delay": {
+        "raster_state_IDLE": 3459,
+        "worker_without_job": 3459
+      },
+      "next_legacy_acquire_cycle": 6396919,
+      "publish_to_legacy_acquire": 257
+    },
+    {
+      "phase": 2,
+      "firstseq": 164,
+      "members": 4,
+      "CPU_call": 417,
+      "CPU_call_cycle": 6737985,
+      "next_CPU_call_cycle": 6745471,
+      "context_upload_start": 6747654,
+      "GROUP_upload_start": 6747810,
+      "GROUP_upload_end": 6747871,
+      "publish_cycle": 6747900,
+      "group_take_cycle": 6750963,
+      "first_member_take": 6751083,
+      "first_raw_start": 6751084,
+      "head_to_group_take": 12978,
+      "head_to_first_raw": 13099,
+      "publish_to_group_take": 3063,
+      "group_take_to_first_raw": 121,
+      "group_unuploaded_after_next_CPU_call": true,
+      "known_staged_delay_before_upload": 2183,
+      "known_staged_delay_before_publish": 2429,
+      "idle_empty_during_known_staged_delay_bounds": [
+        641,
+        2429
+      ],
+      "overlap_during_known_staged_delay": {
+        "raster_state_IDLE": 2429,
+        "worker_without_job": 2429
+      },
+      "next_legacy_acquire_cycle": 6748084,
+      "publish_to_legacy_acquire": 184
+    },
+    {
+      "phase": 2,
+      "firstseq": 173,
+      "members": 2,
+      "CPU_call": 494,
+      "CPU_call_cycle": 7358052,
+      "next_CPU_call_cycle": 7366480,
+      "context_upload_start": 7367932,
+      "GROUP_upload_start": 7368088,
+      "GROUP_upload_end": 7368149,
+      "publish_cycle": 7368178,
+      "group_take_cycle": 7371581,
+      "first_member_take": 7371701,
+      "first_raw_start": 7371702,
+      "head_to_group_take": 13529,
+      "head_to_first_raw": 13650,
+      "publish_to_group_take": 3403,
+      "group_take_to_first_raw": 121,
+      "group_unuploaded_after_next_CPU_call": true,
+      "known_staged_delay_before_upload": 1452,
+      "known_staged_delay_before_publish": 1698,
+      "idle_empty_during_known_staged_delay_bounds": [
+        0,
+        0
+      ],
+      "overlap_during_known_staged_delay": {
+        "worker_without_job": 1698,
+        "raster_state_IDLE": 6
+      },
+      "next_legacy_acquire_cycle": 7368539,
+      "publish_to_legacy_acquire": 361
+    }
+  ],
+  "limits": [
+    "The CPU LOAD-entry to hardware-entry interval includes real CPU group construction and intervening work, not just publication delay.",
+    "A following actual CPU LOAD call before any context upload proves the preceding GROUP was already staged but unsent. The interval begins after preparation, so it is a lower bound on staging delay.",
+    "GPU idle_empty bounds use4096-cycle timeline bins; raster_state_IDLE additionally includes cache maintenance.",
+    "Per-group latencies can overlap. Only merged-union counts avoid double counting.",
+    "A near-following legacy acquire plus the frozen acquire helper supports attribution to its forced kick; MMIO itself does not record the caller PC.",
+    "No time here is automatically recoverable: earlier publication may still wait behind older raster work or a legacy lease."
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/group-start-delay-v1/analyze.py": "f4a457780240f93b2c4fb3eabdec7c6e2b918614544d54be7e05652e7b0e6b12",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/independent_lifetime_v1.py": "87c88d19a51214aed6a6324afca121ccb1cc5dc22199ca5eccb7c7ef181ab8eb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v1/check-independent-v1.json": "bbc258e47fe948537579a95b901b2c7c3e09eea9dae1fab5f4102f8cda7f4ddc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v1/run/async-events.tsv": "324ddd3c0389234285d431b7bb32376719ddd52831699cd77c7bdba59f3492aa",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v1/run/vtx-calls.tsv": "7c96e035a1593f32f499dc03a712f7c5911cce3de7aab5a1716f296d73f26ba0",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v1/run/mmio.tsv": "a9915eb40f8c26140534fff402d135ea3f470d7251ea303352166bef2b0ee657",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v1/run/commands.bin": "753c3163255fde39512697be3149ed3d194dfe698dcebc465994406dcbd18e76",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v1/run/gpu-profile-timeline.csv": "8e29b548e58411514df0eef3ecb39b17d94aa090c3f48ddec9633fa5084f22cf",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app/src/sdk/include/of_gpu.h": "7e4b105e444b7307b36010da87749eff445650b6983283eeab9223e6af3dc01d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app/src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "d658d6d87219941b2d6b4bc413055bf29c736388031a7942f98c52ed32fb5e25"
+  }
+}

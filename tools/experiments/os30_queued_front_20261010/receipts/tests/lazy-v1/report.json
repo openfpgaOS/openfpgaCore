@@ -1,0 +1,48 @@
+{
+  "status": "PASS_ACTUAL_LAZY_C_FUNCTIONS",
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/check_lazy.py": "5f643bf41ce45260c707b1ba4f82b536b5a1c254b2157212434281f3779bb37b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "d3d0a0e3163be954f6086cf509620d18e750e152481df10a6e9e921cc1352cde",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/tests/lazy_bulk_test_tail.c": "b95f50875f4b8df19cccc29e2c260897508daf33ec01f0c6cc8b5cefe27b86bc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/lazy-v1/extracted.json": "ebc988953df315b89530a5365593ae5a9ad96afa0631939524789867816cf7bf",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/lazy-v1/test.c": "7fb72fa8789eb938cd10a0c51820e0f275bc5f725d57bc26954e2f0b30d18485"
+  },
+  "commands": [
+    {
+      "argv": [
+        "gcc",
+        "-std=c11",
+        "-O2",
+        "-ffp-contract=off",
+        "-fno-strict-aliasing",
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/lazy-v1/test.c",
+        "-o",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/lazy-v1/test"
+      ],
+      "returncode": 0,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/lazy-v1/test"
+      ],
+      "returncode": 0,
+      "log_sha256": "0c46fdea3e4ab33650b86302a79b8b339d9a0f320ed395838f1986d51be44df2"
+    }
+  ],
+  "result": {
+    "pass": true,
+    "loads": 8000,
+    "checks": 322014,
+    "explicit_consumes": 4968,
+    "materialized_slots": 52519,
+    "copy_calls": 5023
+  },
+  "limitations": [
+    "Host lifetime/addressing validation, not target floating-point fog arithmetic or MMIO execution.",
+    "Actual helper bodies and actual pre-G_VTX block extracted; hardware success/failure and ordinary software load represented by harness.",
+    "Frozen QGF source used. Snapshot release call is a test stub; actual ownership/ordering is separately covered by worker tests."
+  ]
+}

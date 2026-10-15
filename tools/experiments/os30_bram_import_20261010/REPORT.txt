@@ -1,0 +1,42 @@
+OS30 DIRECT ACCELERATOR BRAM TO GPU EXPERIMENT
+
+Decision: keep the current deployed baseline. The prototype is correct but
+does not improve the measured frame time. No FPGA build or deployment.
+
+Measured cycles; lower is better. Each row uses its own identical-ELF control.
+Design | baseline warm | candidate warm | change
+Shared raw bank | 4,308,650 | 5,357,737 | +24.348%
+Shared bank, end publication | 4,308,401 | 5,237,296 | +21.560%
+Shared bank, idle admission | 4,309,403 | 4,326,590 | +0.399%
+Two snapshots | 4,303,590 | 4,372,522 | +1.602%
+Snapshots, deferred threshold batching | 4,317,744 | 4,389,211 | +1.655%
+Snapshots, early capacity check and overlap | 4,317,710 | 4,350,839 | +0.767%
+
+Final warm command words: 23,000 -> 19,238 (-16.36%).
+Final two-interval result: 1,313 imported vertices, 161 accepted claims,
+zero producer wait loops, zero poll iterations, zero claim failures.
+
+The snapshots permit new raw geometry jobs while the GPU reads older results.
+This removes shared-bank serialization, but not the CPU geometry front end.
+Canonical readback, exact culling, material handling and job construction remain.
+The isolated quantization/store subset was only 1.29% of baseline warm time
+in the earlier matched appv5 pair (retirement-gap attribution, not a causal bound).
+
+Correctness: exact color/depth frames, buffer history, final Surface pool,
+FP registers/FCSR and every indexed draw payload/material; full bank lifetime
+and memory protocol/deadline checks. Known timestamp register is normalized.
+Arithmetic, copy ownership, concurrent bank access and reset cases also pass
+the focused ASan/UBSan test harnesses. See summary.json in the measurement
+directory or results.json in the source package for bound evidence.
+
+Limits: two deterministic SM64 intervals, fixed synthetic scan/audio, bounded
+guest services. No sustained Pocket FPS, Quake2, FPGA fit or timing claim.
+No full seed sweep. No SD writes. Baseline production sources unchanged.
+
+Reproducible sources are in tools/experiments/os30_bram_import_20261010.
+The detailed immutable replay/model/fixture evidence is beside this report.
+
+Equal prepared state in both models: verified-zero third color buffer,
+cleared_bufs3->7, and capability probe2->0 before CPU release. Each control
+redetects absent hardware and each candidate redetects its actual capability.
+These are prepared gameplay replays, not untouched startup tests.

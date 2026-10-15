@@ -1,0 +1,24 @@
+{
+  "status": "PASS",
+  "selected_arbiter_sha256": "5e9e06dca5ccf978a89f0aaacba05aa295ed7706636d8abed85ef2601ee037f1",
+  "baseline_arbiter_sha256": "bf3342a40edac6d77758bcaa15e2603fe72458cdfa84a7645fa3f27c69ac2c95",
+  "same_qsf_parameters_and_macros": true,
+  "cpu_ring_and_production_render_cache": true,
+  "baseline_candidate_full_transcript_exact": true,
+  "color_bytes_compared_per_frame": 153600,
+  "depth_bytes_compared_per_frame": 153600,
+  "nonzero_color_bytes": 132904,
+  "physical_framebuffer_write_operations_each": 4716,
+  "total_cycles_each": 1791183,
+  "refresh_warning": "Both control and candidate identically report refresh interval1701cycles versus model limit1700. Pre-existing in this common testbench/controller model; no new warning or timing regression. This gate does not qualify SDRAM electrical timing.",
+  "source_and_evidence_sha256": {
+    "integration-qsf-v2/receipt.json": "d4b6f72cec93ad02d4b9a3c8e3783cceada82cae4670bc2c4ed49578afffb14f",
+    "integration-qsf-v2-control/receipt.json": "2faa5c210cd5ea16741c060a0c80652bc1d844a473554482cec56f2568d4592e",
+    "integration-qsf-v2/run.log": "bfae58adaffa4de1cbe101d9d47e46295c463ae89c70f855c96f52c1c46c9596",
+    "integration-qsf-v2-control/run.log": "bfae58adaffa4de1cbe101d9d47e46295c463ae89c70f855c96f52c1c46c9596",
+    "replay_integration.py": "b341090bf4096b3b4c9e39096fd44677df5cf22c09dc075802fcf15a6f99f304"
+  },
+  "selected_OS30_texture_cache_sha256": "c3fdc0adfe5ed583c37bf09ad3dbbbecb1e3c6ae1f5714cab5064eacc328e51c",
+  "scope": "Final gate uses the QSF-selected OS30 texture-cache and color-depth-cache source files, exact core_top GPU parameters/macros, CPU ring, WQ16 and real shared SDRAM model.",
+  "supersedes": "integration-comparison.json used functionally equivalent generic texture-cache source; retained as diagnostic evidence, not the exact-source final gate."
+}

@@ -1,0 +1,49 @@
+{
+  "status": "EXPERIMENT_ONLY",
+  "baseline": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/native-v2/frozen/src/fpga/common",
+  "changes": [
+    {
+      "file": "geometry_async_mesh.v",
+      "before": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/native-v2/frozen/src/fpga/common/geometry_async_mesh.v",
+      "before_sha256": "a0dfbfb6b047c1be06dc2bff10df9071ecbebe73cbf355579cff3256098cf123",
+      "after": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/frozen/src/fpga/common/geometry_async_mesh.v",
+      "after_sha256": "4cf923a0f63f3e39c6e8fcba5fdb5aa3bda1ba008aa0284f16c2db800f70ee20"
+    },
+    {
+      "file": "geometry_mesh_raw_frontend.v",
+      "before": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/native-v2/frozen/src/fpga/common/geometry_mesh_raw_frontend.v",
+      "before_sha256": "cfe92bd326e9b8b60ce118f8d4cba0f734aec49d1eb8e1c270e82548f93f94b3",
+      "after": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/frozen/src/fpga/common/geometry_mesh_raw_frontend.v",
+      "after_sha256": "1d4397db226cd152e73f0ef59804cd396ab0ea3abb135a86625abfdee7f22d5b"
+    },
+    {
+      "file": "geometry_mesh_stream.v",
+      "before": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/native-v2/frozen/src/fpga/common/geometry_mesh_stream.v",
+      "before_sha256": "18947ec0aed3901031e03b536815cc6f6165617e7f52a036377e8ddbfa8fa7b7",
+      "after": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/frozen/src/fpga/common/geometry_mesh_stream.v",
+      "after_sha256": "d6b5d7b0b7ff71ceaba3498b2a438b8087441155f3a977a061b261d722c0383f"
+    },
+    {
+      "file": "geometry_mesh_task_engine.v",
+      "before": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/native-v2/frozen/src/fpga/common/geometry_mesh_task_engine.v",
+      "before_sha256": "26a0022220c1eba04b1df5b778e081a48895dfd370a8a39b61d36a043de39eef",
+      "after": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/frozen/src/fpga/common/geometry_mesh_task_engine.v",
+      "after_sha256": "4099d6ea9c34007ed4bdbb8f43ca0aa91167ee9eeee4c38b860c5c331a1fde99"
+    },
+    {
+      "file": "geometry_raw_load.v",
+      "before": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/native-v2/frozen/src/fpga/common/geometry_raw_load.v",
+      "before_sha256": "9a7faaf2558b6fb394bc3d06a06cbf0607b024ea4cb2326b1c97651c5537831a",
+      "after": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/frozen/src/fpga/common/geometry_raw_load.v",
+      "after_sha256": "fc0396d92eeed2ba22a89af7a844fa85bf24353fb00b1c0b4b681574799cc4cf"
+    },
+    {
+      "file": "gpu_mesh_job_front.v",
+      "before": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/native-v2/frozen/src/fpga/common/gpu_mesh_job_front.v",
+      "before_sha256": "8257e2cfe49d7d4186206fa539d7563de829cd63a695a0ebefefca0f631a3d99",
+      "after": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/frozen/src/fpga/common/gpu_mesh_job_front.v",
+      "after_sha256": "02f0b4c5cf3a09e3801d993044b6288417a6983d587f349acbf5add83067c5ba"
+    }
+  ],
+  "patch_sha256": "b09fe4e35e97c7f549ae3c8873ca52ed6fb58164abb888d754cc63f109dfb8fc"
+}

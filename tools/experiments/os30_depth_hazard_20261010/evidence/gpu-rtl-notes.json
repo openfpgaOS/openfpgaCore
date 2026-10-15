@@ -1,0 +1,37 @@
+{
+  "status": "RTL_READY_FOR_LINT_AND_DIRECTED_TESTS",
+  "baseline_model": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2",
+  "baseline_prepared_sha256": "9dc6be7d6567ccbd7ea78c56123e37f33d19d575fd94169fc32f67a93ff28ec6",
+  "baseline_source_sha256": "bb1143c3d6a42f6d209a59d220b373ce8ef6ef1d69dce7f10f400c30cf7810ee",
+  "candidate_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/work/gpu_core.v",
+  "candidate_source_sha256": "56ab019679f812cdce2020b34085e0238ef9ab3ebc97c92394f6aae102f9c0c7",
+  "patch_sha256": "c7c0f7f7e0d64045a47cb36a3ec37d714b156ad484f8c050e55d12c22f6b607f",
+  "recipe_sha256": "793e010bd57e3395e411b6d842e14a7aa3ea02a398f71fcede676456346e5f88",
+  "defines": [
+    "INCLUDE_GPU_DEPTH_SELECTIVE_WAIT"
+  ],
+  "required_existing_define": "INCLUDE_GPU_RENDER_CACHE",
+  "changed_read_path": "Only external depth-window launch uses depth_read_safe.",
+  "untouched": [
+    "Blend and color-window read barriers",
+    "Fence/flip/clear full drain",
+    "Write enqueue/drain/control",
+    "All cache RTL and ports"
+  ],
+  "queue_tag_state_bits": 129,
+  "state_breakdown": {
+    "fifo_tags": 96,
+    "fifo_valid": 16,
+    "pending_valid_index_tag": 11,
+    "read_tag": 6
+  },
+  "resource_claim": "Static register count only; no inferred-area, RAM, fit or timing claim.",
+  "ordering_contract": [
+    "Unpopped FIFO entries are covered by tags plus pending entry, including push/pop overlap.",
+    "All local req/stage/zflush/pending/combiner state retains a global block.",
+    "Popped writes own AW/W or have been accepted by the serialized render cache; cache AW has priority over AR.",
+    "The render cache completes upstream writes into cache data before accepting AR, or tracks posted SDRAM bypass/writeback hazards until downstream B.",
+    "Soft reset clears FIFO and matching tags together; ring reset does not clear either. No new B lifetime is tracked.",
+    "All address aliases use the same hash without a color/depth type distinction; partial masks conservatively conflict."
+  ]
+}

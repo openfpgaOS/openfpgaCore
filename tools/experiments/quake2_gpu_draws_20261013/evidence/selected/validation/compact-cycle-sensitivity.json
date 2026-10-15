@@ -1,0 +1,182 @@
+{
+  "baseline_cycles": 21099427,
+  "selected_cycles": 17168960,
+  "records": 3196,
+  "contexts": 58,
+  "budget_for_20_percent_gain_cycles": 413895.8333333358,
+  "extra_cycles_per_record_budget": 129.50432832707628,
+  "assumption": "First-order conservative estimate: every added worker cycle extends whole-frame time, with none hidden by CPU/raster overlap. This is not a formal bound on timing shifts in shared-memory arbitration; actual replay is the qualification gate.",
+  "rows": [
+    {
+      "extra_cycles_per_record": 1,
+      "added_total_cycles": 3196,
+      "busy_aggregate_throughput_gain_percent": 22.86999372705443,
+      "individual": [
+        {
+          "frame": 92,
+          "gain_percent": 14.5857918593703
+        },
+        {
+          "frame": 94,
+          "gain_percent": 34.71097764063169
+        },
+        {
+          "frame": 148,
+          "gain_percent": 21.366305373021753
+        }
+      ]
+    },
+    {
+      "extra_cycles_per_record": 4,
+      "added_total_cycles": 12784,
+      "busy_aggregate_throughput_gain_percent": 22.801428073890516,
+      "individual": [
+        {
+          "frame": 92,
+          "gain_percent": 14.543477639729009
+        },
+        {
+          "frame": 94,
+          "gain_percent": 34.62901920809396
+        },
+        {
+          "frame": 148,
+          "gain_percent": 21.27734311988747
+        }
+      ]
+    },
+    {
+      "extra_cycles_per_record": 8,
+      "added_total_cycles": 25568,
+      "busy_aggregate_throughput_gain_percent": 22.710126151761777,
+      "individual": [
+        {
+          "frame": 92,
+          "gain_percent": 14.487107269842813
+        },
+        {
+          "frame": 94,
+          "gain_percent": 34.51989630374186
+        },
+        {
+          "frame": 148,
+          "gain_percent": 21.15892945947957
+        }
+      ]
+    },
+    {
+      "extra_cycles_per_record": 16,
+      "added_total_cycles": 51136,
+      "busy_aggregate_throughput_gain_percent": 22.52792899644693,
+      "individual": [
+        {
+          "frame": 92,
+          "gain_percent": 14.374532815962926
+        },
+        {
+          "frame": 94,
+          "gain_percent": 34.30218033040005
+        },
+        {
+          "frame": 148,
+          "gain_percent": 20.922794492234686
+        }
+      ]
+    },
+    {
+      "extra_cycles_per_record": 32,
+      "added_total_cycles": 102272,
+      "busy_aggregate_throughput_gain_percent": 22.165153012825023,
+      "individual": [
+        {
+          "frame": 92,
+          "gain_percent": 14.1500467671559
+        },
+        {
+          "frame": 94,
+          "gain_percent": 33.86885575860836
+        },
+        {
+          "frame": 148,
+          "gain_percent": 20.453275154123183
+        }
+      ]
+    },
+    {
+      "extra_cycles_per_record": 48,
+      "added_total_cycles": 153408,
+      "busy_aggregate_throughput_gain_percent": 21.804518874093894,
+      "individual": [
+        {
+          "frame": 92,
+          "gain_percent": 13.926440202075852
+        },
+        {
+          "frame": 94,
+          "gain_percent": 33.438318428155256
+        },
+        {
+          "frame": 148,
+          "gain_percent": 19.987387815467095
+        }
+      ]
+    },
+    {
+      "extra_cycles_per_record": 64,
+      "added_total_cycles": 204544,
+      "busy_aggregate_throughput_gain_percent": 21.446007667768118,
+      "individual": [
+        {
+          "frame": 92,
+          "gain_percent": 13.703707962410604
+        },
+        {
+          "frame": 94,
+          "gain_percent": 33.01054153300493
+        },
+        {
+          "frame": 148,
+          "gain_percent": 19.52509049526374
+        }
+      ]
+    },
+    {
+      "extra_cycles_per_record": 96,
+      "added_total_cycles": 306816,
+      "busy_aggregate_throughput_gain_percent": 20.73527950919032,
+      "individual": [
+        {
+          "frame": 92,
+          "gain_percent": 13.260846026985895
+        },
+        {
+          "frame": 94,
+          "gain_percent": 32.16316353221731
+        },
+        {
+          "frame": 148,
+          "gain_percent": 18.611101196424997
+        }
+      ]
+    },
+    {
+      "extra_cycles_per_record": 128,
+      "added_total_cycles": 409088,
+      "busy_aggregate_throughput_gain_percent": 20.032821619328843,
+      "individual": [
+        {
+          "frame": 92,
+          "gain_percent": 12.821420492567759
+        },
+        {
+          "frame": 94,
+          "gain_percent": 31.3265140632748
+        },
+        {
+          "frame": 148,
+          "gain_percent": 17.7109840799347
+        }
+      ]
+    }
+  ]
+}

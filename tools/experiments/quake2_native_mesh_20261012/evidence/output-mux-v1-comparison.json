@@ -1,0 +1,11 @@
+{
+  "baseline_sha256": "61933f99a779ebb64ffe52e22d79c1905975218db58d043971014e49818a7781",
+  "candidate_sha256": "829827085023e6bf62832595e8f75ee57558d232e478640a6e65b4c728abdca5",
+  "identical_result_bytes": {
+    "native": true,
+    "legacy-disabled": true
+  },
+  "prepared_core_unchanged": true,
+  "physical_timing_measured": false,
+  "state_invariant": "Only SY_CLAMP enters EMIT, setting index 0. Enabled EMIT increments through 6 then exits. Holds retain state/index; resets leave EMIT. Therefore index[5:3]==0 for every observable EMIT write."
+}

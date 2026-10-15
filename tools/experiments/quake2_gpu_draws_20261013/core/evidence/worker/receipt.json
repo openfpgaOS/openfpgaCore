@@ -1,0 +1,60 @@
+{
+  "worker_sha256": "164d5ce2eeeb478eb7504660b8a4afef4d8f6a16cf75372ba5eff26917305892",
+  "version": "Verilator 5.052 2026-09-05 rev v5.052",
+  "commands": [
+    [
+      "verilator",
+      "--cc",
+      "--exe",
+      "--build",
+      "-j",
+      "4",
+      "-Wno-fatal",
+      "--top-module",
+      "geometry_worker_tb",
+      "--Mdir",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-gpu-draws-20261013/worker-descriptor-tests/gates-combined-v1/enabled/obj",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-gpu-draws-20261013/worker-descriptor-tests/geometry_worker_tb.v",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-gpu-draws-20261013/rtl-compact-descriptor-candidate/src/fpga/common/gpu_geometry_worker.v",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-gpu-draws-20261013/worker-descriptor-tests/geometry_worker.cpp"
+    ],
+    [
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-gpu-draws-20261013/worker-descriptor-tests/gates-combined-v1/enabled/obj/Vgeometry_worker_tb"
+    ],
+    [
+      "verilator",
+      "--cc",
+      "--exe",
+      "--build",
+      "-j",
+      "4",
+      "-Wno-fatal",
+      "--top-module",
+      "geometry_worker_tb",
+      "--Mdir",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-gpu-draws-20261013/worker-descriptor-tests/gates-combined-v1/legacy-disabled/obj",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-gpu-draws-20261013/worker-descriptor-tests/legacy-disabled/geometry_worker_tb.v",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-gpu-draws-20261013/rtl-compact-descriptor-candidate/src/fpga/common/gpu_geometry_worker.v",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-gpu-draws-20261013/worker-descriptor-tests/legacy-disabled/geometry_worker.cpp"
+    ],
+    [
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-gpu-draws-20261013/worker-descriptor-tests/gates-combined-v1/legacy-disabled/obj/Vgeometry_worker_tb"
+    ]
+  ],
+  "scope": "Exact synthetic worker output, canonical integer particles, mixed native MD2/legacy geometry, queue stalls/wrap, enable holds, malformed inputs, soft/ring/media reset. Full GPU image comparisons and physical timing are separate.",
+  "enabled": {
+    "sources": {
+      "geometry_worker_tb.v": "a75ab55b255cb9b4324ac85f7a95f1026f66aebe5d1c3b854376977a1b8fcaec",
+      "geometry_worker.cpp": "b2da77e3749e8568c8c3cbb77102161b4ccaa9b0aec1b1de1091b4423d73f569"
+    },
+    "result": "PASS particles640 mixed jobs, 520456 exact output words, six malformed contexts, RNE/bbox/alpha/cull and preserved native context (5401144 cycles)\nPASS particle invalid record8/overflow1: no indexed triangle or hang\nPASS particle reset18 at divide/emit/alpha/basis/space/triangle; stale context rejects; fresh rebind recovers\nPASS descriptor width: rejected108 high/alignment bits, immediate valid recovery, accepted10 count/address/end boundaries (859703 cycles)\nPASS malformed19, reset12 (request-held/before-data/mid/last; soft/ring/media), postreset reuse\nPASS: 1920 mixed vertex batches, 7680 winding tests, 199032 exact output words, wrap/backpressure/enable/reset (3958603 cycles)\nNative jobs120, meshlets240, burst reads25902, returnedbeats207216, beatswhilepaused23117\n"
+  },
+  "legacy-disabled": {
+    "sources": {
+      "geometry_worker_tb.v": "f0077c5b29445a57b1bed821682d9ee3d4e01636715b065d68f9e7190cba60d7",
+      "geometry_worker.cpp": "0127d1f8054b5c20cee8be30fcf319bbd201b49379529a524fedf325ed158047"
+    },
+    "result": "PASS disabled particles: context/records/alpha pass through as unknown commands\nPASS: 1920 mixed vertex batches, 7680 winding tests, 159960 exact output words, wrap/backpressure/enable/reset (3017813 cycles)\n"
+  },
+  "passed": true
+}

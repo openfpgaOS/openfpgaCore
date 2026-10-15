@@ -1,0 +1,13 @@
+F27 remaining CPU submission work (read-only)
+
+The complete warm interval is4,724,262 cycles versus4,649,707 for the same-ELF control: +74,555 (+1.603%). Retired instructions fall from2,198,460 to2,080,136. These measured boundaries, not charged buckets, decide performance.
+
+250 legacy LOADs invoke acquisition, but147 reuse an existing lease. There are103 actual grants, each with three acquisition writes, followed by103 releases. The555 release-if-pending calls produce only103 completed-sequence MMIO reads:87 release a blocking lease and16 mark it quiescent. Acquisition reads status414 times, including311 unsuccessful loop iterations. The no-repair service fast path is still called832 times.
+
+Actual hardware lease-pending time totals15,267 cycles (median1, maximum2,001);87 of103 waits are one cycle. Lease-granted residence is2,277,534 cycles, of which146,838 overlap legacy raw transformation. This is ownership while the CPU uses canonical state, not a blocked-CPU counter. Output FIFO full lasts1,093,279 cycles,988,952 overlapping fragment rendering; these overlap other counters.
+
+GEO writes rise from2,459 to4,912: matrix1,136→2,656; scalar345→1,094; LOAD setup978→750; lease protocol0→412. New lease acquisition deliberately invalidates the legacy matrix/scalar dirty cache. Context reprogramming therefore accounts for2,269 extra writes even though hardware LOAD starts fall326→250.
+
+A hypothetical one-write ticket-bearing ACQUIRE could replace309 acquisition writes with103, eliminating206 transactions (4.19% of candidate GEO writes). The two corresponding store PCs carry824 preceding-retirement-gap cycles in this run; that is not their full posted-write cost or a prediction of saved frame time. Epoch/status/grant checks, lazy lifetime, material lookup, context restoration and output backpressure remain. No fused ABI is implemented.
+
+Largest added charged function buckets are acquire+108,293, mesh lookup+51,101, display-list interpreter+40,218, admission+30,404, service+21,725 and source lookup+17,338. Large removed buckets include CPU indexed work−135,447, prepared vertex upload−42,823 and canonical copy−33,505. These diagnostic buckets are not exclusive work intervals or recoverable savings. Exact sites, disassembly, hashes and the complete comparison are in result.json.

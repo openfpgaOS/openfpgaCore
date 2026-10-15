@@ -1,0 +1,26 @@
+{
+  "status": "READY_FOR_PHYSICAL_QUALIFICATION",
+  "candidate_sha256": "e0f4ffbd20f2a20ab416543a0e9d830d7ec6b4d8d55df094479428b67f933fbb",
+  "all_functional_gates_passed": true,
+  "independent_source_review": "PASS: /root/q2_mesh_offload_design verified capacity sizing, modular arithmetic, wrap, and absence of state/data/capacity changes.",
+  "new_register_declarations": 0,
+  "new_states": 0,
+  "cycles_added": 0,
+  "total_lockstep_cycles": 27163742,
+  "width_proof_vectors": 1851968,
+  "width_configurations": 35,
+  "full_gpu_frames": 8,
+  "full_gpu_modes_per_frame": 2,
+  "evidence": {
+    "source-pins.json": "7953326e1cdb213eac52b675dd82c4aef09a83ad0edd1a8ff79ab996bce41bfe",
+    "structural-and-parent-equivalence.json": "08acdb586eec1e2de903804bab55c1b10f381ecddb7eaa099377a31e4ff49a13",
+    "lockstep-gates/receipt.json": "f84df800717a277fbd199c6b63aff347c31abf8678fece74bd75f545947b8db0",
+    "width-proof/receipt.json": "2183eb18845a6a3c716eaad01789940b818da9a71f2c91060604eda6229e3bff",
+    "full-gpu-v1/receipt.json": "8727259965e7a1b5e8089de4bb8c77d0473aac096c19ae35beb4b6989cf64053"
+  },
+  "physical_timing_qualified": false,
+  "limitations": [
+    "Native6 actualGPU replays isolate worker change; not restored-audio scheduling or Pocket FPS.",
+    "Physical result and source selection remain root-owned."
+  ]
+}

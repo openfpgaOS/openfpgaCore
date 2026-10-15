@@ -1,0 +1,45 @@
+{
+  "status": "PASS_SIX_CORRUPTIONS_REJECTED",
+  "cases": [
+    {
+      "case": "source_vertex_word",
+      "status": "REJECTED",
+      "message": "PSRAM task source differs from immutable CPU bytes"
+    },
+    {
+      "case": "accepted_context_word",
+      "status": "REJECTED",
+      "message": "accepted context words differ from ordered ingress"
+    },
+    {
+      "case": "legacy_granted_ticket",
+      "status": "REJECTED",
+      "message": ""
+    },
+    {
+      "case": "CPU_LOAD_identity",
+      "status": "REJECTED",
+      "message": "original LOAD call identity/order changed"
+    },
+    {
+      "case": "grant_during_open_context",
+      "status": "REJECTED",
+      "message": ""
+    },
+    {
+      "case": "actual_matrix_write_data",
+      "status": "REJECTED",
+      "message": ""
+    }
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/async_lifetime_v1.py": "52f5751134bee4f9204313558cf2e2675cab5fb3176db254af7fe6c3e24d441b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v1/check-independent-v1.json": "7ee241f926476d7ae81d47a5f5521a05f1e801e084c5da58e5d410fde95ad618",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v1/build.json": "446aae725049ca0ae8a458a569f9789f2222b70e09b61a8731a3044ef60ff737",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v1/run/job-sources.tsv": "8f058c87789617a94e93288ced593fa7e6f16d491f670039218b9a0b7cd3067c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v1/run/async-events.tsv": "9016b145234958d339f0e1996da4b0d0c05a586496a13016dff10ffe46b64298",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v1/run/vtx-calls.tsv": "ffcebcec722a710a40ea0133af334c554bf984d452554302d2efd8fd03b21b5e"
+  },
+  "script_sha256": "816e1009ec6c48775ee96a2bb3a0e55a5bd0fc61b661b39bf0615bafa535d22a",
+  "measured_inputs_unchanged": true
+}

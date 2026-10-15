@@ -1,0 +1,3 @@
+PASS malformed19, reset12 (request-held/before-data/mid/last; soft/ring/media), postreset reuse
+PASS: 1920 mixed vertex batches, 7680 winding tests, 195150 exact output words, wrap/backpressure/enable/reset (4111188 cycles)
+Native jobs120, meshlets240, burst reads10745, returnedbeats85960, beatswhilepaused9576

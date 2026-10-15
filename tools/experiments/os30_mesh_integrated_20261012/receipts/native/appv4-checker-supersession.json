@@ -1,0 +1,21 @@
+{
+  "status": "PASS_AFTER_ATTRIBUTED_SOURCE_CACHE_OMISSIONS",
+  "original_failure": "Appv3 source-key hash history does not apply to appv4: appv4 has exactly one failed count16 task per interval, rather than five failures. Original rendering/state checks passed; the incorrect omission assumption stopped lifetime validation.",
+  "intermediate_failure": "The initial replacement copied the context-only sequence matcher warm omission index598. Read-only per-call capture proves actual omission is597; adjacent started tasks have identical arithmetic contexts, so a context-only sequence matcher cannot identify source ownership. Intermediate failure is preserved.",
+  "replacement": "check-independent-v3.json",
+  "replacement_hook": "../mesh3_lifetime_appv4_v3.py",
+  "invariant": "Every actual LOAD call has the exact same vertex pointer/count/first/fog arguments as capability-off control. All638 mesh-source calls are independently replayed through the actual512-entry/16-probe cache from the zero initial table. Both failed probe windows match actual CPU cache contents. Omitted raw jobs271 and597 belong to those exact failed calls; no START occurs there. Every other START retains exact effective transform context. Rendering/draw-order/Surface/CPUregister/FCSR/deadline/protocol oracles remain unchanged.",
+  "proof": "../source-proof-v4.json",
+  "passivity": "Every preexisting output in both separately instrumented native runs is byte-identical to the originally measured pair, including all cycle counts.",
+  "files_sha256": {
+    "docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv4/check-independent.log": "1a5096d6970a95a07774709658d9c373ba88d9cda457194a053d00a52aa6d13f",
+    "docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv4/check-independent-v2.log": "75102cb55863b32c2aa013394e52a11bf36c4027ecf961eacbc8d0669c696e99",
+    "docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv4/check-independent-v3.json": "d794ac0697e328efde57e18fee4e55155fa2af2d0bb25b7b5a1322058f718ef4",
+    "docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/mesh3_lifetime_appv4.py": "0f1c3ad91fb036bad30d68f1bced0ab0453afd941d1d9369f55ef0f85391a03f",
+    "docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/mesh3_lifetime_appv4_v2.py": "6a1b06ffb78adeed5742fa3fe90db8d71c5ecee71d5df17c47d0870964590572",
+    "docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/mesh3_lifetime_appv4_v3.py": "c8001c466a29c084039188d63e42a4dd4dabffce4bbc8ad4d1f53abf2aca1422",
+    "docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/source-proof-v4.json": "81600a47ed71d4a951949af776d731e1622e7a26e17e8511321ff1ccdacb5f49",
+    "docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/check_source_proof_v1.py": "63917f66eedf048b247903bae097a2d8a44b7b63001e094a3002af494debfb5d",
+    "docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/source_proof_hooks_v1.py": "64e259b759c4b882ea5d3281370b91080b18093a74060ce00307107b9fe517ea"
+  }
+}

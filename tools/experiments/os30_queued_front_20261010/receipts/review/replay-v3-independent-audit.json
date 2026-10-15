@@ -1,0 +1,43 @@
+{
+  "status": "PASS_REPLAY_V3_AND_SUPPLEMENTAL_CHECKER_AUDIT",
+  "scope": "Read-only implementation audit plus separately bound stronger validation; no frozen driver/checker/model edits.",
+  "driver": {
+    "empty_queue_preparation": "Correctly restores captured SDK ingress pointer only after both rings drain and worker is HEADER. Output FIFO/raster pointer stays at its already drained position. HEADER_PRIME refreshes the synchronous input read after pointer relocation. Both initial pointers and zero extra host edges are recorded and verified by supplemental audit.",
+    "published_word_logging": "Pre-edge emit/write_ptr captured without mutation; post-edge RAM word read uses actual queue.size()-1, supporting both512 and2048-word variants. Supplemental audit sums every write/read pointer increment and requires exact equality with binary word count and final drain.",
+    "gpu_observer_occupancy": "Only change versus previously qualified observer: ring_words uses command_wrptr-ring_rdptr when that field exists. This measures raster/output FIFO rather than subtracting independent ingress/output pointers. Legacy model falls back to its original ring pointer. cpu_ring_full and unpublished metrics still describe ingress, so these have distinct meanings.",
+    "input_bindings": "Build/run verifies frozen model sources, generated headers/library, exact ELF, driver/observers, snapshot and guest segments. Supplemental audit additionally verifies capture/guest inventories and both baseline/candidate fixture+ELF identity."
+  },
+  "checker_findings": [
+    {
+      "issue": "Raw0x56 payload equality plus only draw-time0x50 state could miss a load-time projection-state change.",
+      "resolution": "Supplemental checker captures complete26-word object state at each vertex load, then compares that state for every referenced vertex. All three completed candidates pass."
+    },
+    {
+      "issue": "Original queued checker did not independently validate its supplied baseline, initial prepared queue record, import-sticky-error, final worker/math idle, or every published-word pointer increment.",
+      "resolution": "Supplemental checker validates both baseline and candidate against the bound functional capture; checks those lifecycle conditions; all three candidates pass. Accepted raw START may wait pending while queued math owns FMA, which is legal; raw_active&&!raw_pending is forbidden with queued owner."
+    }
+  ],
+  "normalization_review": "Only typed framebuffer-base/flip remapping, the proven initialized third-buffer clear, later integer s5 timestamp, unused vertex slots and redundant sticky state writes are permitted. Full images/depth/all buffer history, Surface pool, initial registers, all FP registers/FCSR, every effective draw payload/load-time projection/current material, raw LOAD/context writes and side effects remain exact.",
+  "large_fifo_test": {
+    "pass": true,
+    "checks": 84608,
+    "cycles": 140838,
+    "current_cpu_vectors": 140,
+    "exact_FP_stage_checks": 150,
+    "natural_arithmetic_repairs": 5,
+    "total_repairs": 7
+  },
+  "large_fifo_scope": "Only QUEUE_BITS9->11 in candidate GPU instantiation; ingress and wrap remain4096. Tests use actual unchanged worker plus BIM2/FMA/converters with2047 pressure and pointer wrap. No fit or area qualification; larger memory is a causal counterfactual.",
+  "evidence_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/replay_v3.py": "af925ae44ef4df8c13d0b9812c86515f0f102c3daf6dc4cffca50651af1dd952",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/check_replays.py": "0b136a3a7d377af3e1268975d33995380fba9a5e275dbfdc2cd8e01497f70ba3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/observer-v2/gpu_observer.hpp": "1f87213e11e8ed5460677fb9c1796846465365be46f3af1c62a3add4a4bc45d2",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/model/frozen/src/fpga/common/gpu_core.v": "a50e45f4e1e866973158efdd5cbf48f56a43f8e2124f713806386d372e2c1e25",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/model/frozen/src/fpga/common/gpu_queued_front.v": "ac978376a246b6860a4891fd23c9f4405ccb2e37362d0aa88091a29187b09dc6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/review/audit_native_v1.py": "1fca1e774a6c6d8ff5a9d28467a77fccfa175de2e3ee9443fc618e7066621da1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/worker-large-v1/manifest.json": "2d16d636901f854c114b05b344f0487aec5bdb6c41b03cf7eaa5ae84ba66c968",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/review/strict-queued-v2.json": "562d6b5c5c95d65d02d4d449fc2fa57449fe6b0b1d8fb3db3de3b0233244cec7",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/review/strict-queued-v3.json": "ce4301788a03f543a1cb3ff020d2caf8baf71e658f6d84d806155fdcb422aa3e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/review/strict-queued-large-v1.json": "eb5a0c012869c551b4f569dbbeef126e354a415e1be36cb481d9e08471b1c6a9"
+  }
+}

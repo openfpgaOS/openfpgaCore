@@ -1,0 +1,90 @@
+{
+  "status": "FOCUSED_WRAPPER_AND_COMBINED_FRONT_PASS",
+  "scope": "Experimental AJ01 RTL only; no synthesis, timing or end-to-end performance claim",
+  "sources": [
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-core/frozen/src/fpga/common/geometry_async_mesh.v",
+      "sha256": "9e781e30512c8b55e54112c1aedc2d77ac5c759424ab30bd5d7041b73dca867f",
+      "baseline_sha256": null
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-core/frozen/src/fpga/common/gpu_mesh_job_front.v",
+      "sha256": "6ce9d7549958228fe7e5a03446a8a00208c6aaea34d5e70b386fcf02ffd59c78",
+      "baseline_sha256": null
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-core/frozen/src/fpga/common/phase10_load_alias.v",
+      "sha256": "2aedc1e5a1c3a3f2b2c7a535633e9bbd598494bcb9692a4f8269bb9d809e8ce0",
+      "baseline_sha256": "322bea9ab96131f84d13edf6448f490e7190519b38a2dfa1ba027fa31fae116d"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-core/frozen/src/fpga/common/geometry_mesh_stream.v",
+      "sha256": "0a5841c2e389b7f1e7358c803cd282fce51e611ccb386f0301f440b6ab484c95",
+      "baseline_sha256": "c437aa11c859757493764e6c243da4cb1238c585a8c65ff7330a8f4017aedc28"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-core/frozen/src/fpga/common/geometry_mesh_task_engine.v",
+      "sha256": "488101ebc88805495970d738cc12523dff29f784dc747e67c9d24e6a9c1823c4",
+      "baseline_sha256": "7a7a4d0d5d376d81412437f7dd9a9b2d66bdc90db7d06d456680920af1e29f7f"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-core/frozen/src/fpga/common/geometry_mesh_raw_frontend.v",
+      "sha256": "cfe92bd326e9b8b60ce118f8d4cba0f734aec49d1eb8e1c270e82548f93f94b3",
+      "baseline_sha256": "61854f2d9949339c9b4c123d1b174da3828601cbf1edcbc0c410fbf854fac764"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-core/frozen/src/fpga/common/geometry_raw_load.v",
+      "sha256": "9a7faaf2558b6fb394bc3d06a06cbf0607b024ea4cb2326b1c97651c5537831a",
+      "baseline_sha256": "ade3041bfd27ab6200c5d6356775adac778a34eb0d81c1f253ff83367627c144"
+    }
+  ],
+  "abi": {
+    "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/design/abi.json",
+    "sha256": "d8c933c03130aa64fa21d1867795cb5902bb673780363811948c341fb95856fe"
+  },
+  "ports": {
+    "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/design/ports.vh",
+    "sha256": "3ec3f069f6311ec45b221a4a8b68cd1acbaf098c0f273f33a5ec8bad408c4b70"
+  },
+  "test": {
+    "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-core/tests/wrapper-v3/manifest.json",
+    "sha256": "6fe18fb266c5dc086094520813e5bc35334eebe0ceff3c8d6d948819f1c3b45d"
+  },
+  "test_summary": {
+    "cases": 10,
+    "checks": 853,
+    "cycles": 3333,
+    "axi_bursts": 28
+  },
+  "notes": [
+    "Retains one raw engine/FMA; matrix repair readback reuses unused attributes row3, without another RAM.",
+    "Legacy lease and view survive GPU consumer reset, while asynchronous DMA is canceled and drained.",
+    "Full matrix context is required before asynchronous JOB.",
+    "Frontend standalone Verilator lint passed. Wrapper build has no UNOPTFLAT, PINMISSING or LATCH warning; inherited arithmetic width/timescale warnings remain.",
+    "Initial wrapper-v1 failed because testbench withdrew credited output space on MMIO DATA edge. Test v2 models actual single-producer monotonic credit and passes; no implementation defect was hidden by this correction.",
+    "Final wrapper-v3 adds exact pending-start cancellation, raw-failure repair, active legacy reset and missing-matrix rejection.",
+    "Root owns gpu_core/tb_irq integration; reviewer covers independent ring frontend and complete native semantics.",
+    "Actual frontend plus sole raw/FMA/cull/packet wrapper passes full ingress (4095 words) behind repair and full output (511 words), followed by 1300 repair words and 4095 ordinary tail words in exact order.",
+    "Legacy handoff grants after all generated words are copied while ordinary GPU output remains queued; ordinary commands continue forwarding during actual legacy LOAD.",
+    "Coupled consumer reset drops a partial repair and output, advances token, and rejects a stale END via both wrapper and front fault.",
+    "Combined-v1 harness generated variable nonzero ordinary header lengths instead of zero-length commands; combined-v2 harness checked occupancy between externally reset read pointer and internal reset write pointer. Both original logs and source snapshots remain. Combined-v3 fixes only harness framing/reset observation; no RTL changes were needed."
+  ],
+  "resources": "4096-word existing ingress; 512-word common output FIFO (2M10K); existing mesh survivor RAM (1M10K); no private packet queue, no second FPU. Actual ALM/RAM/clock fit unqualified.",
+  "previous_receipt": {
+    "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-core/rtl-ready-v1.json",
+    "sha256": "882050efe8a1f1ec04ff22fad2ed0473fc3ce903924218e1db1865db29f387df"
+  },
+  "combined_test": {
+    "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-core/tests/combined-v3/manifest.json",
+    "sha256": "57caf8393b205110f80965f3a4cffb33dacab22b60b1124cdcbb1a7563fb656a",
+    "result": {
+      "status": "PASS",
+      "cases": 3,
+      "checks": 34104,
+      "cycles": 17401,
+      "AXI_bursts": 14,
+      "ingress_full_cycles": 1655,
+      "output_full_cycles": 382
+    }
+  }
+}

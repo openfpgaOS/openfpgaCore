@@ -1,0 +1,94 @@
+{
+  "passed": true,
+  "frames": [
+    {
+      "passed": true,
+      "frame": 20,
+      "argv": [
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/raster/frozen/Vtb_gpu",
+        "+fast_tex=1",
+        "+tagged_tex=1",
+        "+memory_traffic=0",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/raster/replays/baseline/frame_00020.vec",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/raster/replays/baseline/frame_00020.bin"
+      ],
+      "color_sha256": "2db82b0ed70fd158cd5db9a8fdcbe4b87cd576cf0b00e2b0ca7e519492b31829",
+      "depth_sha256": "5f46f274cbf3cc91362ed1d8e158f207bdc926bbab6056c8834570283e00348a",
+      "vector_sha256": "54d65d61308b726ccd665177416f86109b4a42151c8b37e2268b5a9e060740f6",
+      "removed_next_frame_clear": [
+        285212675,
+        1342177280,
+        41943280,
+        41943040
+      ],
+      "frame_tagged_commands_exact": true
+    },
+    {
+      "passed": true,
+      "frame": 80,
+      "argv": [
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/raster/frozen/Vtb_gpu",
+        "+fast_tex=1",
+        "+tagged_tex=1",
+        "+memory_traffic=0",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/raster/replays/baseline/frame_00080.vec",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/raster/replays/baseline/frame_00080.bin"
+      ],
+      "color_sha256": "07bc33670a457532f5d5cd548bd0fd8f37297dff6ce5f1b963de02330eec1c2f",
+      "depth_sha256": "cc457c900b4647ed05743dfa17e8bccf47e4f5f9dfd69c30eab6e4c2f1b922bc",
+      "vector_sha256": "957aea510bd91086d5713acb7800f144be6071d326f2269dd5a8795a482ce5af",
+      "removed_next_frame_clear": [
+        285212675,
+        1342177280,
+        41943280,
+        41943040
+      ],
+      "frame_tagged_commands_exact": true
+    },
+    {
+      "passed": true,
+      "frame": 180,
+      "argv": [
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/raster/frozen/Vtb_gpu",
+        "+fast_tex=1",
+        "+tagged_tex=1",
+        "+memory_traffic=0",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/raster/replays/baseline/frame_00180.vec",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/raster/replays/baseline/frame_00180.bin"
+      ],
+      "color_sha256": "7f4a3191fb6b7e59685d4d27b61b96cb3e1c7b85f44abe0536c24da3a31a1adc",
+      "depth_sha256": "2403ffab168ed03973f8029695f31dda0ad8bc86793ec474d2615f850cb40c08",
+      "vector_sha256": "0d2d88405ed208b24c9af34f7e2b2234b06dae31ce4d0e10a3a898cbba61ce50",
+      "removed_next_frame_clear": [
+        285212675,
+        1344274432,
+        41943280,
+        41943040
+      ],
+      "frame_tagged_commands_exact": true
+    },
+    {
+      "passed": true,
+      "frame": 300,
+      "argv": [
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/raster/frozen/Vtb_gpu",
+        "+fast_tex=1",
+        "+tagged_tex=1",
+        "+memory_traffic=0",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/raster/replays/baseline/frame_00300.vec",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/raster/replays/baseline/frame_00300.bin"
+      ],
+      "color_sha256": "bc44251a648d125b7eea685bdac1ecf9bdb10dfa8bf4ed2ec308bb9753ef35fe",
+      "depth_sha256": "813b8bb0381093e87bd8758c6c14c3f997ace555d550eb69730c75dce5ce975e",
+      "vector_sha256": "6c9705c9f76b0d95ab38203f4a4c2c36ecf15cfd7c2dfd88feee58564322c9c1",
+      "removed_next_frame_clear": [
+        285212675,
+        1344274432,
+        41943280,
+        41943040
+      ],
+      "frame_tagged_commands_exact": true
+    }
+  ],
+  "limits": "Four exact command-composed color/depth RTL samples; no coupled CPU timing."
+}

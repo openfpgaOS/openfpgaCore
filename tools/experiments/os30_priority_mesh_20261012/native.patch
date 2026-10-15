@@ -1,0 +1,2215 @@
+--- a/frozen/docs/measurements/os30-dual-20261004/validation/baseline128/tb_irq.v
++++ b/frozen/docs/measurements/os30-dual-20261004/validation/baseline128/tb_irq.v
+@@ -434,7 +434,56 @@
+ reg[2:0] geometry_startup=0;
+ always@(posedge clk_cpu)geometry_startup<={geometry_startup[1:0],1'b1};
+ wire geometry_reset=!geometry_startup[2]||!reset_n;
++`ifdef INCLUDE_GPU_ASYNC_MESH
++wire mesh_ctx_valid,mesh_ctx_ready;wire[4:0]mesh_ctx_index;wire[31:0]mesh_ctx_data;
++wire mesh_job_valid,mesh_job_ready;
++wire[31:0]mesh_job_seq,mesh_job_vertex,mesh_job_vtx_w0,mesh_job_commands;
++wire[31:0]mesh_job_control,mesh_job_flags,mesh_job_uofs,mesh_job_vofs;
++wire[31:0]mesh_job_cpu_vertex,mesh_job_cpu_commands,mesh_job_alpha;
++wire mesh_word_valid,mesh_word_ready,mesh_job_done,mesh_job_fault;
++wire[31:0]mesh_word_data;wire mesh_consumer_reset,mesh_bridge_fault;
++`elsif INCLUDE_GPU_MESH_FRONT
++wire mesh_marker_valid,mesh_marker_ready,mesh_marker_error;
++wire [31:0] mesh_marker_serial,mesh_marker_flags,mesh_marker_uofs,mesh_marker_vofs;
++wire mesh_word_valid,mesh_word_ready,mesh_packet_done,mesh_packet_error;
++wire [31:0] mesh_word_data;
++wire mesh_consumer_reset,mesh_bridge_fault;
++`endif
+ geometry_load_alias geometry_load(
++`ifdef INCLUDE_GPU_ASYNC_MESH
++ .mesh_ctx_valid(mesh_ctx_valid),
++ .mesh_ctx_ready(mesh_ctx_ready),
++ .mesh_ctx_index(mesh_ctx_index),
++ .mesh_ctx_data(mesh_ctx_data),
++ .mesh_job_valid(mesh_job_valid),
++ .mesh_job_ready(mesh_job_ready),
++ .mesh_job_seq(mesh_job_seq),
++ .mesh_job_vertex(mesh_job_vertex),
++ .mesh_job_vtx_w0(mesh_job_vtx_w0),
++ .mesh_job_commands(mesh_job_commands),
++ .mesh_job_control(mesh_job_control),
++ .mesh_job_flags(mesh_job_flags),
++ .mesh_job_uofs(mesh_job_uofs),
++ .mesh_job_vofs(mesh_job_vofs),
++ .mesh_job_cpu_vertex(mesh_job_cpu_vertex),
++ .mesh_job_cpu_commands(mesh_job_cpu_commands),
++ .mesh_job_alpha(mesh_job_alpha),
++ .mesh_word_valid(mesh_word_valid),
++ .mesh_word_data(mesh_word_data),
++ .mesh_word_ready(mesh_word_ready),
++ .mesh_job_done(mesh_job_done),
++ .mesh_job_fault(mesh_job_fault),
++ .mesh_consumer_reset(mesh_consumer_reset),
++ .mesh_bridge_fault(mesh_bridge_fault),
++`elsif INCLUDE_GPU_MESH_FRONT
++ .mesh_marker_valid(mesh_marker_valid),.mesh_marker_serial(mesh_marker_serial),
++ .mesh_marker_flags(mesh_marker_flags),.mesh_marker_uofs(mesh_marker_uofs),
++ .mesh_marker_vofs(mesh_marker_vofs),.mesh_marker_ready(mesh_marker_ready),
++ .mesh_marker_error(mesh_marker_error),.mesh_word_valid(mesh_word_valid),
++ .mesh_word_data(mesh_word_data),.mesh_word_ready(mesh_word_ready),
++ .mesh_packet_done(mesh_packet_done),.mesh_packet_error(mesh_packet_error),
++ .mesh_consumer_reset(mesh_consumer_reset),.mesh_bridge_fault(mesh_bridge_fault),
++`endif
+  .clk(clk_cpu),.reset(geometry_reset),
+  .reg_wr(geo_mmio_wr),.reg_addr(geo_mmio_addr),.reg_wdata(geo_mmio_data),.reg_wstrb(cpu_run?geometry_reg_wstrb:4'hf),.reg_rdata(geometry_reg_rdata),
+  .m_arvalid(geometry_arvalid),.m_arready(geometry_arready),.m_araddr(geometry_araddr),.m_arlen(geometry_arlen),
+@@ -1078,6 +1127,40 @@
+     // the internal write combiner in front of it only costs time and RAM.
+     .GPU_WRITE_COMBINE(`ifdef INCLUDE_GPU_RENDER_CACHE 0 `else 1 `endif)
+ ) gpu (
++`ifdef INCLUDE_GPU_ASYNC_MESH
++ .mesh_ctx_valid(mesh_ctx_valid),
++ .mesh_ctx_ready(mesh_ctx_ready),
++ .mesh_ctx_index(mesh_ctx_index),
++ .mesh_ctx_data(mesh_ctx_data),
++ .mesh_job_valid(mesh_job_valid),
++ .mesh_job_ready(mesh_job_ready),
++ .mesh_job_seq(mesh_job_seq),
++ .mesh_job_vertex(mesh_job_vertex),
++ .mesh_job_vtx_w0(mesh_job_vtx_w0),
++ .mesh_job_commands(mesh_job_commands),
++ .mesh_job_control(mesh_job_control),
++ .mesh_job_flags(mesh_job_flags),
++ .mesh_job_uofs(mesh_job_uofs),
++ .mesh_job_vofs(mesh_job_vofs),
++ .mesh_job_cpu_vertex(mesh_job_cpu_vertex),
++ .mesh_job_cpu_commands(mesh_job_cpu_commands),
++ .mesh_job_alpha(mesh_job_alpha),
++ .mesh_word_valid(mesh_word_valid),
++ .mesh_word_data(mesh_word_data),
++ .mesh_word_ready(mesh_word_ready),
++ .mesh_job_done(mesh_job_done),
++ .mesh_job_fault(mesh_job_fault),
++ .mesh_consumer_reset(mesh_consumer_reset),
++ .mesh_bridge_fault(mesh_bridge_fault),
++`elsif INCLUDE_GPU_MESH_FRONT
++ .mesh_marker_valid(mesh_marker_valid),.mesh_marker_serial(mesh_marker_serial),
++ .mesh_marker_flags(mesh_marker_flags),.mesh_marker_uofs(mesh_marker_uofs),
++ .mesh_marker_vofs(mesh_marker_vofs),.mesh_marker_ready(mesh_marker_ready),
++ .mesh_marker_error(mesh_marker_error),.mesh_word_valid(mesh_word_valid),
++ .mesh_word_data(mesh_word_data),.mesh_word_ready(mesh_word_ready),
++ .mesh_packet_done(mesh_packet_done),.mesh_packet_error(mesh_packet_error),
++ .mesh_consumer_reset(mesh_consumer_reset),.mesh_bridge_fault(mesh_bridge_fault),
++`endif
+ .gpu_tex_mem_arvalid(tex_arvalid),.gpu_tex_mem_arready(tex_arready),.gpu_tex_mem_araddr(tex_araddr),.gpu_tex_mem_arlen(tex_arlen),.gpu_tex_mem_rvalid(tex_rvalid),.gpu_tex_mem_rdata(tex_rdata),.gpu_tex_mem_rlast(tex_rlast),
+ .gpu_tex_mem_up_wr(word_wr),.gpu_tex_mem_up_addr(word_addr),.gpu_tex_mem_up_wdata(word_data),.gpu_tex_mem_up_busy(word_busy),
+ .gpu_tex_mem_up_len(word_len),.gpu_tex_mem_up_fault(paired.error||paired.protocol_error),
+--- /dev/null
++++ b/frozen/src/fpga/common/geometry_async_mesh.v
+@@ -0,0 +1,236 @@
++// AJ02: sole raw engine, autonomous ordered mesh jobs, head-only CPU repair.
++module geometry_async_mesh (
++ input wire clk,reset,
++ input wire reg_wr,input wire [9:0] reg_addr,input wire [31:0] reg_wdata,input wire [3:0] reg_wstrb,
++ output reg [31:0] reg_rdata,
++ output wire m_arvalid,input wire m_arready,output wire [31:0] m_araddr,output wire [7:0] m_arlen,
++ input wire m_rvalid,output wire m_rready,input wire [31:0] m_rdata,input wire [1:0] m_rresp,input wire m_rlast,
++ input wire [7:0] view_read_addr,output wire [31:0] view_read_data,
++ input wire view_active,output wire view_block,output reg view_valid,output reg [5:0] view_count,
++ output wire raw_start,
++ input wire mesh_ctx_valid,output wire mesh_ctx_ready,input wire [4:0] mesh_ctx_index,input wire [31:0] mesh_ctx_data,
++ input wire mesh_job_valid,output wire mesh_job_ready,
++ input wire [31:0] mesh_job_seq,mesh_job_vertex,mesh_job_vtx_w0,mesh_job_commands,
++ input wire [31:0] mesh_job_control,mesh_job_flags,mesh_job_uofs,mesh_job_vofs,
++ input wire [31:0] mesh_job_cpu_vertex,mesh_job_cpu_commands,mesh_job_alpha,
++ output wire mesh_word_valid,output wire [31:0] mesh_word_data,input wire mesh_word_ready,
++ output reg mesh_job_done,output wire mesh_job_fault,input wire mesh_consumer_reset,mesh_bridge_fault
++);
++ reg [31:0] source_base,aspect,cx,cy,cz,projection_cx,projection_cy,projection_hw,projection_hh;
++ reg [23:0] ambient,diffuse;
++ reg [15:0] scale_u,scale_v,matrix_valid;
++ reg [5:0] count;
++ reg lit,active,pending,legacy,completed,success,config_error,aborting,protocol_error,raw_seen,validation_started;
++ reg [31:0] descriptor_serial,vtx_w0,command_source,configuration,flags_rgb,uofs,vofs,cpu_vertex,cpu_commands,alpha,completed_serial;
++ reg lease_pending,lease_granted,lease_release_pending;
++ reg context_open;
++ reg [4:0] context_next;
++ reg [31:0] lease_target,lease_ticket,granted_ticket,epoch;
++ reg repair_pending,repair_end_pending;
++ reg [31:0] repair_token,repair_ack;
++ reg [5:0] repair_index;
++ wire stream_ready,stream_raw_ready,stream_busy,preflight,fallback,stream_done;
++ reg output_pending,snapshot_detached;
++ reg [31:0] output_serial;
++ wire [31:0] serial,owned_mask,used_mask;
++ wire [6:0] live_count,checked_count,clip_count,cull_count;
++ wire [3:0] reason;
++ wire raw_done,unsupported,all_inside;
++ wire [1:0] dma_error;
++ wire packet_busy,packet_done,packet_error,packet_validated,packet_published,packet_snapshot_valid,fetch_busy,fetch_error;
++ wire producer_valid;wire [31:0] producer_word;
++ wire [8:0] packet_words;
++ wire full_write=reg_wr&&reg_wstrb==4'hf;
++ wire acquire_request=full_write&&reg_addr==10'h02d&&reg_wdata==1;
++ wire release_request=full_write&&reg_addr==10'h02d&&reg_wdata==2;
++ // Before the first word, acquisition wins. An opened bundle must finish
++ // its JOB before legacy may overwrite the shared matrix/scalar context.
++ wire context_allowed=!output_pending&&!active&&!pending&&!aborting&&!lease_granted&&!stream_busy&&!view_active&&!protocol_error&&!mesh_consumer_reset&&
++   (context_open||(!lease_pending&&!acquire_request));
++ assign mesh_ctx_ready=context_allowed;
++ assign mesh_job_ready=context_allowed&&!mesh_ctx_valid;
++ wire ctx_take=mesh_ctx_valid&&mesh_ctx_ready;
++ wire ctx_order_good=context_open?(context_next<28&&mesh_ctx_index==context_next):(mesh_ctx_index==0);
++ wire job_take=mesh_job_valid&&mesh_job_ready;
++ wire legacy_write=full_write&&lease_granted&&!active&&!pending&&!aborting;
++ wire old_start=legacy_write&&reg_addr==10'h002&&reg_wdata[0];
++ wire task_start=pending&&!view_active&&stream_ready&&!aborting&&!(mesh_consumer_reset&&!legacy);
++ assign raw_start=task_start;
++ wire matrix_legacy=legacy_write&&reg_addr[9:4]==6'h04;
++ wire matrix_we=matrix_legacy||(ctx_take&&ctx_order_good&&mesh_ctx_index<16);
++ wire [3:0] matrix_addr=matrix_legacy?reg_addr[3:0]:mesh_ctx_index[3:0];
++ wire [31:0] matrix_data=matrix_legacy?reg_wdata:mesh_ctx_data;
++ wire consumer_cancel=mesh_consumer_reset;
++ wire validate_start=active&&!legacy&&preflight&&live_count!=0&&!repair_pending&&!validation_started&&!packet_busy&&!view_active&&!aborting;
++ wire publish_start=output_pending&&packet_validated&&!packet_published&&!repair_pending&&!view_active&&!aborting;
++ wire repair_ready=repair_pending&&!repair_end_pending&&!aborting&&!protocol_error&&repair_ack==repair_token&&mesh_word_ready&&!mesh_consumer_reset;
++ wire repair_write=full_write&&reg_addr==10'h028;
++ assign mesh_word_valid=!mesh_consumer_reset&&!aborting&&(repair_pending?(repair_write&&repair_ready):producer_valid);
++ assign mesh_word_data=repair_pending?reg_wdata:producer_word;
++ assign mesh_job_fault=protocol_error||mesh_bridge_fault;
++ wire zero_done=active&&!legacy&&preflight&&live_count==0&&!repair_pending;
++ wire snapshot_release=active&&!legacy&&validation_started&&packet_validated&&packet_snapshot_valid&&!snapshot_detached&&!repair_pending&&!aborting;
++ wire task_ack=(active&&legacy&&(preflight||fallback))||zero_done||snapshot_release||
++   (repair_pending&&repair_end_pending&&!view_active)||
++   (aborting&&fallback&&!fetch_busy);
++ wire alias_allowed=(lease_granted&&!active&&!pending)||(repair_pending&&!repair_end_pending&&!aborting);
++ assign view_block=!alias_allowed||old_start||task_start||job_take;
++ wire matrix_diag=repair_pending&&repair_index<16&&!view_active&&!repair_end_pending;
++ wire [7:0] stream_view_addr=matrix_diag?{4'b0,repair_index[3:0]}:view_read_addr;
++ wire bad_job=!context_open||context_next!=28||!(&matrix_valid)||mesh_job_seq==0||mesh_job_seq==completed_serial||mesh_job_control[31:10]!=0||mesh_job_control[7]||
++  mesh_job_control[6:0]==0||mesh_job_control[6:0]>64||mesh_job_flags[31:19]!=0||mesh_job_alpha>255||
++  mesh_job_vtx_w0[7:1]!={1'b0,mesh_job_vtx_w0[17:12]};
++ geometry_mesh_stream #(.SOURCE_MIN_ADDRESS(32'h00000000),.SOURCE_END_ADDRESS(33'h001000000)) mesh(
++  .clk(clk),.reset(reset),.cancel(aborting),.consumer_reset(consumer_cancel),.matrix_diag_read(matrix_diag),
++  .task_valid(task_start),.task_load_only(legacy),.task_ready(stream_ready),.raw_ready(stream_raw_ready),.task_serial(descriptor_serial),
++  .task_vtx_w0(legacy?(32'h01000000|({26'b0,count}<<12)|({26'b0,count}<<1)):vtx_w0),
++  .task_vtx_w1(source_base),.task_command_count(legacy?7'b0:configuration[6:0]),.task_cull_mode(configuration[9:8]),
++  .task_unsupported_features(8'b0),.matrix_we(matrix_we),.matrix_addr(matrix_addr),.matrix_data(matrix_data),
++  .aspect(aspect),.coefficient_x(cx),.coefficient_y(cy),.coefficient_z(cz),
++  .ambient_rgb(ambient),.diffuse_rgb(diffuse),.lighting_enabled(lit),.scale_u(scale_u),.scale_v(scale_v),
++  .m_arvalid(m_arvalid),.m_arready(m_arready),.m_araddr(m_araddr),.m_arlen(m_arlen),
++  .m_rvalid(m_rvalid),.m_rready(m_rready),.m_rdata(m_rdata),.m_rresp(m_rresp),.m_rlast(m_rlast),
++  .list_addr(6'b0),.list_indices(),.view_addr(stream_view_addr),.view_data(view_read_data),
++  .busy(stream_busy),.preflight_valid(preflight),.fallback_valid(fallback),.fallback_reason(reason),.serial(serial),
++  .owned_mask(owned_mask),.used_mask(used_mask),.live_count(live_count),.checked_count(checked_count),
++  .clip_rejected(clip_count),.cull_rejected(cull_count),.task_ack(task_ack),.ack_serial(serial),.done(stream_done),
++  .task_command_source(command_source),.packet_validate(validate_start),.packet_publish(publish_start),
++  .flags_rgb(flags_rgb),.u_offset(uofs),.v_offset(vofs),
++  .word_valid(producer_valid),.word_ready(mesh_word_ready&&!repair_pending&&!aborting),.word_data(producer_word),
++  .packet_busy(packet_busy),.packet_done(packet_done),.packet_error(packet_error),
++  .packet_validated(packet_validated),.packet_published(packet_published),.packet_snapshot_valid(packet_snapshot_valid),.packet_words(packet_words),
++  .fetch_busy(fetch_busy),.fetch_error(fetch_error),.raw_complete(raw_done),.raw_unsupported(unsupported),.raw_all_inside(all_inside),.raw_dma_error(dma_error));
++ reg [31:0] repair_data;
++ always @*begin
++  repair_data=0;
++  if(repair_index<16)repair_data=view_read_data;
++  else case(repair_index)
++   16:repair_data=aspect;17:repair_data=cx;18:repair_data=cy;19:repair_data=cz;
++   20:repair_data={8'b0,ambient};21:repair_data={8'b0,diffuse};22:repair_data={scale_v,scale_u};23:repair_data={31'b0,lit};
++   24:repair_data=projection_cx;25:repair_data=projection_cy;26:repair_data=projection_hw;27:repair_data=projection_hh;
++   28:repair_data=cpu_vertex;29:repair_data=cpu_commands;30:repair_data=vtx_w0;31:repair_data=configuration;
++   32:repair_data=flags_rgb;33:repair_data=uofs;34:repair_data=vofs;35:repair_data=alpha;
++   36:repair_data=source_base;37:repair_data=command_source;
++   default:;
++  endcase
++  reg_rdata=0;
++  case(reg_addr)
++   10'h000:reg_rdata=32'h4c4f4405;
++   10'h001:reg_rdata={23'b0,&matrix_valid,config_error,dma_error,all_inside,unsupported,success,completed,active};
++   10'h020:reg_rdata=32'h414a3032;
++   10'h021:reg_rdata={25'b0,repair_ready,success,lease_granted,lease_pending,mesh_job_fault,repair_pending,active&&!legacy};
++   10'h022:reg_rdata=descriptor_serial;10'h023:reg_rdata=completed_serial;
++   10'h024:reg_rdata={23'b0,success,4'b0,(packet_error?4'd12:reason)};
++   10'h025:reg_rdata=repair_token;10'h026:reg_rdata={26'b0,repair_index};10'h027:reg_rdata=repair_data;
++   10'h02b:reg_rdata=lease_target;10'h02e:reg_rdata=epoch;10'h02f:reg_rdata=lease_granted?granted_ticket:0;
++   default:;
++  endcase
++ end
++ always @(posedge clk)begin
++  if(reset)begin
++   source_base<=0;aspect<=32'h3f800000;cx<=0;cy<=0;cz<=0;ambient<=0;diffuse<=0;scale_u<=0;scale_v<=0;matrix_valid<=0;count<=0;lit<=0;
++   projection_cx<=0;projection_cy<=0;projection_hw<=0;projection_hh<=0;
++   output_pending<=0;snapshot_detached<=0;output_serial<=0;
++   active<=0;pending<=0;legacy<=0;completed<=0;success<=0;config_error<=0;aborting<=0;protocol_error<=0;raw_seen<=0;validation_started<=0;
++   descriptor_serial<=0;vtx_w0<=0;command_source<=0;configuration<=0;flags_rgb<=0;uofs<=0;vofs<=0;cpu_vertex<=0;cpu_commands<=0;alpha<=0;completed_serial<=0;
++   context_open<=0;context_next<=0;lease_pending<=0;lease_granted<=0;lease_release_pending<=0;lease_target<=0;lease_ticket<=0;granted_ticket<=0;epoch<=0;
++   repair_pending<=0;repair_end_pending<=0;repair_token<=0;repair_ack<=0;repair_index<=0;
++   view_valid<=0;view_count<=0;mesh_job_done<=0;
++  end else begin
++   mesh_job_done<=0;
++   if(task_start)pending<=0;
++   if(validate_start)validation_started<=1;
++   if(snapshot_release)snapshot_detached<=1;
++   if(raw_done)begin completed<=1;success<=!unsupported&&dma_error==0;raw_seen<=1;view_valid<=!unsupported&&dma_error==0;view_count<=legacy?count:vtx_w0[17:12];end
++   if(active&&!legacy&&!aborting&&!repair_pending&&(fallback||(packet_error&&!packet_published)))begin
++    repair_pending<=1;repair_end_pending<=0;repair_token<=repair_token+1'b1;repair_ack<=repair_token;repair_index<=0;
++   end
++   if(packet_error&&packet_published)protocol_error<=1;
++   // Raw completion after snapshot detaches only the raw controller. The
++   // immutable output has its own lifetime and may overlap a CPU legacy LOAD.
++   if(stream_done)begin
++    active<=0;pending<=0;aborting<=0;repair_pending<=0;repair_end_pending<=0;
++    if(!legacy&&!snapshot_detached&&!aborting&&!mesh_consumer_reset)begin
++     completed_serial<=output_serial;mesh_job_done<=1;output_pending<=0;validation_started<=0;
++    end
++    if(!raw_seen)completed<=1;
++   end
++   if(output_pending&&packet_done&&packet_published&&!packet_error&&!mesh_consumer_reset)begin
++    completed_serial<=output_serial;mesh_job_done<=1;output_pending<=0;validation_started<=0;
++    // Do not alter active/legacy/completed/success/view: a newer CPU LOAD may own them.
++   end
++   if(lease_pending&&!context_open&&!active&&!pending&&stream_raw_ready&&!view_active&&!aborting&&!protocol_error&&!mesh_bridge_fault&&!mesh_consumer_reset)begin
++    lease_granted<=1;lease_pending<=0;granted_ticket<=lease_ticket;
++   end
++   if(lease_release_pending&&!active&&!pending&&!view_active&&stream_raw_ready)begin lease_granted<=0;lease_release_pending<=0;end
++   if(mesh_bridge_fault)protocol_error<=1;
++   if(reg_wr&&reg_wstrb!=4'hf)protocol_error<=1;
++   if(full_write)begin
++    case(reg_addr)
++     10'h026:if(repair_pending&&reg_wdata<=37)repair_index<=reg_wdata[5:0];else protocol_error<=1;
++     10'h028:if(!repair_ready)protocol_error<=1;
++     10'h029:if(repair_pending)repair_ack<=reg_wdata;else protocol_error<=1;
++     10'h02a:if(reg_wdata==1&&repair_pending&&repair_ack==repair_token&&!repair_end_pending)repair_end_pending<=1;else protocol_error<=1;
++     10'h02b:if(!lease_pending&&!lease_granted)lease_target<=reg_wdata;else protocol_error<=1;
++     10'h02c:if(!lease_pending&&!lease_granted)lease_ticket<=reg_wdata;else protocol_error<=1;
++     10'h02d:begin
++      if(reg_wdata==1&&!lease_pending&&!lease_granted&&lease_ticket!=0)lease_pending<=1;
++      else if(reg_wdata==2&&lease_granted&&granted_ticket==lease_ticket&&!active&&!pending)lease_release_pending<=1;
++      else protocol_error<=1;
++     end
++     default:if((reg_addr<=12||reg_addr[9:4]==6'h04)&&!legacy_write)protocol_error<=1;
++    endcase
++   end
++   if(ctx_take&&!ctx_order_good)protocol_error<=1;
++   if(ctx_take&&ctx_order_good)begin
++    context_open<=1;context_next<=mesh_ctx_index+1'b1;
++    if(mesh_ctx_index<16)matrix_valid[mesh_ctx_index[3:0]]<=1;
++    else case(mesh_ctx_index)
++     16:aspect<=mesh_ctx_data;17:cx<=mesh_ctx_data;18:cy<=mesh_ctx_data;19:cz<=mesh_ctx_data;
++     20:ambient<=mesh_ctx_data[23:0];21:diffuse<=mesh_ctx_data[23:0];
++     22:begin scale_u<=mesh_ctx_data[15:0];scale_v<=mesh_ctx_data[31:16];end
++     23:begin lit<=mesh_ctx_data[0];if(mesh_ctx_data>1)protocol_error<=1;end
++     24:projection_cx<=mesh_ctx_data;25:projection_cy<=mesh_ctx_data;26:projection_hw<=mesh_ctx_data;27:projection_hh<=mesh_ctx_data;
++     default:protocol_error<=1;
++    endcase
++   end
++   if(legacy_write)begin
++    if(matrix_legacy)matrix_valid[reg_addr[3:0]]<=1;
++    case(reg_addr)
++     2:if(reg_wdata[1])begin completed<=0;success<=0;config_error<=0;end
++     3:source_base<=reg_wdata;4:count<=reg_wdata[5:0];5:aspect<=reg_wdata;6:cx<=reg_wdata;7:cy<=reg_wdata;8:cz<=reg_wdata;
++     9:ambient<=reg_wdata[23:0];10:diffuse<=reg_wdata[23:0];11:begin scale_u<=reg_wdata[15:0];scale_v<=reg_wdata[31:16];end
++     12:lit<=reg_wdata[0];default:;
++    endcase
++   end
++   if(job_take||old_start)begin
++    legacy<=old_start;completed<=0;success<=0;raw_seen<=0;view_valid<=0;view_count<=0;validation_started<=0;
++    repair_pending<=0;repair_end_pending<=0;aborting<=0;config_error<=!(&matrix_valid);
++    if(job_take)begin
++     context_open<=0;context_next<=0;output_pending<=1;snapshot_detached<=0;output_serial<=mesh_job_seq;
++     descriptor_serial<=mesh_job_seq;source_base<=mesh_job_vertex;vtx_w0<=mesh_job_vtx_w0;command_source<=mesh_job_commands;
++     configuration<=mesh_job_control;flags_rgb<=mesh_job_flags;uofs<=mesh_job_uofs;vofs<=mesh_job_vofs;
++     cpu_vertex<=mesh_job_cpu_vertex;cpu_commands<=mesh_job_cpu_commands;alpha<=mesh_job_alpha;
++    end
++    if(job_take&&bad_job)begin protocol_error<=1;active<=0;pending<=0;output_pending<=0;end
++    else if(old_start&&!(&matrix_valid))begin completed<=1;active<=0;pending<=0;end
++    else begin active<=1;pending<=1;end
++   end
++   if(mesh_consumer_reset)begin
++    epoch<=epoch+1'b1;repair_token<=repair_token+1'b1;protocol_error<=0;repair_pending<=0;repair_end_pending<=0;
++    completed_serial<=0;lease_pending<=0;context_open<=0;context_next<=0;output_pending<=0;snapshot_detached<=0;validation_started<=0;
++    if(active&&!legacy)begin aborting<=1;pending<=0;end
++    // A granted legacy lease belongs to CPU raw DMA, not the GPU consumer.
++   end
++   if(aborting&&!stream_busy&&!pending)begin active<=0;aborting<=0;end
++  end
++ end
++`ifndef SYNTHESIS
++ always @(posedge clk)if(!reset&&!mesh_consumer_reset)begin
++  if(lease_granted&&context_open)$fatal(1,"AJ02 lease interrupted context");
++  if(lease_granted&&active&&!legacy)$fatal(1,"AJ02 lease interrupted async raw owner");
++  if(lease_granted&&output_pending&&!snapshot_detached)$fatal(1,"AJ02 lease before immutable snapshot");
++  if(snapshot_detached&&mesh.packet_raw_read_active)$fatal(1,"AJ02 raw read after detachment");
++ end
++`endif
++endmodule
+--- /dev/null
++++ b/frozen/src/fpga/common/geometry_float_cull_mem.v
+@@ -0,0 +1,121 @@
++// Compact exact-F11 cull controller. Vertex and six-word scratch storage are
++// supplied by the caller; reads have one-cycle synchronous latency. Reserved
++// scratch words0/1 hold center/products,2/3 hold vertex1differences,4/5 vertex3.
++// The exclusive FMA port has the frozen primitive's6cycle result latency.
++// Vertex fields:0X,1Y,2reciprocalW. negative_w holds exact W<0 predicates.
++module geometry_float_cull_mem(
++ input wire clk,reset,input wire in_valid,output wire in_ready,
++ input wire [14:0] vertex_indices,input wire [17:0] clip_bits,
++ input wire [2:0] negative_w,input wire [1:0] cull_mode,
++ output reg out_valid,input wire out_ready,output reg [1:0] reject_class,
++ output reg [5:0] clip_or,output reg [31:0] cross_bits,output reg unsupported,
++ output reg vertex_read_valid,output reg [4:0] vertex_read_index,
++ output reg [1:0] vertex_read_field,input wire [31:0] vertex_data,
++ output reg scratch_read_valid,output reg [2:0] scratch_read_index,
++ input wire [31:0] scratch_data,output wire scratch_write,
++ output wire [2:0] scratch_write_index,output wire [31:0] scratch_write_data,
++ output wire fma_valid,output reg [31:0] fma_a,fma_b,fma_c,
++ output reg fma_multiply_only,input wire fma_result_valid,
++ input wire [31:0] fma_result,input wire fma_unsupported
++);
++ localparam NONE=0,VERTEX_HOLD=1,VERTEX_MUL=2,VERTEX_MAC=3,
++            SCRATCH_HOLD=4,SCRATCH_MUL=5,SCRATCH_ADD=6;
++ reg busy,bad,parity;
++ reg [14:0] indices;
++ reg [1:0] mode;
++ reg [4:0] pc;
++ reg [31:0] held_operand;
++ reg [2:0] request_kind,read_kind,request_target,read_target;
++ reg [2:0] tags[0:6];
++ reg [2:0] outstanding;
++ assign in_ready=!busy && (!out_valid || out_ready);
++ assign fma_valid=busy && (read_kind==VERTEX_MUL || read_kind==VERTEX_MAC
++                                       || read_kind==SCRATCH_MUL || read_kind==SCRATCH_ADD);
++ assign scratch_write=busy&&fma_result_valid&&tags[6]!=7;
++ assign scratch_write_index=tags[6];
++ assign scratch_write_data=fma_result;
++ always @*begin
++  vertex_read_valid=0;vertex_read_index=0;vertex_read_field=0;
++  scratch_read_valid=0;scratch_read_index=0;request_kind=NONE;request_target=0;
++  if(busy)case(pc)
++   0,5,9:begin
++    vertex_read_valid=1;vertex_read_field=2;request_kind=VERTEX_HOLD;
++    vertex_read_index=pc==0?indices[9:5]:pc==5?indices[4:0]:indices[14:10];
++   end
++   2,3:begin
++    vertex_read_valid=1;vertex_read_index=indices[9:5];vertex_read_field=pc==2?0:1;
++    request_kind=VERTEX_MUL;request_target=pc==2?0:1;
++   end
++   7,8,11,12:begin
++    vertex_read_valid=1;vertex_read_index=pc<9?indices[4:0]:indices[14:10];
++    vertex_read_field=(pc==7||pc==11)?0:1;
++    scratch_read_valid=1;scratch_read_index=(pc==7||pc==11)?0:1;
++    request_kind=VERTEX_MAC;
++    case(pc)7:request_target=2;8:request_target=3;11:request_target=4;default:request_target=5;endcase
++   end
++   14,17,21:begin
++    scratch_read_valid=1;request_kind=SCRATCH_HOLD;
++    scratch_read_index=pc==14?5:pc==17?4:parity?0:1;
++   end
++   16,19:begin
++    scratch_read_valid=1;scratch_read_index=pc==16?2:3;
++    request_kind=SCRATCH_MUL;request_target=pc==16?0:1;
++   end
++   23:begin
++    scratch_read_valid=1;scratch_read_index=parity?1:0;
++    request_kind=SCRATCH_ADD;request_target=7;
++   end
++   default:;
++  endcase
++  fma_a=0;fma_b=held_operand;fma_c=0;fma_multiply_only=0;
++  case(read_kind)
++   VERTEX_MUL:begin fma_a=vertex_data;fma_multiply_only=1;end
++   VERTEX_MAC:begin fma_a=vertex_data;fma_c={~scratch_data[31],scratch_data[30:0]};end
++   SCRATCH_MUL:begin fma_a=scratch_data;fma_multiply_only=1;end
++   SCRATCH_ADD:begin fma_a=32'h3f800000;fma_b=scratch_data;fma_c={~held_operand[31],held_operand[30:0]};end
++   default:;
++  endcase
++ end
++ integer i;
++ always @(posedge clk)begin
++  if(reset)begin
++   busy<=0;out_valid<=0;bad<=0;unsupported<=0;pc<=0;outstanding<=0;
++   read_kind<=NONE;read_target<=0;
++   for(i=0;i<7;i=i+1)tags[i]<=0;
++  end else begin
++   read_kind<=request_kind;read_target<=request_target;
++   tags[0]<=read_target;for(i=1;i<7;i=i+1)tags[i]<=tags[i-1];
++   if(out_valid&&out_ready)out_valid<=0;
++   if(busy&&read_kind==VERTEX_HOLD)held_operand<=vertex_data;
++   if(busy&&read_kind==SCRATCH_HOLD)held_operand<=scratch_data;
++   case({fma_valid,busy&&fma_result_valid})
++    2'b10:outstanding<=outstanding+1'b1;
++    2'b01:outstanding<=outstanding-1'b1;
++    default:;
++   endcase
++   if(busy)begin
++    case(pc)
++     4,13,20:if(outstanding==0&&!fma_valid)pc<=pc+1'b1;
++     24:;
++     default:pc<=pc+1'b1;
++    endcase
++    if(fma_result_valid)begin
++     bad<=bad|fma_unsupported;
++     if(tags[6]==7)begin
++      cross_bits<=fma_result;unsupported<=bad|fma_unsupported;
++      reject_class<=((fma_result[30:0]==0)||(mode==1?fma_result[31]:!fma_result[31]))?2:0;
++      busy<=0;out_valid<=1;
++     end
++    end
++   end else if(in_valid&&in_ready)begin
++    indices<=vertex_indices;mode<=cull_mode;parity<=^negative_w;
++    clip_or<=clip_bits[5:0]|clip_bits[11:6]|clip_bits[17:12];
++    cross_bits<=0;bad<=0;unsupported<=0;pc<=0;outstanding<=0;read_kind<=NONE;
++    if(|(clip_bits[5:0]&clip_bits[11:6]&clip_bits[17:12]))begin reject_class<=1;out_valid<=1;end
++    else if(cull_mode==3)begin reject_class<=2;out_valid<=1;end
++    else if(cull_mode==0)begin reject_class<=0;out_valid<=1;end
++    else busy<=1;
++   end
++  end
++ end
++endmodule
+--- /dev/null
++++ b/frozen/src/fpga/common/geometry_import_convert.v
+@@ -0,0 +1,50 @@
++// Direct LOAD-result import: binary32 power-of-two scale and signed RNE.
++// This is the existing app's FE_TONEAREST contract, not a general FPU.
++// Unsupported nonfinite and nonzero subnormal inputs fail before cache writes.
++module geometry_import_convert (
++    input wire [31:0] value,
++    input wire depth_mode,
++    output reg [31:0] result,
++    output reg error
++);
++    reg [23:0] mantissa;
++    reg [32:0] magnitude, remainder, half;
++    integer shift_count, right_count;
++    always @* begin
++        result = 0;
++        error = 0;
++        mantissa = {1'b1, value[22:0]};
++        magnitude = 0;
++        remainder = 0;
++        half = 0;
++        shift_count = 0;
++        right_count = 0;
++        if (value[30:23] == 8'hff ||
++            (value[30:23] == 0 && value[22:0] != 0)) begin
++            error = 1;
++        end else if (depth_mode && (value[31] || value[30:0] <= 31'h30800000)) begin
++            result = 32'd1;
++        end else if (depth_mode && value[30:0] >= 31'h3fffffff) begin
++            result = 32'h7fffff80;
++        end else if (value[30:23] != 0) begin
++            // value = mantissa * 2^(exponent - 150).
++            shift_count = {24'd0, value[30:23]} + (depth_mode ? 30 : 8) - 150;
++            if (shift_count >= 0) begin
++                if (shift_count > 8) error = 1;
++                else magnitude = {9'd0, mantissa} << shift_count;
++            end else begin
++                right_count = -shift_count;
++                if (right_count <= 24) begin
++                    magnitude = {9'd0, mantissa} >> right_count;
++                    remainder = {9'd0, mantissa} & ((33'd1 << right_count) - 1'b1);
++                    half = 33'd1 << (right_count - 1);
++                    if (remainder > half || (remainder == half && magnitude[0]))
++                        magnitude = magnitude + 1'b1;
++                end
++            end
++            if ((!value[31] && magnitude > 33'h07fffffff) ||
++                (value[31] && magnitude > 33'h080000000)) error = 1;
++            result = value[31] ? -magnitude[31:0] : magnitude[31:0];
++        end
++    end
++endmodule
+--- /dev/null
++++ b/frozen/src/fpga/common/geometry_mesh_command_fetch.v
+@@ -0,0 +1,69 @@
++// Small bounded original-command reader: two 32-bit registers, no extra BRAM.
++// Begin only after vertex LOAD has drained the shared read master. The next
++// command may prefetch while the mesh engine culls the previous one. Source
++// addresses are bound PSRAM addresses, NOT original CPU virtual pointers.
++// cancel drains an accepted read burst; reset must reset the AXI fabric too.
++module geometry_mesh_command_fetch #(
++ parameter [31:0] SOURCE_MIN_ADDRESS=32'h10000000,
++ parameter [32:0] SOURCE_END_ADDRESS=33'h014000000
++)(
++ input wire clk,reset,start,cancel,
++ input wire [31:0] source,input wire [6:0] count,
++ output wire busy,output reg done,error,
++ output wire command_valid,input wire command_ready,
++ output reg [31:0] command_w0,command_w1,
++ output wire m_arvalid,input wire m_arready,output wire [31:0] m_araddr,
++ output wire [7:0] m_arlen,input wire m_rvalid,output wire m_rready,
++ input wire [31:0] m_rdata,input wire [1:0] m_rresp,input wire m_rlast
++);
++ localparam IDLE=0,ADDRESS=1,READ=2,OFFER=3,FINISH=4;
++ reg [2:0] state;
++ reg [31:0] address;
++ reg [6:0] remaining;
++ reg canceled,second,extra;
++ wire [32:0] source_end={1'b0,source}+{23'b0,count,3'b0};
++ wire bad_source=(|source[2:0])||source<SOURCE_MIN_ADDRESS||source_end>SOURCE_END_ADDRESS||count==0||count>64;
++ assign busy=state!=IDLE;
++ // Once asserted, AXI ARVALID remains asserted until acceptance, even cancel.
++ assign m_arvalid=state==ADDRESS&&!reset;
++ assign m_araddr=address;
++ assign m_arlen=8'd1;
++ assign m_rready=state==READ&&!reset;
++ assign command_valid=state==OFFER&&!cancel&&!canceled&&!error&&!reset;
++ always @(posedge clk)begin
++  done<=0;
++  if(reset)begin
++   state<=IDLE;address<=0;remaining<=0;canceled<=0;second<=0;extra<=0;
++   command_w0<=0;command_w1<=0;done<=0;error<=0;
++  end else begin
++   if(cancel&&busy)canceled<=1;
++   case(state)
++    IDLE:if(start&&!cancel)begin
++     error<=bad_source;canceled<=0;address<=source;remaining<=count;
++     second<=0;extra<=0;
++     if(bad_source)state<=FINISH;else state<=ADDRESS;
++    end
++    ADDRESS:if(m_arready)begin second<=0;extra<=0;state<=READ;end
++    READ:if(m_rvalid)begin
++     if(!second)command_w0<=m_rdata;
++     else if(!extra)command_w1<=m_rdata;
++     if(m_rresp!=0||m_rlast!=second||extra)error<=1;
++     if(m_rlast)begin
++      if(cancel||canceled||error||m_rresp!=0||!second||extra)state<=FINISH;
++      else state<=OFFER;
++     end else begin
++      if(second)extra<=1;
++      second<=1;
++     end
++    end
++    OFFER:if(cancel||canceled)state<=FINISH;
++     else if(command_ready)begin
++      if(remaining==1)state<=FINISH;
++      else begin remaining<=remaining-1'b1;address<=address+8;state<=ADDRESS;end
++     end
++    FINISH:begin done<=1;state<=IDLE;end
++    default:begin error<=1;state<=FINISH;end
++   endcase
++  end
++ end
++endmodule
+--- /dev/null
++++ b/frozen/src/fpga/common/geometry_mesh_packet.v
+@@ -0,0 +1,168 @@
++// Experimental consumer of a completed, immutable mesh-task raw view.
++// The owner holds raw inputs until snapshot_valid. Converted payload and the
++// survivor list then remain immutable until done. No raw reads occur in emission.
++// Validates every used vertex AND every list entry before publishing anything.
++// Unsupported numeric inputs return error with zero output. Successful validation
++// holds until publish; only the converted snapshot/list stays immutable then. GPU material state
++// is a separate ordered prerequisite: this unit emits vertex/index words only.
++// reset is a fabric/consumer reset: resetting this producer alone during a
++// published packet is invalid. No asynchronous per-task cancel after publication.
++module geometry_mesh_packet (
++ input wire clk,reset,start,publish,
++ output wire validated,output reg snapshot_valid,output wire raw_read_active,
++ output wire [8:0] store_addr,output wire store_we,output reg [15:0] store_wdata,
++ input wire [15:0] store_rdata,output reg [8:0] payload_words,
++ input wire [31:0] used_mask,flags_rgb,u_offset,v_offset,
++ input wire [6:0] live_count,
++ output wire [7:0] view_addr,input wire [31:0] view_data,
++ output wire [5:0] list_addr,input wire [14:0] list_indices,
++ output wire word_valid,input wire word_ready,output reg [31:0] word_data,
++ output wire busy,output reg done,error
++);
++ localparam IDLE=0,SELECT=1,PRIME=2,CAPTURE=3,EMIT_VERTEX=4,
++            LIST_PRIME=5,LIST_CAPTURE=6,DRAW_HEADER=7,DRAW_WORD=8,FINISH=9,VALIDATED=10,
++            SNAP_WRITE=11,SNAP_PRIME=12,SNAP_CAPTURE=13;
++ reg [3:0] state;
++ reg validation;
++ reg [31:0] mask,flags,uo,vo,list_mask;
++ reg [6:0] count;
++ reg [5:0] slot,job;
++ reg [2:0] row;
++ reg [3:0] emit_index,half_index;
++ reg [31:0] x,y,w,u,v,depth;
++ reg [15:0] rgb;
++ reg [14:0] indices;
++ assign busy=state!=IDLE;
++ assign validated=state==VALIDATED;
++ assign view_addr={row,slot[4:0]};
++ assign list_addr=job;
++ assign raw_read_active=!reset&&!snapshot_valid&&(state==PRIME||state==CAPTURE);
++ assign store_addr=(state==SNAP_WRITE||state==SNAP_PRIME||state==SNAP_CAPTURE)?
++   (9'd64+{half_index,slot[4:0]}):{3'b0,job};
++ assign store_we=!reset&&state==SNAP_WRITE;
++ assign word_valid=!reset&&(state==EMIT_VERTEX||state==DRAW_HEADER||state==DRAW_WORD);
++ wire [31:0] converted;
++ wire conversion_error;
++ geometry_import_convert convert(.value(view_data),.depth_mode(row==4),.result(converted),.error(conversion_error));
++ wire signed [31:0] ru={{16{view_data[15]}},view_data[15:0]};
++ wire signed [31:0] rv={{16{view_data[31]}},view_data[31:16]};
++ wire signed [31:0] tu=ru-$signed(uo)+(flags[17]?32'sd16:32'sd0);
++ wire signed [31:0] tv=rv-$signed(vo)+(flags[17]?32'sd16:32'sd0);
++ wire bad_vertex=((row==0||row==1||row==3||row==4)&&conversion_error)||
++   (row==3&&(view_data<32'h00800000||view_data>=32'h46fffe00))||
++   (row==4&&(view_data[31]||view_data[30:23]==0||view_data[30:23]==8'hff))||
++   (row==7&&view_data!=0);
++ wire [31:0] triangle_mask=(32'b1<<list_indices[4:0])|
++   (32'b1<<list_indices[9:5])|(32'b1<<list_indices[14:10]);
++ wire bad_context=|flags_rgb[31:19]||live_count>64||
++   ((live_count==0)!=(used_mask==0))||
++   (flags_rgb[16]&&(u_offset>524280||v_offset>524280||(|u_offset[2:0])||(|v_offset[2:0])));
++ always @* begin
++  case(half_index)
++   0:store_wdata=x[15:0];1:store_wdata=x[31:16];
++   2:store_wdata=y[15:0];3:store_wdata=y[31:16];
++   4:store_wdata=w[15:0];5:store_wdata=w[31:16];
++   6:store_wdata=u[15:0];7:store_wdata=u[31:16];
++   8:store_wdata=v[15:0];9:store_wdata=v[31:16];
++   10:store_wdata=rgb;11:store_wdata=depth[15:0];12:store_wdata=depth[31:16];
++   default:store_wdata=0;
++  endcase
++  word_data=0;
++  if(state==EMIT_VERTEX)case(emit_index)
++   0:word_data=32'h56000008;
++   1:word_data={27'b0,slot[4:0]};
++   2:word_data=x;3:word_data=y;4:word_data=w;
++   5:word_data=u;6:word_data=v;7:word_data={16'b0,rgb};8:word_data=depth;
++   default:;
++  endcase
++  else if(state==DRAW_HEADER)word_data=32'h54000001;
++  else if(state==DRAW_WORD)word_data={17'b0,indices};
++ end
++ always @(posedge clk)begin
++  done<=0;
++  if(reset)begin
++   state<=IDLE;validation<=0;mask<=0;flags<=0;uo<=0;vo<=0;list_mask<=0;
++   count<=0;slot<=0;job<=0;row<=0;emit_index<=0;
++   x<=0;y<=0;w<=0;u<=0;v<=0;depth<=0;rgb<=0;indices<=0;done<=0;error<=0;payload_words<=0;
++   snapshot_valid<=0;half_index<=0;
++  end else case(state)
++   IDLE:if(start)begin
++    // Count during the existing validation walk, avoiding a combinational
++    // popcount tree or a second admission scan. No output exists yet.
++    snapshot_valid<=0;payload_words<={1'b0,live_count,1'b0};
++    error<=bad_context;
++    if(bad_context)state<=FINISH;
++    else if(live_count==0)begin count<=0;snapshot_valid<=1;state<=VALIDATED;end
++    else begin
++     mask<=used_mask;flags<=flags_rgb;uo<=u_offset;vo<=v_offset;count<=live_count;
++     slot<=0;job<=0;list_mask<=0;validation<=1;state<=SELECT;
++    end
++   end
++   SELECT:if(slot==32)begin job<=0;state<=LIST_PRIME;end
++    else if(mask[slot[4:0]])begin
++     if(validation)payload_words<=payload_words+9'd9;
++     row<=0;half_index<=0;state<=validation?PRIME:SNAP_PRIME;
++    end
++    else slot<=slot+1'b1;
++   PRIME:state<=CAPTURE;
++   CAPTURE:if(bad_vertex)begin error<=1;state<=FINISH;end
++    else begin
++     case(row)
++      0:x<=converted;1:y<=converted;3:w<=converted;4:depth<=converted;
++      5:begin u<=flags[16]?(tu<<11):0;v<=flags[16]?(tv<<11):0;end
++      6:rgb<=flags[18]?{view_data[7:3],view_data[15:10],view_data[23:19]}:flags[15:0];
++      default:;
++     endcase
++     if(row==7)begin
++      half_index<=0;state<=SNAP_WRITE;
++     end else begin row<=row+1'b1;state<=PRIME;end
++    end
++   SNAP_WRITE:if(half_index==12)begin slot<=slot+1'b1;state<=SELECT;end
++    else half_index<=half_index+1'b1;
++   SNAP_PRIME:state<=SNAP_CAPTURE;
++   SNAP_CAPTURE:begin
++    case(half_index)
++     0:x[15:0]<=store_rdata;1:x[31:16]<=store_rdata;
++     2:y[15:0]<=store_rdata;3:y[31:16]<=store_rdata;
++     4:w[15:0]<=store_rdata;5:w[31:16]<=store_rdata;
++     6:u[15:0]<=store_rdata;7:u[31:16]<=store_rdata;
++     8:v[15:0]<=store_rdata;9:v[31:16]<=store_rdata;
++     10:rgb<=store_rdata;11:depth[15:0]<=store_rdata;12:depth[31:16]<=store_rdata;
++     default:;
++    endcase
++    if(half_index==12)begin emit_index<=0;state<=EMIT_VERTEX;end
++    else begin half_index<=half_index+1'b1;state<=SNAP_PRIME;end
++   end
++   EMIT_VERTEX:if(word_ready)begin
++    if(emit_index==8)begin slot<=slot+1'b1;state<=SELECT;end
++    else emit_index<=emit_index+1'b1;
++   end
++   LIST_PRIME:state<=LIST_CAPTURE;
++   LIST_CAPTURE:if(validation)begin
++    if((triangle_mask&~mask)!=0||({1'b0,job}+7'd1==count&&(list_mask|triangle_mask)!=mask))begin
++     error<=1;state<=FINISH;
++    end else begin
++     list_mask<=list_mask|triangle_mask;
++     if({1'b0,job}+7'd1==count)begin validation<=0;slot<=0;snapshot_valid<=1;state<=VALIDATED;end
++     else begin job<=job+1'b1;state<=LIST_PRIME;end
++    end
++   end else begin indices<=list_indices;state<=DRAW_HEADER;end
++   DRAW_HEADER:if(word_ready)state<=DRAW_WORD;
++   DRAW_WORD:if(word_ready)begin
++    if({1'b0,job}+7'd1==count)state<=FINISH;
++    else begin job<=job+1'b1;state<=LIST_PRIME;end
++   end
++   VALIDATED:if(publish)begin
++    if(count==0)state<=FINISH;else begin validation<=0;slot<=0;job<=0;state<=SELECT;end
++   end
++   FINISH:begin done<=1;state<=IDLE;end
++   default:begin error<=1;state<=FINISH;end
++  endcase
++ end
++`ifndef SYNTHESIS
++ always @(posedge clk)if(!reset)begin
++  if(snapshot_valid&&raw_read_active)$fatal(1,"Packet reread raw after snapshot");
++  if(store_we&&snapshot_valid)$fatal(1,"Packet changed committed snapshot");
++ end
++`endif
++endmodule
+--- /dev/null
++++ b/frozen/src/fpga/common/geometry_mesh_queue.v
+@@ -0,0 +1,128 @@
++// Variable-length immutable packets in one 512-word dual-port RAM.
++// Each record is {serial,flags,uofs,vofs,payload_count,payload...}. A producer
++// reserves its entire record before writing; only the final exact-length commit
++// publishes it. An older committed consumer can drain during a later fill.
++module geometry_mesh_queue (
++ input wire clk,reset,
++ input wire reserve,output wire reserve_ready,
++ input wire [31:0] reserve_serial,reserve_flags,reserve_uofs,reserve_vofs,
++ input wire [8:0] reserve_words,output wire [31:0] producer_serial,
++ input wire producer_valid,input wire [31:0] producer_word,
++ output wire producer_ready,input wire producer_done,producer_error,
++ input wire marker_valid,input wire [31:0] marker_serial,marker_flags,marker_uofs,marker_vofs,
++ output wire marker_ready,marker_error,
++ output wire word_valid,output wire [31:0] word_data,input wire word_ready,
++ output reg done,output wire error,busy,filling,output wire [31:0] owner_serial
++);
++ localparam EMPTY=0,HEADER_PRIME=1,READY=2,DRAIN=3,FAULT=4,HEADER_CAPTURE=5;
++ reg [2:0] state,header_index;
++ reg fault,fill_active;
++ reg [31:0] serial,flags,uofs,vofs;
++ reg [31:0] fill_serial,fill_flags,fill_uofs,fill_vofs;
++ reg [8:0] fill_count;
++ reg [2:0] fill_header;
++ reg [9:0] write_count,read_count,count;
++ // The tenth bit distinguishes full from empty across the physical 512-word
++ // wrap. Credits include the whole reserved record; only one fill may exist.
++ reg [9:0] write_ptr,committed_ptr,read_ptr,reserved_end;
++ wire [9:0] used_words=committed_ptr-read_ptr;
++ wire [9:0] free_words=10'd512-used_words;
++ wire [9:0] reservation_words={1'b0,reserve_words}+10'd5;
++ wire reserve_take=reserve&&reserve_ready;
++ assign reserve_ready=!reset&&!fault&&!fill_active&&reserve_words<=416&&
++   used_words<=512&&free_words>=reservation_words;
++ assign owner_serial=serial;
++ assign producer_serial=fill_serial;
++ assign busy=fill_active||state!=EMPTY||read_ptr!=committed_ptr;
++ assign filling=fill_active;
++ assign producer_ready=fill_active&&fill_header==5&&write_count<{1'b0,fill_count}&&!fault&&!reset;
++ wire push=producer_valid&&producer_ready;
++ wire header_write=fill_active&&fill_header<5&&!fault&&!reset;
++ wire commit=fill_active&&producer_done&&!producer_valid&&!producer_error&&
++   fill_header==5&&write_count=={1'b0,fill_count}&&write_ptr==reserved_end&&!fault&&!reset;
++ wire marker_match=marker_serial==serial&&marker_flags==flags&&marker_uofs==uofs&&marker_vofs==vofs;
++ wire filling_match=marker_serial==fill_serial&&marker_flags==fill_flags&&
++   marker_uofs==fill_uofs&&marker_vofs==fill_vofs;
++ assign marker_ready=marker_valid&&marker_match&&state==READY&&!fault&&!reset;
++ // A header in flight is ordinary backpressure. A marker for the sole
++ // uncommitted head also waits. Never compare against the previous head's regs.
++ assign marker_error=marker_valid&&!reset&&(fault||state==FAULT||state==DRAIN||
++   (state==READY&&!marker_match)||
++   (state==EMPTY&&read_ptr==committed_ptr&&(!fill_active||!filling_match)));
++ assign word_valid=state==DRAIN&&read_count<count&&!fault&&!reset;
++ wire pop=word_valid&&word_ready;
++ assign error=fault;
++ (* ramstyle="M10K, no_rw_check" *) reg [31:0] queue[0:511];
++ reg [31:0] data;
++ reg [31:0] header_word;
++ wire [8:0] read_addr=read_ptr[8:0]+{8'b0,pop};
++ assign word_data=data;
++ always @*begin
++  case(fill_header)
++   0:header_word=fill_serial;
++   1:header_word=fill_flags;
++   2:header_word=fill_uofs;
++   3:header_word=fill_vofs;
++   default:header_word={23'b0,fill_count};
++  endcase
++ end
++ always @(posedge clk)begin
++  data<=queue[read_addr];
++  if(header_write||push)queue[write_ptr[8:0]]<=header_write?header_word:producer_word;
++  if(reset)begin
++   state<=EMPTY;header_index<=0;fault<=0;fill_active<=0;
++   serial<=0;flags<=0;uofs<=0;vofs<=0;
++   fill_serial<=0;fill_flags<=0;fill_uofs<=0;fill_vofs<=0;fill_count<=0;fill_header<=0;
++   write_count<=0;read_count<=0;count<=0;done<=0;
++   write_ptr<=0;committed_ptr<=0;read_ptr<=0;reserved_end<=0;
++  end else begin
++   done<=0;
++   if(reserve_take)begin
++    fill_active<=1;fill_serial<=reserve_serial;fill_flags<=reserve_flags;
++    fill_uofs<=reserve_uofs;fill_vofs<=reserve_vofs;fill_count<=reserve_words;
++    fill_header<=0;write_count<=0;write_ptr<=committed_ptr;
++    reserved_end<=committed_ptr+reservation_words;
++   end
++   if(header_write)begin fill_header<=fill_header+1'b1;write_ptr<=write_ptr+1'b1;end
++   if(push)begin write_count<=write_count+1'b1;write_ptr<=write_ptr+1'b1;end
++   if(commit)begin committed_ptr<=write_ptr;fill_active<=0;end
++   // Extra/short payloads never advance committed_ptr. Older records remain
++   // intact, but the consumer halts until the coupled GPU/queue reset.
++   if((reserve&&!fill_active&&reserve_words>416)||
++      (fill_active&&(producer_error||
++        (producer_valid&&fill_header==5&&write_count=={1'b0,fill_count})||
++        (producer_done&&!commit))))fault<=1;
++   if(fault)state<=FAULT;
++   else case(state)
++    EMPTY:if(read_ptr!=committed_ptr)begin header_index<=0;state<=HEADER_PRIME;end
++    HEADER_PRIME:state<=HEADER_CAPTURE;
++    HEADER_CAPTURE:begin
++     read_ptr<=read_ptr+1'b1;
++     case(header_index)
++      0:serial<=data;
++      1:flags<=data;
++      2:uofs<=data;
++      3:vofs<=data;
++      4:begin
++       count<=data[9:0];read_count<=0;
++       if(data>416)fault<=1;
++      end
++      default:fault<=1;
++     endcase
++     if(header_index==4)state<=READY;
++     else begin header_index<=header_index+1'b1;state<=HEADER_PRIME;end
++    end
++    READY:if(marker_ready)begin
++     if(count==0)begin done<=1;state<=EMPTY;end
++     else state<=DRAIN;
++    end
++    DRAIN:if(pop)begin
++     read_count<=read_count+1'b1;read_ptr<=read_ptr+1'b1;
++     if(read_count+10'd1==count)begin done<=1;state<=EMPTY;end
++    end
++    FAULT:;
++    default:fault<=1;
++   endcase
++  end
++ end
++endmodule
+--- /dev/null
++++ b/frozen/src/fpga/common/geometry_mesh_raw_frontend.v
+@@ -0,0 +1,159 @@
++// Private LOAD + exact cull integration. Original vertex DMA, transform,
++// lighting and triangle culling share the baseline FMA and raw memories. This is not
++// yet the command-ring/RUN/legacy-packet frontend. Results require valid_slots.
++module geometry_mesh_raw_frontend #(parameter EXTERNAL_FMA=0,parameter CAPTURE_CONTEXT=1,parameter USE_OWNERSHIP=0,parameter ENABLE_INVALIDATE=0,parameter EXTERNAL_DMA=0,
++ parameter [31:0] SOURCE_MIN_ADDRESS=32'h10000000,
++ parameter [32:0] SOURCE_END_ADDRESS=33'h014000000) (
++ input wire clk,reset,
++ input wire matrix_diag_read,
++ input wire slot_invalidate,input wire [31:0] invalidate_mask,
++ input wire matrix_we,input wire [3:0] matrix_addr,input wire [31:0] matrix_data,
++ input wire start,input wire [31:0] job_base,input wire [5:0] count,input wire [4:0] dest,
++ input wire [31:0] aspect,coefficient_x,coefficient_y,coefficient_z,
++ input wire [23:0] ambient_rgb,diffuse_rgb,input wire lighting_enabled,
++ input wire [15:0] scale_u,scale_v,
++ output wire m_arvalid,input wire m_arready,output wire [31:0] m_araddr,
++ output wire [7:0] m_arlen,input wire m_rvalid,output wire m_rready,
++ input wire [31:0] m_rdata,input wire [1:0] m_rresp,input wire m_rlast,
++ // EXTERNAL_DMA: one parent-owned reader, held for this complete operation.
++ output wire dma_request_start,output wire [31:0] dma_request_base,
++ output wire [7:0] dma_request_words,
++ input wire dma_response_busy,dma_response_done,input wire [1:0] dma_response_error,
++ input wire dma_response_word_valid,input wire [7:0] dma_response_word_index,
++ input wire [31:0] dma_response_word_data,
++ input wire [7:0] output_addr,output wire [31:0] output_data,
++ output wire busy,done,unsupported,output wire [1:0] dma_error,
++ output wire all_inside,output wire [31:0] cycles,compute_cycles,valid_slots,
++ input wire tri_valid,output wire tri_ready,input wire [14:0] tri_indices,
++ input wire [31:0] owned_slots,
++ input wire [1:0] tri_cull_mode,
++ output reg tri_out_valid,input wire tri_out_ready,
++ output reg [1:0] tri_reject_class,output reg [5:0] tri_clip_or,
++ output reg [31:0] tri_cross_bits,output reg tri_unsupported,tri_fallback,
++ output reg [2:0] tri_reason,
++ output wire fma_request_valid,output wire [31:0] fma_request_a,fma_request_b,fma_request_c,
++ output wire fma_request_multiply,input wire fma_response_valid,
++ input wire [31:0] fma_response_data,input wire fma_response_unsupported
++);
++ localparam IDLE=0,META=1,LAUNCH=2,CULL=3;
++ reg [1:0] state;
++ reg [14:0] indices;
++ reg [1:0] mode;
++ reg [17:0] clips;
++ reg parity,good_w,equal_w;
++ reg [31:0] first_w;
++ reg [2:0] meta_index,meta_tag;
++ reg meta_draining,meta_read_valid;
++ wire raw_busy;
++ wire [31:0] usable_slots=USE_OWNERSHIP?(valid_slots&owned_slots):valid_slots;
++ wire idle=state==IDLE && !tri_out_valid;
++ assign busy=raw_busy || !idle;
++ assign tri_ready=idle && !raw_busy && !start;
++ wire [4:0] meta_vertex=meta_index[2:1]==0?indices[4:0]:
++                      meta_index[2:1]==1?indices[9:5]:indices[14:10];
++ wire [7:0] meta_addr={meta_index[0]?3'd3:3'd7,meta_vertex};
++ wire c_vertex_valid;
++ wire [4:0] c_vertex_index;
++ wire [1:0] c_vertex_field;
++ wire [7:0] c_vertex_addr={c_vertex_field==2?3'd4:{1'b0,c_vertex_field},c_vertex_index};
++ wire [7:0] read_addr=state==META?meta_addr:state==CULL?c_vertex_addr:output_addr;
++ wire raw_req,raw_mul,c_req,c_mul;
++ wire [31:0] raw_a,raw_b,raw_c,c_a,c_b,c_c;
++ wire result_valid,result_bad;
++ wire [31:0] result;
++ reg [6:0] cull_owner;
++ wire c_sread,c_swrite;
++ wire [2:0] c_sread_index,c_swrite_index;
++ wire [31:0] scratch_data,c_swrite_data;
++ wire c_ready,c_out,c_bad;
++ wire [1:0] c_reject;
++ wire [5:0] c_clip;
++ wire [31:0] c_cross;
++ geometry_raw_load #(.EXTERNAL_FMA(1),.CAPTURE_CONTEXT(CAPTURE_CONTEXT),.ENABLE_INVALIDATE(ENABLE_INVALIDATE),.EXTERNAL_DMA(EXTERNAL_DMA),
++  .SOURCE_MIN_ADDRESS(SOURCE_MIN_ADDRESS),.SOURCE_END_ADDRESS(SOURCE_END_ADDRESS)) raw (
++  .clk(clk),.reset(reset),.matrix_diag_read(matrix_diag_read),.matrix_we(matrix_we&&idle),.matrix_addr(matrix_addr),.matrix_data(matrix_data),
++  .slot_invalidate(slot_invalidate&&idle&&!raw_busy),.invalidate_mask(invalidate_mask),
++  .start(start&&idle),.job_base(job_base),.count(count),.dest(dest),
++  .aspect(aspect),.coefficient_x(coefficient_x),.coefficient_y(coefficient_y),.coefficient_z(coefficient_z),
++  .ambient_rgb(ambient_rgb),.diffuse_rgb(diffuse_rgb),.lighting_enabled(lighting_enabled),.scale_u(scale_u),.scale_v(scale_v),
++  .m_arvalid(m_arvalid),.m_arready(m_arready),.m_araddr(m_araddr),.m_arlen(m_arlen),
++  .m_rvalid(m_rvalid),.m_rready(m_rready),.m_rdata(m_rdata),.m_rresp(m_rresp),.m_rlast(m_rlast),
++  .dma_request_start(dma_request_start),.dma_request_base(dma_request_base),.dma_request_words(dma_request_words),
++  .dma_response_busy(dma_response_busy),.dma_response_done(dma_response_done),.dma_response_error(dma_response_error),
++  .dma_response_word_valid(dma_response_word_valid),.dma_response_word_index(dma_response_word_index),.dma_response_word_data(dma_response_word_data),
++  .output_addr(read_addr),.output_data(output_data),.busy(raw_busy),.done(done),.unsupported(unsupported),
++  .dma_error(dma_error),.all_inside(all_inside),.cycles(cycles),.compute_cycles(compute_cycles),.valid_slots(valid_slots),
++  .fma_request_valid(raw_req),.fma_request_a(raw_a),.fma_request_b(raw_b),.fma_request_c(raw_c),.fma_request_multiply(raw_mul),
++  .fma_response_valid(result_valid&&!cull_owner[6]),.fma_response_data(result),.fma_response_unsupported(result_bad),
++  .scratch_read_valid(c_sread),.scratch_read_addr({4'b0,c_sread_index}),.scratch_read_data(scratch_data),
++  .scratch_write(c_swrite),.scratch_write_addr({4'b0,c_swrite_index}),.scratch_write_data(c_swrite_data));
++ geometry_float_cull_mem cull (
++  .clk(clk),.reset(reset),.in_valid(state==LAUNCH),.in_ready(c_ready),
++  .vertex_indices(indices),.clip_bits(clips),.negative_w({2'b0,parity}),.cull_mode(mode),
++  .out_valid(c_out),.out_ready(state==CULL),.reject_class(c_reject),.clip_or(c_clip),.cross_bits(c_cross),.unsupported(c_bad),
++  .vertex_read_valid(c_vertex_valid),.vertex_read_index(c_vertex_index),.vertex_read_field(c_vertex_field),.vertex_data(output_data),
++  .scratch_read_valid(c_sread),.scratch_read_index(c_sread_index),.scratch_data(scratch_data),
++  .scratch_write(c_swrite),.scratch_write_index(c_swrite_index),.scratch_write_data(c_swrite_data),
++  .fma_valid(c_req),.fma_a(c_a),.fma_b(c_b),.fma_c(c_c),.fma_multiply_only(c_mul),
++  .fma_result_valid(result_valid&&cull_owner[6]),.fma_result(result),.fma_unsupported(result_bad));
++ assign fma_request_valid=raw_req||c_req;
++ assign fma_request_a=c_req?c_a:raw_a;assign fma_request_b=c_req?c_b:raw_b;assign fma_request_c=c_req?c_c:raw_c;
++ assign fma_request_multiply=c_req?c_mul:raw_mul;
++ generate if(EXTERNAL_FMA)begin:g_external
++  assign result=fma_response_data;assign result_valid=fma_response_valid;assign result_bad=fma_response_unsupported;
++ end else begin:g_internal
++ GeometryFmaProbe fma (.clk(clk),.reset(reset),.io_valid(fma_request_valid),
++  .io_a(fma_request_a),.io_b(fma_request_b),.io_c(fma_request_c),
++  .io_multiplyOnly(fma_request_multiply),.io_result(result),.io_resultValid(result_valid),.io_unsupported(result_bad));
++ end endgenerate
++ always @(posedge clk)begin
++  if(reset)begin
++   state<=IDLE;indices<=0;mode<=0;clips<=0;parity<=0;good_w<=0;equal_w<=0;first_w<=0;
++   meta_index<=0;meta_tag<=0;meta_draining<=0;meta_read_valid<=0;
++   cull_owner<=0;tri_out_valid<=0;tri_reject_class<=0;tri_clip_or<=0;tri_cross_bits<=0;tri_unsupported<=0;tri_fallback<=0;tri_reason<=0;
++  end else begin
++   cull_owner<={cull_owner[5:0],c_req};
++   meta_read_valid<=state==META&&!meta_draining;meta_tag<=meta_index;
++   if(tri_out_valid&&tri_out_ready)tri_out_valid<=0;
++   case(state)
++    IDLE:if(tri_valid&&tri_ready)begin
++     indices<=tri_indices;mode<=tri_cull_mode;clips<=0;parity<=0;good_w<=1;equal_w<=1;
++     tri_reject_class<=0;tri_clip_or<=0;tri_cross_bits<=0;tri_reason<=0;
++     if(!usable_slots[tri_indices[4:0]] || !usable_slots[tri_indices[9:5]] || !usable_slots[tri_indices[14:10]])begin
++      tri_out_valid<=1;tri_unsupported<=1;tri_fallback<=1;tri_reason<=1;
++     end else begin
++      state<=META;meta_index<=0;meta_draining<=0;tri_unsupported<=0;
++     end
++    end
++    META:begin
++     if(!meta_draining)begin
++      if(meta_index==5)meta_draining<=1;
++      else meta_index<=meta_index+1'b1;
++     end
++     if(meta_read_valid)begin
++      if(meta_tag[0])begin
++       parity<=parity^(output_data[31]&&|output_data[30:0]);
++       if(output_data[31] || output_data[30:23]==0 || output_data>=32'h46fffe00)good_w<=0;
++       if(meta_tag==1)first_w<=output_data;
++       else if(output_data!=first_w)equal_w<=0;
++      end
++      else case(meta_tag[2:1])
++       0:clips[5:0]<=output_data[5:0];
++       1:clips[11:6]<=output_data[5:0];
++       2:clips[17:12]<=output_data[5:0];
++      endcase
++      if(meta_tag==5)state<=LAUNCH;
++     end
++    end
++    LAUNCH:if(c_ready)state<=CULL;
++    CULL:if(c_out)begin
++     tri_out_valid<=1;tri_reject_class<=c_reject;tri_clip_or<=c_clip;
++     tri_cross_bits<=c_cross;tri_unsupported<=c_bad;
++     tri_fallback<=c_bad || (c_reject==0 && (c_clip!=0 || !good_w || equal_w));
++     tri_reason<=c_bad?3'd4:c_reject!=0?3'd0:c_clip!=0?3'd2:(!good_w||equal_w)?3'd3:3'd0;
++     state<=IDLE;
++    end
++   endcase
++  end
++ end
++endmodule
+--- /dev/null
++++ b/frozen/src/fpga/common/geometry_mesh_stream.v
+@@ -0,0 +1,164 @@
++// Isolated end-to-end source/command DMA + geometry + packet prototype.
++// One physical AXI read master has sequential vertex-LOAD then command-fetch
++// ownership. An early geometry exception cancels and DRAINS command prefetch
++// before exposing fallback or accepting task ACK. Original source/context and
++// command bytes must remain immutable until the matching task ACK.
++// Consumer/fabric reset must reset the AXI responder and packet destination.
++// VALIDATE runs a complete no-output pass; publication waits the matching ring marker.
++// Ordinary cancel after publication is ignored. consumer_reset discards the packet
++// together with its GPU consumer, while the raw master and command fetch drain.
++module geometry_mesh_stream #(
++ parameter [31:0] SOURCE_MIN_ADDRESS=32'h10000000,
++ parameter [32:0] SOURCE_END_ADDRESS=33'h014000000
++)(
++ input wire clk,reset,cancel,consumer_reset,
++ input wire matrix_diag_read,
++ input wire task_valid,task_load_only,output wire task_ready,output wire raw_ready,
++ input wire [31:0] task_serial,task_vtx_w0,task_vtx_w1,
++ input wire [6:0] task_command_count,input wire [1:0] task_cull_mode,
++ input wire [7:0] task_unsupported_features,
++ input wire matrix_we,input wire [3:0] matrix_addr,input wire [31:0] matrix_data,
++ input wire [31:0] aspect,coefficient_x,coefficient_y,coefficient_z,
++ input wire [23:0] ambient_rgb,diffuse_rgb,input wire lighting_enabled,
++ input wire [15:0] scale_u,scale_v,
++ output wire m_arvalid,input wire m_arready,output wire [31:0] m_araddr,
++ output wire [7:0] m_arlen,input wire m_rvalid,output wire m_rready,
++ input wire [31:0] m_rdata,input wire [1:0] m_rresp,input wire m_rlast,
++ input wire [5:0] list_addr,output wire [14:0] list_indices,
++ input wire [7:0] view_addr,output wire [31:0] view_data,
++ output wire busy,preflight_valid,fallback_valid,
++ output wire [3:0] fallback_reason,output wire [31:0] serial,
++ output wire [31:0] owned_mask,used_mask,
++ output wire [6:0] live_count,checked_count,clip_rejected,cull_rejected,
++ input wire task_ack,input wire [31:0] ack_serial,output wire done,
++ input wire [31:0] task_command_source,
++ input wire packet_validate,packet_publish,input wire [31:0] flags_rgb,u_offset,v_offset,
++ output wire packet_validated,packet_published,packet_snapshot_valid,output wire [8:0] packet_words,
++ output wire raw_complete,raw_unsupported,raw_all_inside,output wire [1:0] raw_dma_error,
++ output wire word_valid,input wire word_ready,output wire [31:0] word_data,
++ output wire packet_busy,packet_done,packet_error,
++ output wire fetch_busy,fetch_error
++);
++ wire engine_ready,engine_busy,engine_preflight,engine_fallback,engine_done;
++ wire [3:0] engine_reason;
++ wire command_valid,command_ready;wire [31:0] command_w0,command_w1;
++ wire raw_arvalid,raw_rready;wire [31:0] raw_araddr;wire [7:0] raw_arlen;
++ wire fetch_arvalid,fetch_rready,fetch_done;wire [31:0] fetch_araddr;wire [7:0] fetch_arlen;
++ reg fetch_started,validation_started,publication_started,packet_complete,engine_load_only;
++ wire packet_store_we,packet_raw_read_active;
++ wire [8:0] packet_store_addr;
++ wire [15:0] packet_store_wdata,packet_store_rdata;
++ reg [31:0] command_source;reg [6:0] command_count;
++ wire fetch_start=engine_busy&&command_ready&&!fetch_started&&!cancel;
++ wire packet_take=packet_validate&&preflight_valid&&!validation_started&&!cancel&&!consumer_reset;
++ wire publish_take=packet_publish&&packet_validated&&!publication_started&&!consumer_reset;
++ // Validation snapshots all converted vertices into the survivor M10K.
++ // Publication reads only that store, so LOAD-only tasks may reuse raw/FMA.
++ wire packet_owned=packet_take||packet_raw_read_active;
++ wire engine_cancel=((cancel||consumer_reset)&&!engine_load_only)||(fetch_started&&fetch_error);
++ assign packet_published=publication_started;
++ wire safe_ack=task_ack&&!fetch_busy&&(engine_load_only||!packet_busy||packet_snapshot_valid);
++ wire packet_reset=reset||consumer_reset||
++   ((cancel||safe_ack)&&!packet_snapshot_valid);
++ assign raw_ready=engine_ready&&!fetch_busy&&!cancel;
++ assign task_ready=raw_ready&&(!packet_busy||task_load_only);
++ assign busy=engine_busy||fetch_busy||packet_busy;
++ assign preflight_valid=engine_preflight&&!fetch_busy&&!fetch_error;
++ assign fallback_valid=engine_fallback&&!fetch_busy&&(engine_load_only||!packet_busy);
++ assign fallback_reason=fetch_started&&fetch_error?4'd3:engine_reason;
++ assign done=engine_done;
++ assign m_arvalid=fetch_started?fetch_arvalid:raw_arvalid;
++ assign m_araddr=fetch_started?fetch_araddr:raw_araddr;
++ assign m_arlen=fetch_started?fetch_arlen:raw_arlen;
++ assign m_rready=fetch_started?fetch_rready:raw_rready;
++ wire [7:0] packet_view_addr;wire [5:0] packet_list_addr;
++ always @(posedge clk)begin
++  if(reset)begin fetch_started<=0;validation_started<=0;publication_started<=0;packet_complete<=0;engine_load_only<=0;command_source<=0;command_count<=0;end
++  else begin
++   if(task_valid&&task_ready)begin
++    fetch_started<=0;engine_load_only<=task_load_only;
++    if(!task_load_only)begin validation_started<=0;publication_started<=0;packet_complete<=0;end
++    command_source<=task_command_source;command_count<=task_command_count;
++   end
++   if(fetch_start)fetch_started<=1;
++   if(packet_take)validation_started<=1;
++   if(publish_take)publication_started<=1;
++   if(consumer_reset)begin validation_started<=0;publication_started<=0;packet_complete<=0;end
++   if(packet_done)packet_complete<=1;
++   if(engine_done)fetch_started<=0;
++  end
++ end
++ geometry_mesh_command_fetch #(.SOURCE_MIN_ADDRESS(SOURCE_MIN_ADDRESS),.SOURCE_END_ADDRESS(SOURCE_END_ADDRESS)) fetch(.clk(clk),.reset(reset),.start(fetch_start),
++  .cancel(engine_cancel||engine_fallback),.source(command_source),.count(command_count),
++  .busy(fetch_busy),.done(fetch_done),.error(fetch_error),
++  .command_valid(command_valid),.command_ready(command_ready),.command_w0(command_w0),.command_w1(command_w1),
++  .m_arvalid(fetch_arvalid),.m_arready(m_arready&&fetch_started),.m_araddr(fetch_araddr),.m_arlen(fetch_arlen),
++  .m_rvalid(m_rvalid&&fetch_started),.m_rready(fetch_rready),.m_rdata(m_rdata),.m_rresp(m_rresp),.m_rlast(m_rlast));
++ geometry_mesh_task_engine #(.SOURCE_MIN_ADDRESS(SOURCE_MIN_ADDRESS),.SOURCE_END_ADDRESS(SOURCE_END_ADDRESS)) engine(
++  .clk(clk),
++  .reset(reset),
++  .cancel(engine_cancel),.matrix_diag_read(matrix_diag_read&&!packet_owned),
++  .task_valid(task_valid&&task_ready),
++  .task_load_only(task_load_only),
++  .task_ready(engine_ready),
++  .task_serial(task_serial),
++  .task_vtx_w0(task_vtx_w0),
++  .task_vtx_w1(task_vtx_w1),
++  .task_command_count(task_command_count),
++  .task_cull_mode(task_cull_mode),
++  .task_unsupported_features(task_unsupported_features),
++  .command_valid(command_valid),
++  .command_ready(command_ready),
++  .command_w0(command_w0),
++  .command_w1(command_w1),
++  .matrix_we(matrix_we),
++  .matrix_addr(matrix_addr),
++  .matrix_data(matrix_data),
++  .aspect(aspect),
++  .coefficient_x(coefficient_x),
++  .coefficient_y(coefficient_y),
++  .coefficient_z(coefficient_z),
++  .ambient_rgb(ambient_rgb),
++  .diffuse_rgb(diffuse_rgb),
++  .lighting_enabled(lighting_enabled),
++  .scale_u(scale_u),
++  .scale_v(scale_v),
++  .m_arvalid(raw_arvalid),
++  .m_arready(m_arready&&!fetch_started),
++  .m_araddr(raw_araddr),
++  .m_arlen(raw_arlen),
++  .m_rvalid(m_rvalid&&!fetch_started),
++  .m_rready(raw_rready),
++  .m_rdata(m_rdata),
++  .m_rresp(m_rresp),
++  .m_rlast(m_rlast),
++  .list_addr(packet_owned?packet_list_addr:list_addr),
++  .list_indices(list_indices),
++  .snapshot_access(packet_busy),.snapshot_we(packet_store_we),.snapshot_addr(packet_store_addr),
++  .snapshot_wdata(packet_store_wdata),.snapshot_rdata(packet_store_rdata),
++  .view_addr(packet_owned?packet_view_addr:view_addr),
++  .view_data(view_data),
++  .busy(engine_busy),
++  .preflight_valid(engine_preflight),
++  .fallback_valid(engine_fallback),
++  .fallback_reason(engine_reason),
++  .serial(serial),
++  .owned_mask(owned_mask),
++  .used_mask(used_mask),
++  .live_count(live_count),
++  .checked_count(checked_count),
++  .clip_rejected(clip_rejected),
++  .cull_rejected(cull_rejected),
++  .task_ack(safe_ack),
++  .ack_serial(ack_serial),
++  .done(engine_done),.raw_complete(raw_complete),.raw_unsupported(raw_unsupported),
++  .raw_all_inside(raw_all_inside),.raw_dma_error(raw_dma_error));
++ geometry_mesh_packet packet(.clk(clk),.reset(packet_reset),.start(packet_take),
++  .publish(publish_take),.validated(packet_validated),.snapshot_valid(packet_snapshot_valid),
++  .raw_read_active(packet_raw_read_active),.store_addr(packet_store_addr),.store_we(packet_store_we),
++  .store_wdata(packet_store_wdata),.store_rdata(packet_store_rdata),.payload_words(packet_words),
++  .used_mask(used_mask),.flags_rgb(flags_rgb),.u_offset(u_offset),.v_offset(v_offset),.live_count(live_count),
++  .view_addr(packet_view_addr),.view_data(view_data),.list_addr(packet_list_addr),.list_indices(list_indices),
++  .word_valid(word_valid),.word_ready(word_ready),.word_data(word_data),
++  .busy(packet_busy),.done(packet_done),.error(packet_error));
++endmodule
+--- /dev/null
++++ b/frozen/src/fpga/common/geometry_mesh_task_ctrl.v
+@@ -0,0 +1,144 @@
++// Isolated bounded mesh-task controller. Owns one immutable VTX + TRI span.
++// No triangle is published before the ENTIRE span has passed preflight.
++// The external command source, raw vertices and task context remain owned
++// until a matching ACK after output copy, or a matching whole-task repair ACK.
++// cancel stops new work but drains an accepted LOAD/cull before cancellation.
++module geometry_mesh_task_ctrl(
++ input wire clk,reset,cancel,
++ input wire task_valid,task_load_only,output wire task_ready,
++ input wire [31:0] task_serial,task_vtx_w0,task_vtx_w1,
++ input wire [6:0] task_command_count,input wire [1:0] task_cull_mode,
++ input wire [7:0] task_unsupported_features,
++ input wire command_valid,output wire command_ready,
++ input wire [31:0] command_w0,command_w1,
++ output wire load_start,output reg [31:0] load_base,
++ output reg [5:0] load_count,output reg [4:0] load_dest,
++ input wire load_busy,load_done,load_unsupported,input wire [1:0] load_dma_error,
++ output wire check_valid,input wire check_ready,output wire [14:0] check_indices,
++ output reg [1:0] check_cull_mode,
++ input wire result_valid,output wire result_ready,
++ input wire [1:0] result_reject_class,input wire result_fallback,input wire [2:0] result_reason,
++ input wire [5:0] list_addr,output wire [14:0] list_indices,
++ input wire snapshot_access,snapshot_we,input wire [8:0] snapshot_addr,
++ input wire [15:0] snapshot_wdata,output wire [15:0] snapshot_rdata,
++ output wire busy,preflight_valid,fallback_valid,
++ output reg [3:0] fallback_reason,output reg [31:0] serial,
++ output reg [31:0] owned_mask,used_mask,
++ output reg [6:0] live_count,checked_count,clip_rejected,cull_rejected,
++ input wire task_ack,input wire [31:0] ack_serial,
++ output reg done
++);
++ localparam IDLE=0,LOAD_ARM=1,LOAD_WAIT=2,FETCH=3,CHECK=4,WAIT_RESULT=5,
++            ACCEPTED=6,FALLBACK=7;
++ reg [2:0] state;
++ reg canceled,second,has_second,load_only;
++ reg [6:0] requested,commands_seen,triangles_seen;
++ reg [14:0] first_indices,second_indices;
++ // One M10K: indices0..63, then thirteen16-bit planes for32 vertices.
++ // Packet validation owns writes after culling; LOAD-only jobs never write it.
++ (* ramstyle="M10K, no_rw_check" *) reg [15:0] survivors[0:511];
++ reg [15:0] list_q;
++ wire [7:0] offered_count=task_vtx_w0[19:12];
++ wire [6:0] offered_end=task_vtx_w0[7:1];
++ wire bad_load_shape=task_vtx_w0[31:24]!=8'h01 || offered_count==0 || offered_count>32 ||
++                     offered_end>32 || {1'b0,offered_end} < offered_count;
++ wire [4:0] offered_dest=offered_end[4:0]-offered_count[4:0];
++ wire one=command_w0[31:24]==8'h05;
++ wire two=command_w0[31:24]==8'h06;
++ wire valid0=!(|{command_w0[23:22],command_w0[15:14],command_w0[7:6]});
++ wire valid1=!(|{command_w1[23:22],command_w1[15:14],command_w1[7:6]});
++ wire [14:0] decoded0={command_w0[5:1],command_w0[13:9],command_w0[21:17]};
++ wire [14:0] decoded1={command_w1[5:1],command_w1[13:9],command_w1[21:17]};
++ wire owned0=owned_mask[decoded0[4:0]] && owned_mask[decoded0[9:5]] && owned_mask[decoded0[14:10]];
++ wire owned1=owned_mask[decoded1[4:0]] && owned_mask[decoded1[9:5]] && owned_mask[decoded1[14:10]];
++ wire result_keep=result_reject_class==0;
++ wire accepted_result=state==WAIT_RESULT&&result_valid&&!result_fallback&&!cancel&&!canceled;
++ assign task_ready=state==IDLE&&!cancel;
++ assign busy=state!=IDLE;
++ assign load_start=state==LOAD_ARM&&!load_busy&&!cancel&&!canceled;
++ assign command_ready=state==FETCH&&!cancel&&!canceled;
++ assign check_valid=state==CHECK&&!cancel&&!canceled;
++ assign check_indices=second?second_indices:first_indices;
++ assign result_ready=state==WAIT_RESULT;
++ assign preflight_valid=state==ACCEPTED&&!cancel&&!canceled;
++ assign fallback_valid=state==FALLBACK;
++ assign list_indices=list_q[14:0];
++ assign snapshot_rdata=list_q;
++ always @(posedge clk)begin
++  list_q<=survivors[snapshot_access?snapshot_addr:{3'b0,list_addr}];
++  if(accepted_result&&result_keep)
++   survivors[{3'b0,live_count[5:0]}]<={1'b0,check_indices};
++  else if(snapshot_we)survivors[snapshot_addr]<=snapshot_wdata;
++  if(reset)begin
++   state<=IDLE;load_only<=0;canceled<=0;second<=0;has_second<=0;requested<=0;commands_seen<=0;triangles_seen<=0;
++   first_indices<=0;second_indices<=0;load_base<=0;load_count<=0;load_dest<=0;check_cull_mode<=0;
++   fallback_reason<=0;serial<=0;owned_mask<=0;used_mask<=0;live_count<=0;checked_count<=0;
++   clip_rejected<=0;cull_rejected<=0;done<=0;
++  end else begin
++   done<=0;
++   if(cancel&&busy)canceled<=1;
++   case(state)
++    IDLE:if(task_valid&&task_ready)begin
++     load_only<=task_load_only;serial<=task_serial;load_base<=task_vtx_w1;load_count<=offered_count[5:0];load_dest<=offered_dest;
++     requested<=task_command_count;check_cull_mode<=task_cull_mode;commands_seen<=0;triangles_seen<=0;
++     live_count<=0;checked_count<=0;clip_rejected<=0;cull_rejected<=0;used_mask<=0;
++     owned_mask<=(32'hffffffff>>(32-offered_count))<<offered_dest;
++     canceled<=0;fallback_reason<=0;second<=0;has_second<=0;
++     if(bad_load_shape || (!task_load_only && (task_command_count==0 || task_command_count>64)))begin fallback_reason<=1;state<=FALLBACK;end
++     else if(|task_unsupported_features)begin fallback_reason<=2;state<=FALLBACK;end
++     else state<=LOAD_ARM;
++    end
++    LOAD_ARM:if(cancel||canceled)begin fallback_reason<=14;state<=FALLBACK;end
++             else if(!load_busy)state<=LOAD_WAIT;
++    LOAD_WAIT:if(load_done)begin
++     if(cancel||canceled)begin fallback_reason<=14;state<=FALLBACK;end
++     else if(load_dma_error!=0)begin fallback_reason<=3;state<=FALLBACK;end
++     else if(load_unsupported)begin fallback_reason<=4;state<=FALLBACK;end
++     else state<=load_only?ACCEPTED:FETCH;
++    end
++    FETCH:if(cancel||canceled)begin fallback_reason<=14;state<=FALLBACK;end
++    else if(command_valid&&command_ready)begin
++     if((!one&&!two)||!valid0||(two&&!valid1))begin fallback_reason<=5;state<=FALLBACK;end
++     else if(!owned0||(two&&!owned1))begin fallback_reason<=6;state<=FALLBACK;end
++     else if({1'b0,triangles_seen}+8'd1+{7'b0,two}>64)begin fallback_reason<=7;state<=FALLBACK;end
++     else begin
++      first_indices<=decoded0;second_indices<=decoded1;has_second<=two;second<=0;
++      triangles_seen<=triangles_seen+7'd1+{6'b0,two};state<=CHECK;
++     end
++    end
++    CHECK:if(cancel||canceled)begin fallback_reason<=14;state<=FALLBACK;end
++          else if(check_ready)state<=WAIT_RESULT;
++    WAIT_RESULT:if(result_valid)begin
++     checked_count<=checked_count+1'b1;
++     if(cancel||canceled)begin fallback_reason<=14;state<=FALLBACK;end
++     else if(result_fallback)begin
++      fallback_reason<=result_reason==2?4'd8:result_reason==3?4'd9:result_reason==4?4'd10:4'd11;
++      state<=FALLBACK;
++     end else begin
++      if(result_keep)begin
++       live_count<=live_count+1'b1;
++       used_mask<=used_mask|(32'b1<<check_indices[4:0])|(32'b1<<check_indices[9:5])|(32'b1<<check_indices[14:10]);
++      end
++      if(result_reject_class==1)clip_rejected<=clip_rejected+1'b1;
++      if(result_reject_class==2)cull_rejected<=cull_rejected+1'b1;
++      if(has_second&&!second)begin second<=1;state<=CHECK;end
++      else begin
++       commands_seen<=commands_seen+1'b1;
++       if(commands_seen+7'd1==requested)state<=ACCEPTED;else state<=FETCH;
++      end
++     end
++    end
++    ACCEPTED:if(cancel||canceled)begin fallback_reason<=14;state<=FALLBACK;end
++     else if(task_ack&&ack_serial==serial)begin state<=IDLE;done<=1;end
++    FALLBACK:if(task_ack&&ack_serial==serial)begin state<=IDLE;done<=1;end
++    default:state<=IDLE;
++   endcase
++  end
++ end
++`ifndef SYNTHESIS
++ always @(posedge clk)if(!reset)begin
++  if(snapshot_we&&accepted_result&&result_keep)$fatal(1,"Snapshot/cull write collision");
++  if(snapshot_we&&snapshot_addr<64)$fatal(1,"Snapshot overwrote survivor index");
++ end
++`endif
++endmodule
+--- /dev/null
++++ b/frozen/src/fpga/common/geometry_mesh_task_engine.v
+@@ -0,0 +1,105 @@
++// Bounded executable LOAD + original TRI1/TRI2 + exact cull task engine.
++// Original command fetching and GPU packet conversion are separate ready/valid
++// consumers. The retained raw view and survivors cannot be overwritten before
++// the owner acknowledges completed output copy or ordered whole-task repair.
++// Scalar context is latched at task acceptance. Matrix writes are accepted
++// only while task_ready and task_valid==0; sixteen initialized words are needed.
++// reset is FABRIC reset, shared with AXI responder. cancel never resets DMA.
++module geometry_mesh_task_engine #(
++ parameter [31:0] SOURCE_MIN_ADDRESS=32'h10000000,
++ parameter [32:0] SOURCE_END_ADDRESS=33'h014000000
++)(
++ input wire clk,reset,cancel,
++ input wire matrix_diag_read,
++ input wire task_valid,task_load_only,output wire task_ready,
++ input wire [31:0] task_serial,task_vtx_w0,task_vtx_w1,
++ input wire [6:0] task_command_count,input wire [1:0] task_cull_mode,
++ input wire [7:0] task_unsupported_features,
++ input wire command_valid,output wire command_ready,
++ input wire [31:0] command_w0,command_w1,
++ input wire matrix_we,input wire [3:0] matrix_addr,input wire [31:0] matrix_data,
++ input wire [31:0] aspect,coefficient_x,coefficient_y,coefficient_z,
++ input wire [23:0] ambient_rgb,diffuse_rgb,input wire lighting_enabled,
++ input wire [15:0] scale_u,scale_v,
++ output wire m_arvalid,input wire m_arready,output wire [31:0] m_araddr,
++ output wire [7:0] m_arlen,input wire m_rvalid,output wire m_rready,
++ input wire [31:0] m_rdata,input wire [1:0] m_rresp,input wire m_rlast,
++ input wire [5:0] list_addr,output wire [14:0] list_indices,
++ input wire snapshot_access,snapshot_we,input wire [8:0] snapshot_addr,
++ input wire [15:0] snapshot_wdata,output wire [15:0] snapshot_rdata,
++ input wire [7:0] view_addr,output wire [31:0] view_data,
++ output wire busy,preflight_valid,fallback_valid,
++ output wire [3:0] fallback_reason,output wire [31:0] serial,
++ output wire [31:0] owned_mask,used_mask,
++ output wire [6:0] live_count,checked_count,clip_rejected,cull_rejected,
++ input wire task_ack,input wire [31:0] ack_serial,output wire done,
++ output wire raw_complete,raw_unsupported,raw_all_inside,output wire [1:0] raw_dma_error
++);
++ wire c_task_ready;
++ assign task_ready=c_task_ready&&!matrix_we;
++ wire take_task=task_valid&&task_ready;
++ reg [15:0] matrix_valid;
++ reg [31:0] held_aspect,held_cx,held_cy,held_cz;
++ reg [23:0] held_ambient,held_diffuse;
++ reg held_lit;
++ reg [15:0] held_su,held_sv;
++ wire load_start,raw_busy,load_done,load_unsupported;
++ wire [31:0] load_base;
++ wire [5:0] load_count;
++ wire [4:0] load_dest;
++ wire [1:0] load_dma_error;
++ assign raw_complete=load_done;assign raw_unsupported=load_unsupported;assign raw_dma_error=load_dma_error;
++ wire check_valid,check_ready,result_valid,result_ready,result_fallback;
++ wire [14:0] check_indices;
++ wire [1:0] check_cull_mode,result_reject_class;
++ wire [2:0] result_reason;
++ always @(posedge clk)begin
++  if(reset)begin
++   matrix_valid<=0;held_aspect<=0;held_cx<=0;held_cy<=0;held_cz<=0;
++   held_ambient<=0;held_diffuse<=0;held_lit<=0;held_su<=0;held_sv<=0;
++  end else begin
++   if(matrix_we&&c_task_ready&&!task_valid)matrix_valid[matrix_addr]<=1;
++   if(take_task)begin
++    held_aspect<=aspect;held_cx<=coefficient_x;held_cy<=coefficient_y;held_cz<=coefficient_z;
++    held_ambient<=ambient_rgb;held_diffuse<=diffuse_rgb;held_lit<=lighting_enabled;held_su<=scale_u;held_sv<=scale_v;
++   end
++  end
++ end
++ geometry_mesh_task_ctrl ctrl(
++  .clk(clk),.reset(reset),.cancel(cancel),.task_valid(task_valid&&!matrix_we),.task_ready(c_task_ready),
++  .task_load_only(task_load_only),.task_serial(task_serial),.task_vtx_w0(task_vtx_w0),.task_vtx_w1(task_vtx_w1),
++  .task_command_count(task_command_count),.task_cull_mode(task_cull_mode),
++  .task_unsupported_features(task_unsupported_features|(matrix_valid==16'hffff ? 8'h00 : 8'h80)),
++  .command_valid(command_valid),.command_ready(command_ready),.command_w0(command_w0),.command_w1(command_w1),
++  .load_start(load_start),.load_base(load_base),.load_count(load_count),.load_dest(load_dest),
++  .load_busy(raw_busy),.load_done(load_done),.load_unsupported(load_unsupported),.load_dma_error(load_dma_error),
++  .check_valid(check_valid),.check_ready(check_ready),.check_indices(check_indices),.check_cull_mode(check_cull_mode),
++  .result_valid(result_valid),.result_ready(result_ready),.result_reject_class(result_reject_class),
++  .result_fallback(result_fallback),.result_reason(result_reason),
++  .list_addr(list_addr),.list_indices(list_indices),
++  .snapshot_access(snapshot_access),.snapshot_we(snapshot_we),.snapshot_addr(snapshot_addr),
++  .snapshot_wdata(snapshot_wdata),.snapshot_rdata(snapshot_rdata),.busy(busy),.preflight_valid(preflight_valid),
++  .fallback_valid(fallback_valid),.fallback_reason(fallback_reason),.serial(serial),.owned_mask(owned_mask),.used_mask(used_mask),
++  .live_count(live_count),.checked_count(checked_count),.clip_rejected(clip_rejected),.cull_rejected(cull_rejected),
++  .task_ack(task_ack),.ack_serial(ack_serial),.done(done));
++ geometry_mesh_raw_frontend #(.CAPTURE_CONTEXT(0),.USE_OWNERSHIP(1),
++  .SOURCE_MIN_ADDRESS(SOURCE_MIN_ADDRESS),.SOURCE_END_ADDRESS(SOURCE_END_ADDRESS)) frontend(
++  .clk(clk),.reset(reset),.matrix_diag_read(matrix_diag_read),.slot_invalidate(1'b0),.invalidate_mask(32'b0),
++  .matrix_we(matrix_we&&c_task_ready&&!task_valid),.matrix_addr(matrix_addr),.matrix_data(matrix_data),
++  .start(load_start),.job_base(load_base),.count(load_count),.dest(load_dest),
++  .aspect(held_aspect),.coefficient_x(held_cx),.coefficient_y(held_cy),.coefficient_z(held_cz),
++  .ambient_rgb(held_ambient),.diffuse_rgb(held_diffuse),.lighting_enabled(held_lit),.scale_u(held_su),.scale_v(held_sv),
++  .m_arvalid(m_arvalid),.m_arready(m_arready),.m_araddr(m_araddr),.m_arlen(m_arlen),
++  .m_rvalid(m_rvalid),.m_rready(m_rready),.m_rdata(m_rdata),.m_rresp(m_rresp),.m_rlast(m_rlast),
++  .dma_request_start(),.dma_request_base(),.dma_request_words(),
++  .dma_response_busy(1'b0),.dma_response_done(1'b0),.dma_response_error(2'b0),
++  .dma_response_word_valid(1'b0),.dma_response_word_index(8'b0),.dma_response_word_data(32'b0),
++  .output_addr(view_addr),.output_data(view_data),.busy(raw_busy),.done(load_done),.unsupported(load_unsupported),
++  .dma_error(load_dma_error),.all_inside(raw_all_inside),.cycles(),.compute_cycles(),.valid_slots(),
++  .tri_valid(check_valid),.tri_ready(check_ready),.tri_indices(check_indices),.owned_slots(owned_mask),
++  .tri_cull_mode(check_cull_mode),.tri_out_valid(result_valid),.tri_out_ready(result_ready),
++  .tri_reject_class(result_reject_class),.tri_clip_or(),.tri_cross_bits(),.tri_unsupported(),
++  .tri_fallback(result_fallback),.tri_reason(result_reason),
++  .fma_request_valid(),.fma_request_a(),.fma_request_b(),.fma_request_c(),.fma_request_multiply(),
++  .fma_response_valid(1'b0),.fma_response_data(32'b0),.fma_response_unsupported(1'b0));
++endmodule
+--- a/frozen/src/fpga/common/geometry_raw_load.v
++++ b/frozen/src/fpga/common/geometry_raw_load.v
+@@ -8,6 +8,7 @@
+  parameter [31:0] SOURCE_MIN_ADDRESS=32'h10000000,
+  parameter [32:0] SOURCE_END_ADDRESS=33'h014000000) (
+  input wire clk,reset,
++ input wire matrix_diag_read,
+  input wire slot_invalidate,input wire [31:0] invalidate_mask,
+  input wire matrix_we,input wire [3:0] matrix_addr,input wire [31:0] matrix_data,
+  input wire start,input wire [31:0] job_base,input wire [5:0] count,input wire [4:0] dest,
+@@ -90,12 +91,13 @@
+  wire [4:0] attribute_read_addr,attribute_rgb_addr;
+  wire [1:0] attribute_rgb_channel;
+  wire [7:0] attribute_rgb_data;
+- wire [1:0] output_attribute_row=output_addr[7:5]==5?2'd1:output_addr[7:5]==7?2'd2:2'd0;
++ wire [1:0] output_attribute_row=matrix_diag_read?2'd3:output_addr[7:5]==5?2'd1:output_addr[7:5]==7?2'd2:2'd0;
+  wire [6:0] attribute_read_address=attribute_read_valid?{2'b0,attribute_read_addr}:{output_attribute_row,output_addr[4:0]};
+  reg [6:0] attribute_write_address;
+  reg [31:0] attribute_write_data;
+  reg [3:0] attribute_write_bytes;
+  reg [2:0] output_row;
++ reg output_matrix;
+  wire signed [32:0] u_product=$signed(source_u)*$signed({1'b0,su});
+  wire signed [32:0] v_product=$signed(word_data[15:0])*$signed({1'b0,sv});
+  wire calculate=state==FETCH && fetch_done && fetch_error==0;
+@@ -144,14 +146,18 @@
+  wire [1:0] clip_pair={float_lt(compute_position_data,neg_w),float_lt(clip_w,compute_position_data)};
+  wire [5:0] classification={clip_xy,clip_pair};
+  always @*begin
+-  case(output_row)
++  if(output_matrix)output_data=attribute_q;
++  else case(output_row)
+    5,6,7:output_data=attribute_q;
+    default:output_data=compute_data;
+   endcase
+  end
+  always @*begin
+   attribute_write_address=0;attribute_write_data=0;attribute_write_bytes=0;
+-  if(word_valid && raw_word==4)begin
++  if(matrix_we&&!busy)begin
++   attribute_write_address={3'b110,matrix_addr};
++   attribute_write_data=matrix_data;attribute_write_bytes=4'b1111;
++  end else if(word_valid && raw_word==4)begin
+    attribute_write_address={2'd1,global_raw_vertex};
+    attribute_write_data={v_product[31:16],u_product[31:16]};attribute_write_bytes=4'b1111;
+   end else if(word_valid && raw_word==5)begin
+@@ -195,7 +201,7 @@
+   .data_b(32'b0),.byteena_b(1'b1),.clock1(1'b1));
+ `endif
+  always @(posedge clk)begin
+-  output_row<=output_addr[7:5];
++  output_row<=output_addr[7:5];output_matrix<=matrix_diag_read;
+   if(word_valid)begin
+    if(raw_word==3)source_u<=word_data[31:16];
+    if(raw_word==4)normal_xy<=word_data[31:16];
+--- a/frozen/src/fpga/common/gpu_core.v
++++ b/frozen/src/fpga/common/gpu_core.v
+@@ -249,6 +249,31 @@
+     // GPU enable (gated by MMIO GPU_CTRL)
+     input wire gpu_enable,
+ 
++`ifdef INCLUDE_GPU_ASYNC_MESH
++output wire mesh_ctx_valid,
++input wire mesh_ctx_ready,
++output wire [4:0] mesh_ctx_index,
++output wire [31:0] mesh_ctx_data,
++output wire mesh_job_valid,
++input wire mesh_job_ready,
++output wire [31:0] mesh_job_seq, mesh_job_vertex, mesh_job_vtx_w0, mesh_job_commands,
++output wire [31:0] mesh_job_control, mesh_job_flags, mesh_job_uofs, mesh_job_vofs,
++output wire [31:0] mesh_job_cpu_vertex, mesh_job_cpu_commands, mesh_job_alpha,
++input wire mesh_word_valid,
++input wire [31:0] mesh_word_data,
++output wire mesh_word_ready,
++input wire mesh_job_done, mesh_job_fault,
++output wire mesh_consumer_reset, mesh_bridge_fault,
++`elsif INCLUDE_GPU_MESH_FRONT
++    output wire mesh_marker_valid,
++    output wire [31:0] mesh_marker_serial,mesh_marker_flags,mesh_marker_uofs,mesh_marker_vofs,
++    input wire mesh_marker_ready,mesh_marker_error,
++    input wire mesh_word_valid,input wire [31:0] mesh_word_data,
++    output wire mesh_word_ready,
++    input wire mesh_packet_done,mesh_packet_error,
++    output wire mesh_consumer_reset,mesh_bridge_fault,
++`endif
++
+     // ================================================================
+     // AXI4 Read Master — ring fetch + texture cache fills
+     // ================================================================
+@@ -430,6 +455,11 @@
+ localparam RING_WORDS = 4096;  // 16 KB
+ localparam RING_ADDR_BITS = 12;
+ localparam GEOMETRY_WORKER = `ifdef INCLUDE_GPU_GEOMETRY_WORKER 1 `else 0 `endif;
++// Both output queues publish incrementally and have independent pointers.
++// Only the original geometry worker changes packet arithmetic/decoding.
++localparam STREAMED_COMMANDS = GEOMETRY_WORKER ||
++    `ifdef INCLUDE_GPU_ASYNC_MESH 1 `elsif INCLUDE_GPU_MESH_FRONT 1 `else 0 `endif;
++
+ 
+ reg [31:0] ring_bram [0:RING_WORDS-1];
+ reg [RING_ADDR_BITS-1:0] ring_wr_addr;  // Append pointer (word index)
+@@ -525,6 +555,69 @@
+             || (GPU_WRITE_COMBINE && !fb_write_drain_complete);
+ 
+ // Port B: GPU read (synchronous, 1-cycle latency)
++`ifdef INCLUDE_GPU_ASYNC_MESH
++assign mesh_consumer_reset=!reset_n||soft_reset||ring_reset;
++generate if (1) begin : g_async_mesh
++    wire [RING_ADDR_BITS-1:0] address;
++    reg [31:0] data;
++    always @(posedge clk) data <= ring_bram[address];
++    gpu_mesh_job_front #(.ADDR_BITS(RING_ADDR_BITS),.QUEUE_BITS(9)) front (
++        .clk(clk),.reset_n(reset_n),.enable(active),
++        .soft_reset(soft_reset),.ring_reset(ring_reset),
++        .input_wrptr(ring_wrptr),.input_rdptr(upload_rdptr),
++        .input_addr(address),.input_data(data),
++        .output_rdptr(ring_rdptr),.output_addr(ring_rd_addr),
++        .output_data(ring_rd_data),.output_wrptr(command_wrptr),
++        .busy(geometry_worker_busy),
++        .mesh_ctx_valid(mesh_ctx_valid),
++        .mesh_ctx_ready(mesh_ctx_ready),
++        .mesh_ctx_index(mesh_ctx_index),
++        .mesh_ctx_data(mesh_ctx_data),
++        .mesh_job_valid(mesh_job_valid),
++        .mesh_job_ready(mesh_job_ready),
++        .mesh_job_seq(mesh_job_seq),
++        .mesh_job_vertex(mesh_job_vertex),
++        .mesh_job_vtx_w0(mesh_job_vtx_w0),
++        .mesh_job_commands(mesh_job_commands),
++        .mesh_job_control(mesh_job_control),
++        .mesh_job_flags(mesh_job_flags),
++        .mesh_job_uofs(mesh_job_uofs),
++        .mesh_job_vofs(mesh_job_vofs),
++        .mesh_job_cpu_vertex(mesh_job_cpu_vertex),
++        .mesh_job_cpu_commands(mesh_job_cpu_commands),
++        .mesh_job_alpha(mesh_job_alpha),
++        .mesh_word_valid(mesh_word_valid),
++        .mesh_word_data(mesh_word_data),
++        .mesh_word_ready(mesh_word_ready),
++        .mesh_job_done(mesh_job_done),
++        .mesh_job_fault(mesh_job_fault),
++        .fault(mesh_bridge_fault)
++    );
++end endgenerate
++`elsif INCLUDE_GPU_MESH_FRONT
++assign mesh_consumer_reset=!reset_n||soft_reset||ring_reset;
++generate if (1) begin : g_mesh_front
++    wire [RING_ADDR_BITS-1:0] address;
++    reg [31:0] data;
++    always @(posedge clk) data <= ring_bram[address];
++    gpu_mesh_bridge #(.ADDR_BITS(RING_ADDR_BITS),.QUEUE_BITS(7),.RAM_STYLE("M10K")) bridge (
++        .clk(clk),.reset_n(reset_n),.enable(active),
++        .soft_reset(soft_reset),.ring_reset(ring_reset),
++        .input_wrptr(ring_wrptr),.input_rdptr(upload_rdptr),
++        .input_addr(address),.input_data(data),
++        .output_rdptr(ring_rdptr),.output_addr(ring_rd_addr),
++        .output_data(ring_rd_data),.output_wrptr(command_wrptr),
++        .busy(geometry_worker_busy),
++        .mesh_marker_valid(mesh_marker_valid),.mesh_marker_serial(mesh_marker_serial),
++        .mesh_marker_flags(mesh_marker_flags),.mesh_marker_uofs(mesh_marker_uofs),
++        .mesh_marker_vofs(mesh_marker_vofs),.mesh_marker_ready(mesh_marker_ready),
++        .mesh_marker_error(mesh_marker_error),.mesh_word_valid(mesh_word_valid),
++        .mesh_word_data(mesh_word_data),.mesh_word_ready(mesh_word_ready),
++        .mesh_packet_done(mesh_packet_done),.mesh_packet_error(mesh_packet_error),
++        .fault(mesh_bridge_fault)
++    );
++end endgenerate
++`else
+ generate if (GEOMETRY_WORKER) begin : g_geometry_worker
+     wire [RING_ADDR_BITS-1:0] address;
+     reg [31:0] data;
+@@ -546,6 +639,7 @@
+     assign upload_rdptr = ring_rdptr;
+     assign geometry_worker_busy = 1'b0;
+ end endgenerate
++`endif
+ 
+ // DMA word-write into ring BRAM port A: asserted by the DMA FSM
+ // when an R-beat lands (dma_state==DMA_S_R && m_rd_rvalid).  These
+@@ -753,7 +847,15 @@
+         //   bit 9     = sticky CPU append overflow (cleared by ring reset)
+         // Bit 10 advertises the version-1 raw-vertex geometry command (0x59)
+         // and indexed-draw culling bits. Old cores return zero here.
+-        4'd5:    reg_rdata = {20'b0, (GEOMETRY_WORKER != 0), (SM64_GEOMETRY != 0), (INCLUDE_CPU_RING && cpu_ring_overflow),
++        4'd5:    reg_rdata = {
++`ifdef INCLUDE_GPU_ASYNC_MESH
++                              mesh_bridge_fault, 19'b0,
++`elsif INCLUDE_GPU_MESH_FRONT
++                              mesh_bridge_fault, 19'b0,
++`else
++                              20'b0,
++`endif
++                              (GEOMETRY_WORKER != 0), (SM64_GEOMETRY != 0), (INCLUDE_CPU_RING && cpu_ring_overflow),
+                               (INCLUDE_CPU_RING && cpu_ring_mode), (INCLUDE_CPU_RING != 0),
+                               dma_desc_full, dma_state, transluc_upload_busy,
+                               dma_busy, ring_empty, busy};
+@@ -4271,7 +4373,7 @@
+         // Consume the first word of the next packed-record chunk and prime
+         // ring_rd_data so S_PAY_DATA sees the first record word index.
+         pay_idx      <= 6'd31;
+-        if (GEOMETRY_WORKER && ring_empty) state <= S_PAY_WAIT;
++        if (STREAMED_COMMANDS && ring_empty) state <= S_PAY_WAIT;
+         else begin
+             ring_rdptr   <= ring_rdptr + 1'b1;
+             ring_rd_addr <= ring_rdptr + 1'b1;
+@@ -6683,8 +6785,8 @@
+             span_la_chunk <= 1'b0;
+ `endif
+             state        <= S_IDLE;
+-            ring_rdptr   <= GEOMETRY_WORKER ? 12'd0 : ring_wrptr;
+-            ring_rd_addr <= GEOMETRY_WORKER ? 12'd0 : ring_wrptr;
++            ring_rdptr   <= STREAMED_COMMANDS ? 12'd0 : ring_wrptr;
++            ring_rd_addr <= STREAMED_COMMANDS ? 12'd0 : ring_wrptr;
+             m_wr_awvalid <= 0;
+             m_wr_wvalid  <= 0;
+             fbwq_rd_ptr  <= 4'b0;
+@@ -7254,7 +7356,7 @@
+                 // accepts.
+                 pay_remaining <= cmd_payload_words;
+                 // Start first BRAM read (data arrives next cycle)
+-                if (GEOMETRY_WORKER && ring_empty) state <= S_PAY_WAIT;
++                if (STREAMED_COMMANDS && ring_empty) state <= S_PAY_WAIT;
+                 else begin
+                     ring_rdptr <= ring_rdptr + 1'b1;
+                     ring_rd_addr <= ring_rdptr + 1'b1;
+@@ -7824,7 +7926,7 @@
+                 // A worker may be blocked behind its small output queue or
+                 // awaiting another published CPU word. Consume each payload
+                 // word once, then wait before issuing an unavailable read.
+-                if (GEOMETRY_WORKER && ring_empty) state <= S_PAY_WAIT;
++                if (STREAMED_COMMANDS && ring_empty) state <= S_PAY_WAIT;
+                 else begin
+                     ring_rdptr <= ring_rdptr + 1'b1;
+                     ring_rd_addr <= ring_rdptr + 1'b1;
+--- /dev/null
++++ b/frozen/src/fpga/common/gpu_mesh_bridge.v
+@@ -0,0 +1,107 @@
++// Ordered expansion of a validated mesh task into ordinary GPU packets.
++// The producer owns raw/list memory through its final accepted output word.
++// Only published ring work contributes busy; an unpublished task must not
++// prevent CPU material preparation from fencing older GPU work.
++`default_nettype none
++module gpu_mesh_bridge #(
++    parameter ADDR_BITS=12, parameter QUEUE_BITS=9,
++    parameter RAM_STYLE="M10K"
++) (
++    input wire clk,reset_n,enable,soft_reset,ring_reset,
++    input wire [ADDR_BITS-1:0] input_wrptr,
++    output reg [ADDR_BITS-1:0] input_rdptr,
++    output wire [ADDR_BITS-1:0] input_addr,
++    input wire [31:0] input_data,
++    input wire [ADDR_BITS-1:0] output_rdptr,output_addr,
++    output reg [31:0] output_data,
++    output reg [ADDR_BITS-1:0] output_wrptr,
++    output wire busy,
++    output wire mesh_marker_valid,
++    output reg [31:0] mesh_marker_serial,mesh_marker_flags,
++                       mesh_marker_uofs,mesh_marker_vofs,
++    input wire mesh_marker_ready,mesh_marker_error,
++    input wire mesh_word_valid,input wire [31:0] mesh_word_data,
++    output wire mesh_word_ready,
++    input wire mesh_packet_done,mesh_packet_error,
++    output reg fault
++);
++localparam HEADER=0,PASS_HEADER=1,COPY=2,FIELDS=3,REQUEST=4,STREAM=5,FAULT=6;
++reg [2:0] state;
++reg [31:0] header;
++reg [12:0] remaining;
++reg [1:0] field_index;
++(* ramstyle=RAM_STYLE *) reg [31:0] queue[0:(1<<QUEUE_BITS)-1];
++wire input_empty=input_rdptr==input_wrptr;
++wire [ADDR_BITS-1:0] used=output_wrptr-output_rdptr;
++wire space=used<((1<<QUEUE_BITS)-1);
++wire running=reset_n&&!soft_reset&&!ring_reset&&enable&&!fault;
++wire take=running&&!input_empty&&
++    (state==HEADER||state==FIELDS||(state==COPY&&space));
++assign input_addr=input_rdptr+{{(ADDR_BITS-1){1'b0}},take};
++assign busy=!input_empty||state!=HEADER||fault;
++assign mesh_marker_valid=running&&state==REQUEST;
++assign mesh_word_ready=running&&state==STREAM&&space;
++wire emit=running&&space&&
++    (state==PASS_HEADER||(state==COPY&&!input_empty)||
++     (state==STREAM&&mesh_word_valid));
++wire [31:0] emit_data=state==PASS_HEADER?header:
++    state==STREAM?mesh_word_data:input_data;
++always @(posedge clk) begin
++    output_data<=queue[output_addr[QUEUE_BITS-1:0]];
++    if(emit)queue[output_wrptr[QUEUE_BITS-1:0]]<=emit_data;
++end
++always @(posedge clk) begin
++    if(!reset_n||soft_reset||ring_reset)begin
++        input_rdptr<=(reset_n&&soft_reset&&!ring_reset)?input_wrptr:0;
++        output_wrptr<=0;state<=HEADER;header<=0;remaining<=0;field_index<=0;
++        mesh_marker_serial<=0;mesh_marker_flags<=0;
++        mesh_marker_uofs<=0;mesh_marker_vofs<=0;fault<=0;
++    end else if(state==STREAM&&mesh_packet_error)begin
++        fault<=1;state<=FAULT;
++    end else if(state==STREAM&&mesh_packet_done)begin
++        // Completion is a pulse from an independent producer. Capture it
++        // even if software disables the consumer on this exact cycle.
++        state<=HEADER;
++    end else if(running)begin
++        if(take)input_rdptr<=input_rdptr+1'b1;
++        if(emit)output_wrptr<=output_wrptr+1'b1;
++        case(state)
++            HEADER:if(take)begin
++                header<=input_data;remaining<=input_data[12:0];field_index<=0;
++                if(input_data[31:24]==8'h62)begin
++                    if(input_data!=32'h62000004)begin fault<=1;state<=FAULT;end
++                    else state<=FIELDS;
++                end else state<=PASS_HEADER;
++            end
++            PASS_HEADER:if(emit)state<=remaining==0?HEADER:COPY;
++            COPY:if(take)begin
++                remaining<=remaining-1'b1;
++                if(remaining==1)state<=HEADER;
++            end
++            FIELDS:if(take)begin
++                case(field_index)
++                    0:mesh_marker_serial<=input_data;
++                    1:mesh_marker_flags<=input_data;
++                    2:mesh_marker_uofs<=input_data;
++                    3:mesh_marker_vofs<=input_data;
++                endcase
++                field_index<=field_index+1'b1;
++                if(field_index==3)state<=REQUEST;
++            end
++            REQUEST:if(mesh_marker_error)begin fault<=1;state<=FAULT;end
++                else if(mesh_marker_ready)state<=mesh_packet_done?HEADER:STREAM;
++            STREAM:if(mesh_packet_error)begin fault<=1;state<=FAULT;end
++                else if(mesh_packet_done)state<=HEADER;
++            default:begin fault<=1;state<=FAULT;end
++        endcase
++    end
++end
++`ifndef SYNTHESIS
++always @(posedge clk)if(running)begin
++    if(used>=(1<<QUEUE_BITS))$fatal(1,"mesh output FIFO overflow");
++    if(state==STREAM&&mesh_packet_done&&mesh_word_valid)
++        $fatal(1,"mesh producer completion overlaps output");
++end
++`endif
++endmodule
++`default_nettype wire
+--- /dev/null
++++ b/frozen/src/fpga/common/gpu_mesh_job_front.v
+@@ -0,0 +1,103 @@
++// AJ02 ordered context/job expansion. One producer, one ordinary output FIFO.
++`default_nettype none
++module gpu_mesh_job_front #(parameter ADDR_BITS=12, parameter QUEUE_BITS=9)(
++ input wire clk,reset_n,enable,soft_reset,ring_reset,
++ input wire [ADDR_BITS-1:0] input_wrptr,
++ output reg [ADDR_BITS-1:0] input_rdptr,
++ output wire [ADDR_BITS-1:0] input_addr,input wire [31:0] input_data,
++ input wire [ADDR_BITS-1:0] output_rdptr,output_addr,
++ output reg [31:0] output_data,output reg [ADDR_BITS-1:0] output_wrptr,
++ output wire busy, output reg fault,
++ output wire mesh_ctx_valid,input wire mesh_ctx_ready,
++ output wire [4:0] mesh_ctx_index,output wire [31:0] mesh_ctx_data,
++ output wire mesh_job_valid,input wire mesh_job_ready,
++ output reg [31:0] mesh_job_seq,mesh_job_vertex,mesh_job_vtx_w0,mesh_job_commands,
++ output reg [31:0] mesh_job_control,mesh_job_flags,mesh_job_uofs,mesh_job_vofs,
++ output reg [31:0] mesh_job_cpu_vertex,mesh_job_cpu_commands,mesh_job_alpha,
++ input wire mesh_word_valid,input wire [31:0] mesh_word_data,output wire mesh_word_ready,
++ input wire mesh_job_done,mesh_job_fault
++);
++ localparam HEADER=0,PASS_HEADER=1,COPY=2,CTX_BASE=3,CTX_DATA=4,FIELDS=5,REQUEST=6,STREAM=7,FAULT=8;
++ reg [3:0] state,field_index;
++ reg [31:0] header;
++ reg [12:0] remaining;
++ reg [4:0] context_index;
++ reg context_pending;
++ (* ramstyle="M10K, no_rw_check" *) reg [31:0] queue[0:(1<<QUEUE_BITS)-1];
++ wire input_empty=input_rdptr==input_wrptr;
++ wire [ADDR_BITS-1:0] used=output_wrptr-output_rdptr;
++ wire space=used<((1<<QUEUE_BITS)-1);
++ wire running=reset_n&&!soft_reset&&!ring_reset&&enable&&!fault;
++ wire take=running&&!input_empty&&(state==HEADER||state==FIELDS||state==CTX_BASE||
++   (state==COPY&&space)||(state==CTX_DATA&&mesh_ctx_ready));
++ assign input_addr=input_rdptr+{{(ADDR_BITS-1){1'b0}},take};
++ assign busy=!input_empty||state!=HEADER||fault;
++ assign mesh_ctx_valid=running&&state==CTX_DATA&&!input_empty;
++ assign mesh_ctx_index=context_index;
++ assign mesh_ctx_data=input_data;
++ assign mesh_job_valid=running&&state==REQUEST;
++ assign mesh_word_ready=running&&state==STREAM&&space;
++ wire emit=running&&space&&(state==PASS_HEADER||(state==COPY&&!input_empty)||
++   (state==STREAM&&mesh_word_valid));
++ wire [31:0] emit_data=state==PASS_HEADER?header:state==STREAM?mesh_word_data:input_data;
++ // Passive stream taps are exactly FIFO write handshakes.
++ wire output_push=emit;
++ wire [31:0] output_word=emit_data;
++ always @(posedge clk)begin
++  output_data<=queue[output_addr[QUEUE_BITS-1:0]];
++  if(emit)queue[output_wrptr[QUEUE_BITS-1:0]]<=emit_data;
++ end
++ always @(posedge clk)begin
++  if(!reset_n||soft_reset||ring_reset)begin
++   input_rdptr<=(reset_n&&soft_reset&&!ring_reset)?input_wrptr:0;
++   output_wrptr<=0;context_pending<=0;state<=HEADER;field_index<=0;header<=0;remaining<=0;context_index<=0;fault<=0;
++   mesh_job_seq<=0;mesh_job_vertex<=0;mesh_job_vtx_w0<=0;mesh_job_commands<=0;
++   mesh_job_control<=0;mesh_job_flags<=0;mesh_job_uofs<=0;mesh_job_vofs<=0;
++   mesh_job_cpu_vertex<=0;mesh_job_cpu_commands<=0;mesh_job_alpha<=0;
++  end else begin
++   if(emit)output_wrptr<=output_wrptr+1'b1;
++   if(take)input_rdptr<=input_rdptr+1'b1;
++   if(state==STREAM&&mesh_job_fault)begin state<=FAULT;fault<=1;end
++   else if(state==STREAM&&mesh_job_done)state<=HEADER;
++   else if(running)case(state)
++    HEADER:if(take)begin
++     header<=input_data;remaining<=input_data[12:0];field_index<=0;
++     if(context_pending&&input_data[31:24]!=8'h64)begin state<=FAULT;fault<=1;end
++     else if(input_data[31:24]==8'h63)begin
++      if(input_data!=32'h6300001d)begin state<=FAULT;fault<=1;end
++      else begin state<=CTX_BASE;context_pending<=1;end
++     end else if(input_data[31:24]==8'h64)begin
++      if(input_data!=32'h6400000b||!context_pending)begin state<=FAULT;fault<=1;end else begin state<=FIELDS;context_pending<=0;end
++     end else state<=PASS_HEADER;
++    end
++    PASS_HEADER:if(emit)state<=remaining==0?HEADER:COPY;
++    COPY:if(take)begin remaining<=remaining-1'b1;if(remaining==1)state<=HEADER;end
++    CTX_BASE:if(take)begin
++     if(input_data!=0)begin state<=FAULT;fault<=1;end
++     else begin context_index<=input_data[4:0];remaining<=remaining-1'b1;state<=CTX_DATA;end
++    end
++    CTX_DATA:if(take)begin context_index<=context_index+1'b1;remaining<=remaining-1'b1;if(remaining==1)state<=HEADER;end
++    FIELDS:if(take)begin
++     case(field_index)
++      0:mesh_job_seq<=input_data;1:mesh_job_vertex<=input_data;2:mesh_job_vtx_w0<=input_data;
++      3:mesh_job_commands<=input_data;4:mesh_job_control<=input_data;5:mesh_job_flags<=input_data;
++      6:mesh_job_uofs<=input_data;7:mesh_job_vofs<=input_data;8:mesh_job_cpu_vertex<=input_data;
++      9:mesh_job_cpu_commands<=input_data;10:mesh_job_alpha<=input_data;
++     endcase
++     field_index<=field_index+1'b1;if(field_index==10)state<=REQUEST;
++    end
++    REQUEST:if(mesh_job_fault)begin fault<=1;state<=FAULT;end
++     else if(mesh_job_ready)state<=mesh_job_done?HEADER:STREAM;
++    STREAM:;
++    default:begin fault<=1;state<=FAULT;end
++   endcase
++  end
++ end
++`ifndef SYNTHESIS
++ always @(posedge clk)if(running)begin
++  if(used>=(1<<QUEUE_BITS))$fatal(1,"AJ01 output overflow");
++  if(state==STREAM&&mesh_job_done&&mesh_word_valid)$fatal(1,"AJ01 done with word");
++ end
++`endif
++endmodule
++`default_nettype wire
+--- a/frozen/src/fpga/common/phase10_load_alias.v
++++ b/frozen/src/fpga/common/phase10_load_alias.v
+@@ -1,3 +1,283 @@
++`ifdef INCLUDE_GPU_ASYNC_MESH
++module geometry_load_alias (
++ input wire clk,reset,
++ input wire reg_wr,input wire [9:0] reg_addr,input wire [31:0] reg_wdata,input wire [3:0] reg_wstrb,
++ output wire [31:0] reg_rdata,
++ output wire m_arvalid,input wire m_arready,output wire [31:0] m_araddr,output wire [7:0] m_arlen,
++ input wire m_rvalid,output wire m_rready,input wire [31:0] m_rdata,input wire [1:0] m_rresp,input wire m_rlast,
++ input wire [7:0] view_read_addr,output wire [31:0] view_read_data,
++ input wire view_active,output wire view_block,output wire view_valid,output wire [5:0] view_count,
++ input wire mesh_ctx_valid,output wire mesh_ctx_ready,input wire [4:0] mesh_ctx_index,input wire [31:0] mesh_ctx_data,
++ input wire mesh_job_valid,output wire mesh_job_ready,
++ input wire [31:0] mesh_job_seq,mesh_job_vertex,mesh_job_vtx_w0,mesh_job_commands,
++ input wire [31:0] mesh_job_control,mesh_job_flags,mesh_job_uofs,mesh_job_vofs,
++ input wire [31:0] mesh_job_cpu_vertex,mesh_job_cpu_commands,mesh_job_alpha,
++ output wire mesh_word_valid,output wire [31:0] mesh_word_data,input wire mesh_word_ready,
++ output wire mesh_job_done,output wire mesh_job_fault,input wire mesh_consumer_reset,mesh_bridge_fault
++);
++ wire raw_start;
++ geometry_async_mesh async_mesh(
++  .clk(clk),
++  .reset(reset),
++  .reg_wr(reg_wr),
++  .reg_addr(reg_addr),
++  .reg_wdata(reg_wdata),
++  .reg_wstrb(reg_wstrb),
++  .reg_rdata(reg_rdata),
++  .m_arvalid(m_arvalid),
++  .m_arready(m_arready),
++  .m_araddr(m_araddr),
++  .m_arlen(m_arlen),
++  .m_rvalid(m_rvalid),
++  .m_rready(m_rready),
++  .m_rdata(m_rdata),
++  .m_rresp(m_rresp),
++  .m_rlast(m_rlast),
++  .view_read_addr(view_read_addr),
++  .view_read_data(view_read_data),
++  .view_active(view_active),
++  .view_block(view_block),
++  .view_valid(view_valid),
++  .view_count(view_count),
++  .mesh_ctx_valid(mesh_ctx_valid),
++  .mesh_ctx_ready(mesh_ctx_ready),
++  .mesh_ctx_index(mesh_ctx_index),
++  .mesh_ctx_data(mesh_ctx_data),
++  .mesh_job_valid(mesh_job_valid),
++  .mesh_job_ready(mesh_job_ready),
++  .mesh_job_seq(mesh_job_seq),
++  .mesh_job_vertex(mesh_job_vertex),
++  .mesh_job_vtx_w0(mesh_job_vtx_w0),
++  .mesh_job_commands(mesh_job_commands),
++  .mesh_job_control(mesh_job_control),
++  .mesh_job_flags(mesh_job_flags),
++  .mesh_job_uofs(mesh_job_uofs),
++  .mesh_job_vofs(mesh_job_vofs),
++  .mesh_job_cpu_vertex(mesh_job_cpu_vertex),
++  .mesh_job_cpu_commands(mesh_job_cpu_commands),
++  .mesh_job_alpha(mesh_job_alpha),
++  .mesh_word_valid(mesh_word_valid),
++  .mesh_word_data(mesh_word_data),
++  .mesh_word_ready(mesh_word_ready),
++  .mesh_job_done(mesh_job_done),
++  .mesh_job_fault(mesh_job_fault),
++  .mesh_consumer_reset(mesh_consumer_reset),
++  .mesh_bridge_fault(mesh_bridge_fault),
++  .raw_start(raw_start));
++endmodule
++`elsif INCLUDE_GPU_MESH_FRONT
++// Experimental MTF1 wrapper. The legacy LOD5 path and mesh tasks share ONE
++// physical raw LOAD/FMA engine. No task owns GPU_BUSY before its ring marker.
++module geometry_load_alias (
++ input wire clk,reset,
++ input wire reg_wr,input wire [9:0] reg_addr,
++ input wire [31:0] reg_wdata,input wire [3:0] reg_wstrb,
++ output reg [31:0] reg_rdata,
++ output wire m_arvalid,input wire m_arready,output wire [31:0] m_araddr,
++ output wire [7:0] m_arlen,input wire m_rvalid,output wire m_rready,
++ input wire [31:0] m_rdata,input wire [1:0] m_rresp,input wire m_rlast,
++ input wire [7:0] view_read_addr,output wire [31:0] view_read_data,
++ input wire view_active,output wire view_block,output reg view_valid,
++ output reg [5:0] view_count,
++ input wire mesh_marker_valid,
++ input wire [31:0] mesh_marker_serial,mesh_marker_flags,mesh_marker_uofs,mesh_marker_vofs,
++ output wire mesh_marker_ready,mesh_marker_error,
++ output wire mesh_word_valid,output wire [31:0] mesh_word_data,input wire mesh_word_ready,
++ output wire mesh_packet_done,mesh_packet_error,
++ input wire mesh_consumer_reset,mesh_bridge_fault
++);
++ reg [31:0] source_base,aspect,cx,cy,cz;
++ reg [5:0] count;
++ reg [23:0] ambient,diffuse;
++ reg [15:0] scale_u,scale_v,matrix_valid;
++ reg lit,active,pending,completed,success,config_error;
++ reg legacy,aborting,protocol_error,raw_seen,copy_done,validation_pending,arm_pending;
++ reg [31:0] descriptor_serial,vtx_w0,command_source,configuration,flags_rgb,uofs,vofs,completed_serial;
++ wire stream_ready,stream_busy,preflight,fallback,stream_done;
++ wire [31:0] serial,owned_mask,used_mask;
++ wire [6:0] live_count,checked_count,clip_count,cull_count;
++ wire [3:0] reason;
++ wire raw_done,unsupported,all_inside;wire [1:0] dma_error;
++ wire packet_busy,packet_done,packet_error,packet_validated,packet_published,fetch_busy,fetch_error;
++ wire full_write=reg_wr&&reg_wstrb==4'hf;
++ wire write_idle=full_write&&!active&&!pending;
++ wire old_start=write_idle&&reg_addr==10'h002&&reg_wdata[0];
++ wire mesh_start=write_idle&&reg_addr==10'h026&&reg_wdata==1;
++ wire task_start=pending&&!view_active&&stream_ready;
++ wire raw_start=task_start; // retained passive alias-start assertion name
++ wire matrix_we=write_idle&&reg_addr[9:4]==6'h04;
++ wire ack_request=full_write&&reg_addr==10'h026&&reg_wdata==2&&!legacy;
++ wire cancel_request=full_write&&reg_addr==10'h026&&reg_wdata==4&&!legacy;
++ wire validate_request=full_write&&reg_addr==10'h026&&reg_wdata==8&&!legacy;
++ wire arm_request=full_write&&reg_addr==10'h026&&reg_wdata==16&&!legacy;
++ wire validate_start=validation_pending&&!view_active&&preflight&&!packet_busy&&!packet_published;
++ wire consumer_cancel=mesh_consumer_reset&&active&&!legacy;
++ wire producer_valid,producer_ready;
++ wire [31:0] producer_word;
++ wire queue_reserve_ready,queue_busy,queue_filling,queue_fault;
++ wire queue_marker_ready,queue_marker_error;
++ wire [31:0] queue_serial;
++ wire [31:0] queue_fill_serial;
++ wire [8:0] packet_words;
++ wire queue_reserve=arm_pending&&packet_validated&&!packet_published&&queue_reserve_ready&&!consumer_cancel;
++ // Reservation latches metadata independently; copying waits an accepted alias.
++ wire raw_copy_start=arm_pending&&packet_validated&&!packet_published&&queue_filling&&
++   queue_fill_serial==serial&&!view_active&&!consumer_cancel;
++ wire raw_copy_done=packet_done&&packet_published;
++ wire pending_marker_match=active&&!legacy&&arm_pending&&packet_validated&&
++   mesh_marker_serial==serial&&mesh_marker_flags==flags_rgb&&mesh_marker_uofs==uofs&&mesh_marker_vofs==vofs;
++ // A legitimate marker can arrive while ARM is waiting to reserve the now-free
++ // queue. This is flow control, not a malformed token.
++ assign mesh_marker_ready=queue_marker_ready;
++ assign mesh_marker_error=queue_marker_error&&!(queue_reserve_ready&&pending_marker_match);
++ assign mesh_packet_error=queue_fault;
++ geometry_mesh_queue packet_queue(.clk(clk),.reset(reset||mesh_consumer_reset),
++  .reserve(queue_reserve),.reserve_ready(queue_reserve_ready),
++  .reserve_serial(serial),.reserve_flags(flags_rgb),.reserve_uofs(uofs),.reserve_vofs(vofs),
++  .reserve_words(packet_words),.producer_serial(queue_fill_serial),
++  .producer_valid(producer_valid),.producer_word(producer_word),.producer_ready(producer_ready),
++  .producer_done(raw_copy_done),.producer_error(packet_error&&packet_published),
++  .marker_valid(mesh_marker_valid),.marker_serial(mesh_marker_serial),.marker_flags(mesh_marker_flags),
++  .marker_uofs(mesh_marker_uofs),.marker_vofs(mesh_marker_vofs),
++  .marker_ready(queue_marker_ready),.marker_error(queue_marker_error),
++  .word_valid(mesh_word_valid),.word_data(mesh_word_data),.word_ready(mesh_word_ready),
++  .done(mesh_packet_done),.error(queue_fault),.busy(queue_busy),.filling(queue_filling),.owner_serial(queue_serial));
++ wire task_ack=(legacy&&(preflight||fallback))||
++   (ack_request&&(preflight||fallback)&&!packet_published&&!arm_pending)||
++   (packet_done&&packet_published&&!packet_error)||
++   (aborting&&fallback&&!fetch_busy);
++ // Alias requests are blocked only while the sole view port is actually owned.
++ // Accepted bursts always drain before a new LOAD or validation takes that port.
++ assign view_block=pending||old_start||mesh_start||validation_pending||validate_request||
++   (active&&!(preflight||fallback))||(packet_busy&&!packet_validated)||
++   (arm_pending&&queue_filling&&!packet_published);
++ geometry_mesh_stream #(.SOURCE_MIN_ADDRESS(32'h00000000),.SOURCE_END_ADDRESS(33'h001000000)) mesh(
++  .clk(clk),.reset(reset),.cancel((cancel_request&&!arm_pending)||aborting),.consumer_reset(consumer_cancel),
++  .task_valid(task_start),.task_load_only(legacy),.task_ready(stream_ready),
++  .task_serial(descriptor_serial),
++  .task_vtx_w0(legacy?(32'h01000000|({26'b0,count}<<12)|({26'b0,count}<<1)):vtx_w0),
++  .task_vtx_w1(source_base),.task_command_count(legacy?7'b0:configuration[6:0]),
++  .task_cull_mode(configuration[9:8]),
++  .task_unsupported_features(legacy?8'b0:(configuration[23:16]|(vtx_w0[7:1]!={1'b0,vtx_w0[17:12]}?8'h01:8'h00))),
++  .matrix_we(matrix_we),.matrix_addr(reg_addr[3:0]),.matrix_data(reg_wdata),
++  .aspect(aspect),.coefficient_x(cx),.coefficient_y(cy),.coefficient_z(cz),
++  .ambient_rgb(ambient),.diffuse_rgb(diffuse),.lighting_enabled(lit),.scale_u(scale_u),.scale_v(scale_v),
++  .m_arvalid(m_arvalid),.m_arready(m_arready),.m_araddr(m_araddr),.m_arlen(m_arlen),
++  .m_rvalid(m_rvalid),.m_rready(m_rready),.m_rdata(m_rdata),.m_rresp(m_rresp),.m_rlast(m_rlast),
++  .list_addr(6'b0),.list_indices(),.view_addr(view_read_addr),.view_data(view_read_data),
++  .busy(stream_busy),.preflight_valid(preflight),.fallback_valid(fallback),.fallback_reason(reason),.serial(serial),
++  .owned_mask(owned_mask),.used_mask(used_mask),.live_count(live_count),.checked_count(checked_count),
++  .clip_rejected(clip_count),.cull_rejected(cull_count),.task_ack(task_ack),.ack_serial(serial),.done(stream_done),
++  .task_command_source(command_source),.packet_validate(validate_start),.packet_publish(raw_copy_start),
++  .flags_rgb(flags_rgb),.u_offset(uofs),.v_offset(vofs),
++  .word_valid(producer_valid),.word_ready(producer_ready),.word_data(producer_word),
++  .packet_busy(packet_busy),.packet_done(packet_done),.packet_error(packet_error),
++  .packet_validated(packet_validated),.packet_published(packet_published),.packet_words(packet_words),
++  .fetch_busy(fetch_busy),.fetch_error(fetch_error),
++  .raw_complete(raw_done),.raw_unsupported(unsupported),.raw_all_inside(all_inside),.raw_dma_error(dma_error));
++ always @* begin
++  reg_rdata=0;
++  case(reg_addr)
++   10'h000:reg_rdata=32'h4c4f4405;
++   10'h001:reg_rdata={23'b0,&matrix_valid,config_error,dma_error,all_inside,unsupported,success,completed,active};
++   10'h020:reg_rdata=32'h4d544632;
++   10'h021:reg_rdata={11'b0,copy_done,reason,raw_seen,live_count,packet_published,packet_error,packet_validated,
++     success,protocol_error,fallback,preflight,active&&!legacy};
++   10'h022:reg_rdata=descriptor_serial;
++   10'h023:reg_rdata=vtx_w0;
++   10'h024:reg_rdata=command_source;
++   10'h025:reg_rdata=configuration;
++   10'h027:reg_rdata=used_mask;
++   10'h028:reg_rdata=owned_mask;
++   10'h029:reg_rdata={25'b0,clip_count};
++   10'h02a:reg_rdata={25'b0,cull_count};
++   10'h02b:reg_rdata=flags_rgb;
++   10'h02c:reg_rdata=uofs;
++   10'h02d:reg_rdata=vofs;
++   10'h02e:reg_rdata={25'b0,checked_count};
++   10'h02f:reg_rdata=completed_serial;
++   default:;
++  endcase
++ end
++ always @(posedge clk) begin
++  if(reset)begin
++   source_base<=0;aspect<=32'h3f800000;cx<=0;cy<=0;cz<=0;count<=0;
++   ambient<=0;diffuse<=0;scale_u<=0;scale_v<=0;matrix_valid<=0;lit<=0;
++   active<=0;pending<=0;completed<=0;success<=0;config_error<=0;
++   view_valid<=0;view_count<=0;legacy<=0;aborting<=0;protocol_error<=0;raw_seen<=0;copy_done<=0;validation_pending<=0;arm_pending<=0;
++   descriptor_serial<=0;vtx_w0<=0;command_source<=0;configuration<=0;flags_rgb<=0;uofs<=0;vofs<=0;completed_serial<=0;
++  end else begin
++   if(task_start)pending<=0;
++   if(validate_start)validation_pending<=0;
++   if(raw_done)begin
++    completed<=1;success<=!unsupported&&dma_error==0;raw_seen<=1;
++    view_valid<=!unsupported&&dma_error==0;view_count<=legacy?count:vtx_w0[17:12];
++   end
++   if(consumer_cancel)begin aborting<=1;validation_pending<=0;arm_pending<=0;end
++   if(stream_done)begin
++    active<=0;pending<=0;aborting<=0;validation_pending<=0;arm_pending<=0;
++    completed_serial<=serial;
++    if(!raw_seen)completed<=1;
++   end
++   if(raw_copy_done)copy_done<=1;
++   if(mesh_marker_error||mesh_bridge_fault||mesh_packet_error)protocol_error<=1;
++   if(full_write)begin
++    if(reg_addr==10'h026)begin
++     case(reg_wdata)
++      1:if(active||pending)protocol_error<=1;
++      2:if(!active||legacy||!(preflight||fallback)||packet_published||arm_pending)protocol_error<=1;
++      4:if(!active||legacy||packet_published||arm_pending)protocol_error<=1;
++      8:if(!active||legacy||!preflight||packet_busy||validation_pending||packet_published)protocol_error<=1;
++        else validation_pending<=1;
++      16:if(!active||legacy||!preflight||!packet_validated||packet_published||arm_pending)protocol_error<=1;
++        else arm_pending<=1;
++      default:protocol_error<=1;
++     endcase
++    end
++    if((reg_addr==10'h02b||reg_addr==10'h02c||reg_addr==10'h02d)&&
++       (!active||(!legacy&&preflight&&!packet_busy&&!validation_pending)))begin
++     case(reg_addr)
++      10'h02b:flags_rgb<=reg_wdata;
++      10'h02c:uofs<=reg_wdata;
++      10'h02d:vofs<=reg_wdata;
++     endcase
++    end
++    else if((reg_addr==10'h02b||reg_addr==10'h02c||reg_addr==10'h02d))protocol_error<=1;
++   end
++   if(write_idle)begin
++    if(matrix_we)matrix_valid[reg_addr[3:0]]<=1;
++    case(reg_addr)
++     10'h002:if(reg_wdata[1])begin completed<=0;success<=0;config_error<=0;protocol_error<=0;end
++     10'h003:source_base<=reg_wdata;
++     10'h004:count<=reg_wdata[5:0];
++     10'h005:aspect<=reg_wdata;
++     10'h006:cx<=reg_wdata;
++     10'h007:cy<=reg_wdata;
++     10'h008:cz<=reg_wdata;
++     10'h009:ambient<=reg_wdata[23:0];
++     10'h00a:diffuse<=reg_wdata[23:0];
++     10'h00b:begin scale_u<=reg_wdata[15:0];scale_v<=reg_wdata[31:16];end
++     10'h00c:lit<=reg_wdata[0];
++     10'h022:descriptor_serial<=reg_wdata;
++     10'h023:vtx_w0<=reg_wdata;
++     10'h024:command_source<=reg_wdata;
++     10'h025:configuration<=reg_wdata;
++     default:;
++    endcase
++   end
++   if(old_start||mesh_start)begin
++    completed<=0;success<=0;raw_seen<=0;copy_done<=0;validation_pending<=0;arm_pending<=0;aborting<=0;
++    view_valid<=0;view_count<=0;legacy<=old_start;
++    config_error<=!(&matrix_valid);
++    // Mesh shape/context errors are returned by full preflight before LOAD.
++    // Legacy lacks a fallback status, so reject a missing matrix synchronously.
++    if(old_start&&!(&matrix_valid))begin completed<=1;active<=0;pending<=0;end
++    else begin active<=1;pending<=1;end
++   end
++  end
++ end
++endmodule
++`else
+ // Private LOD5: completed native LOAD remains in BRAM. CPU copies the
+ // read-only, cacheable 32-byte raw view into its ordinary LoadedVertex slots.
+ // All hardware jobs use dest0. No result DMA, persistent ownership or counters.
+@@ -91,3 +371,4 @@
+   end
+  end
+ endmodule
++`endif

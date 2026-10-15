@@ -1,0 +1,6 @@
+{
+  "original_failure": "Old appv2 assumption that nonshape raw writes are identical does not hold after appv3 changes ELF address hashes. Exactlyfive command-cache source failures perframe skipfourcount4 andonecount12 task. The skipped lit count12 task also omits matrix/light writes; later disabled-lighting jobs retain different unused coefficients.",
+  "original_failure_log_sha256": "f3c97c05868791fd54cd5949538b123338e1cd562400f49b01516e358728a880",
+  "replacement": "check-independent-v2.json using mesh3_lifetime_appv3_v2.py",
+  "invariant": "Every actual START matches exact effective raw matrix/aspect/scales/enabled-lighting context in order; every omission is tied to exact source-cache terminal probe and CPU fallback counts; raw writes while owned rejected. Full raster, effective draw, Surface and register/FCSR oracle unchanged."
+}

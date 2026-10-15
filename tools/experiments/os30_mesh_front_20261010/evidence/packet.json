@@ -1,0 +1,55 @@
+{
+  "status": "PASS",
+  "build_command": [
+    "verilator",
+    "--cc",
+    "--exe",
+    "--build",
+    "-j",
+    "4",
+    "-Wno-fatal",
+    "--top-module",
+    "geometry_mesh_packet",
+    "--Mdir",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/test-v2/obj",
+    "-CFLAGS",
+    "-std=c++17 -O1 -fsanitize=address,undefined -fno-omit-frame-pointer",
+    "-LDFLAGS",
+    "-fsanitize=address,undefined",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/geometry_mesh_packet.v",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/model/frozen/src/fpga/common/geometry_import_convert.v",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/test_packet.cpp"
+  ],
+  "inputs": [
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/geometry_mesh_packet.v",
+      "sha256": "7514026cf2b23e8f219aa193e24c922bacac05e04079bd6f3edd772cbb97e493"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/model/frozen/src/fpga/common/geometry_import_convert.v",
+      "sha256": "3beac876e469ec45ff3d3e81c9645671dcb92737d1f84dd188ca454fbbcf7526"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/test_packet.cpp",
+      "sha256": "d59ea78d3cda5f3f21b328ef6406836721dc8d25683169a8bf1c38fb42c5bd2a"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/run_test.py",
+      "sha256": "1c70f9f0723dfee8d610b8fc2246a592649edfbf53c8a55987645684cbbfb769"
+    }
+  ],
+  "result": {
+    "status": "PASS",
+    "cases": 1227,
+    "words_checked": 370859,
+    "stalled_cycles": 277901,
+    "cycles": 1929943
+  },
+  "sanitizers": {
+    "address": true,
+    "undefined": true,
+    "leaks": false,
+    "leak_note": "LeakSanitizer cannot run under this sandbox ptrace environment."
+  },
+  "scope": "Clocked synchronous-RAM packet consumer; independent host float/RNE packet oracle, backpressure, captured context and zero-output fallback. No complete-frame performance or physical fit claim."
+}

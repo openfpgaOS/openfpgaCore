@@ -1,0 +1,36 @@
+{
+  "passed": true,
+  "commands": 4121,
+  "source_function_sha256": "c42c1fcc176c89200d1af48d6b6d0d0ae54d1fa9c4d55599319116d5c21ec123",
+  "compile_command": [
+    "gcc",
+    "-std=c11",
+    "-O2",
+    "-Wall",
+    "-Wextra",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/source-traversal.c",
+    "-o",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/source-traversal"
+  ],
+  "macro_command": [
+    "gcc",
+    "-E",
+    "-dM",
+    "-DF3DEX_GBI_2E",
+    "-I/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64-v2/src/sm64/sm64/include",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64-v2/src/sm64/sm64/include/PR/gbi.h"
+  ],
+  "run_stdout": "4121 commands\n",
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/check_source_traversal.py": "cdc5147be23efa402ee5a8ae43450c7cdb755932dc1c37bdbdfa8081039025c2",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64-v2/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "49a72cfd370563bb3c283a72d35a4d32007905565778259d8cad060e87fbd503",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64-v2/src/sm64/sm64/include/PR/gbi.h": "ee1881885c22beadc6655e41a086413682bc1f78b4726a30937b1878427311d9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64-v2/src/sm64/sm64/include/PR/ultratypes.h": "c3d82c2c6a21020d163d22d2e22721daf04fab6f861dc7804c2304466c42db91",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/source-traversal.c": "93ddf15fc5b18c36b1b77ea5d03081e0a778f30d9f6deaec3aef4281c1256726",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/source-traversal": "f49090ed16f9ac6d738d4bb582a871cab82f608774f34a7156de5fff72c3b90c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/source-traversal.bin": "e00b9de6153e8b1179208b9c2997f0854116f25bca8d4f364e899e3db21e8449",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/fixture-v2/capture/run-reference/snapshot/sdram.bin": "843fd9fb239c733b9562f7c6f3a273471ea77ff28165b45ff2bad184dfc4c49a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/coverage-frame360-events.json": "28ba4c35605290e3698f636c49297bad5c88b660a3f38940f0d3308507f307ec"
+  },
+  "scope": "Actual source switch and recursive G_DL/tail branch/rectangle pointer consumption, with one passive observe insertion. Renderer handlers are stubbed; no arithmetic/material execution claim."
+}

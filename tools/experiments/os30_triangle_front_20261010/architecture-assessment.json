@@ -1,0 +1,177 @@
+{
+  "status": "REJECT_PERFORMANCE_PROMOTION_CORRECTNESS_PASSED",
+  "scope": "Two prepared matched-ELF intervals per version with fixed synthetic audio/scan requests, fresh functional goldens, original core baseline; not sustained hardware FPS.",
+  "results": {
+    "v2": {
+      "warm_baseline_cycles": 4329312,
+      "warm_candidate_cycles": 4408243,
+      "cycle_change_percent": 1.8231765231981445,
+      "baseline_retired": 2107552,
+      "candidate_retired": 2127688,
+      "retired_difference": 20136,
+      "warm_hardware_state_cycles": {
+        "0": 4363021,
+        "1": 89,
+        "2": 739,
+        "3": 739,
+        "4": 5173,
+        "5": 739,
+        "6": 36915,
+        "7": 739,
+        "8": 89
+      },
+      "warm_hardware_busy_cycles": 45222,
+      "selected_cpu_function_attribution": {
+        "gfx_cpu_indexed_run": {
+          "baseline": {
+            "retired": 409412,
+            "retirement_gap_cycles": 575992
+          },
+          "candidate": {
+            "retired": 311092,
+            "retirement_gap_cycles": 465345
+          },
+          "retired_difference": -98320,
+          "retirement_gap_difference": -110647
+        },
+        "gfx_triangle_front_run": {
+          "baseline": {
+            "retired": 8568,
+            "retirement_gap_cycles": 11558
+          },
+          "candidate": {
+            "retired": 100311,
+            "retirement_gap_cycles": 176888
+          },
+          "retired_difference": 91743,
+          "retirement_gap_difference": 165330
+        },
+        "load_alias_copy": {
+          "baseline": {
+            "retired": 106916,
+            "retirement_gap_cycles": 198997
+          },
+          "candidate": {
+            "retired": 91406,
+            "retirement_gap_cycles": 174802
+          },
+          "retired_difference": -15510,
+          "retirement_gap_difference": -24195
+        },
+        "load_alias_vertex": {
+          "baseline": {
+            "retired": 100363,
+            "retirement_gap_cycles": 265532
+          },
+          "candidate": {
+            "retired": 102816,
+            "retirement_gap_cycles": 268453
+          },
+          "retired_difference": 2453,
+          "retirement_gap_difference": 2921
+        }
+      }
+    },
+    "v3": {
+      "warm_baseline_cycles": 4370891,
+      "warm_candidate_cycles": 4460109,
+      "cycle_change_percent": 2.041185652993871,
+      "baseline_retired": 2108535,
+      "candidate_retired": 2112469,
+      "retired_difference": 3934,
+      "warm_hardware_state_cycles": {
+        "0": 4379767,
+        "1": 183,
+        "2": 1396,
+        "3": 1396,
+        "4": 9772,
+        "5": 1396,
+        "6": 64620,
+        "7": 1396,
+        "8": 183
+      },
+      "warm_hardware_busy_cycles": 80342,
+      "selected_cpu_function_attribution": {
+        "gfx_cpu_indexed_run": {
+          "baseline": {
+            "retired": 409412,
+            "retirement_gap_cycles": 596857
+          },
+          "candidate": {
+            "retired": 233479,
+            "retirement_gap_cycles": 364499
+          },
+          "retired_difference": -175933,
+          "retirement_gap_difference": -232358
+        },
+        "gfx_triangle_front_run": {
+          "baseline": {
+            "retired": 8568,
+            "retirement_gap_cycles": 9856
+          },
+          "candidate": {
+            "retired": 171757,
+            "retirement_gap_cycles": 296604
+          },
+          "retired_difference": 163189,
+          "retirement_gap_difference": 286748
+        },
+        "load_alias_copy": {
+          "baseline": {
+            "retired": 106916,
+            "retirement_gap_cycles": 195003
+          },
+          "candidate": {
+            "retired": 78010,
+            "retirement_gap_cycles": 152331
+          },
+          "retired_difference": -28906,
+          "retirement_gap_difference": -42672
+        },
+        "load_alias_vertex": {
+          "baseline": {
+            "retired": 100773,
+            "retirement_gap_cycles": 263815
+          },
+          "candidate": {
+            "retired": 103326,
+            "retirement_gap_cycles": 262102
+          },
+          "retired_difference": 2553,
+          "retirement_gap_difference": -1713
+        }
+      }
+    }
+  },
+  "observed_control_path": [
+    "CPU decodes and validates each immutable run and writes each triangle job over MMIO.",
+    "CPU starts preflight and synchronously polls completion; current raw vertices and shared FMA remain reserved.",
+    "CPU reads keep/fallback masks, resolves supported materials, compacts surviving jobs and computes dirty vertex slots.",
+    "CPU claims a BIM2 snapshot and emits imports plus surviving indexed draws.",
+    "Any hardware-unsupported triangle falls back the whole run to CPU processing, preserving correctness but repeating front-end work."
+  ],
+  "conclusion": "The exact hardware culler and lazy residency are correct in tested boundaries and replay, but this CPU-managed request/response boundary plus limited snapshot availability and ordered fallback erase the saved canonical readback and CPU culling. Polling is part of the overhead, not a sufficient explanation by itself: metadata parsing, mask consumption and job compaction still run on the CPU. Neither tested version is a performance improvement.",
+  "recommendation": "Retain current production core. A future distinct experiment should evaluate queued immutable triangle jobs consumed into ordered GPU-ready descriptors without CPU mask readback/compaction. It must first define snapshot/partial-G_VTX lifetime, exact exceptional fallback ordering, and material ordering. No area, timing or speed improvement is established for that design.",
+  "attribution_caveats": [
+    "Function retirement gaps are attribution, not independent causal savings. Do not add GPU partition shifts to CPU gap differences.",
+    "Hardware state durations show synchronous reservation work, not its isolated effect on full-frame completion. Older raster work can overlap the CPU poll window.",
+    "The v2 and v3 app builds differ; use each same-ELF baseline for hardware comparison.",
+    "Two-bank pressure and immediate GPU command publication alter GPU idle flush behavior; more offloaded triangles need not improve full-frame time."
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/performance-v2.json": "7bac357338821a3b55d30268dc9e8b86ff73a2aff9faa818c9ae4fe3b3fdc41b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/front-v2/run/front-events.tsv": "3843c7bbb9f30e187d13f25be2b5f02bcfa06bec63a10a47191c08265ebf27ed",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/front-v2/run/boundaries.tsv": "b8752f4ba654f2121d7246b040da1008a9f2463b8b210c97be5b8a937eaf4666",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/review/baseline-v2.json": "18daada69bf42e34591325ae01f6a85931a041f31afdcb9eab948c6860057db4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/review/front-v2.json": "6c58d98fabab89242100113e64bffd681d64cc03c67f9ae6f5c4a2df035e8f8a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/review/final-elf-v2-cull-dag.json": "d99ec56448487b867fb93e7a1e4c03942d76df24d31d7a6e384437b0cfbac726",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/performance-v3.json": "967475b4aeea4af65b15978752c204e2d6a108e42be42cb60ea67043c70c272e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/front-v3/run/front-events.tsv": "be63ade457f15e0feb19737b55725ab8ce1ceb35bdd7dd1cc3f5c4c6275fe200",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/front-v3/run/boundaries.tsv": "011a0a2e9f13044e5a7eecde0e13493d58f0e9b3826328b96523e8ee46316b3a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/review/baseline-v3.json": "5d967a7fc16d87c78ad4c32d8efac9090e41f1c0feeb1ad1d97b7d2f67514456",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/review/front-v3.json": "9bc87130a3267f3bc0f1547d4640be851b1b26d7977dfd0e3ae127ce170df496",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/review/final-elf-v3-cull-dag.json": "abdc0b62c70f615e6f522705d793d1072b9bbaad63eed45453f0e6267e9999db",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/work/sm64-v3/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "939aa790a25dbb3f135ad11b2d986982fc6de4426dbd637c004fc7e78f942d35",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/review/app-overhead-and-banks-v1.json": "455e9e797caa885e7796097b74ed80b9d3d88acea730f965493dcb57ce498439"
+  }
+}

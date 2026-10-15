@@ -1,0 +1,1062 @@
+{
+  "status": "PASS_INDEPENDENT_RESULTS_AUDIT_RETAIN_BASELINE",
+  "runs": {
+    "baseline-v1": {
+      "oracle": "PASS_FULL_FUNCTIONAL_ORACLE_AND_HASH_BINDING",
+      "interval_cycles": [
+        3980965,
+        4366717
+      ],
+      "partition": {
+        "idle_empty": 2222226,
+        "idle_cache_drain": 129406,
+        "command_fetch": 28560,
+        "command_execute": 2780,
+        "command_barrier": 3330,
+        "clear": 199952,
+        "triangle_setup": 205965,
+        "triangle_walk": 10545,
+        "vertex_transform": 72716,
+        "vertex_cache": 23646,
+        "span_setup": 12354,
+        "framebuffer_flush": 1863,
+        "fragment_retire": 169971,
+        "fragment_color_depth_response": 492433,
+        "fragment_read_drain_or_setup": 81638,
+        "fragment_write_backpressure": 2012,
+        "fragment_depth_read_gate": 356008,
+        "fragment_texture_starved": 34220,
+        "fragment_perspective_starved": 107766,
+        "fragment_local_hold": 116487,
+        "fragment_pipeline_progress": 92839,
+        "other": 0
+      },
+      "reads": [
+        {
+          "requests": 14051,
+          "words": 111982,
+          "completions": 14051,
+          "ar_wait": 4614,
+          "outstanding": 570278,
+          "before_first": 436121,
+          "first": {
+            "count": 14051,
+            "sum": 436121,
+            "max": 495,
+            "p50": 4,
+            "p95": 102,
+            "p99": 380
+          },
+          "last": {
+            "count": 14051,
+            "sum": 570278,
+            "max": 509,
+            "p50": 11,
+            "p95": 116,
+            "p99": 394
+          }
+        },
+        {
+          "requests": 5194,
+          "words": 83104,
+          "completions": 5194,
+          "ar_wait": 116259,
+          "outstanding": 262440,
+          "before_first": 106620,
+          "first": {
+            "count": 5194,
+            "sum": 106620,
+            "max": 356,
+            "p50": 17,
+            "p95": 20,
+            "p99": 325
+          },
+          "last": {
+            "count": 5194,
+            "sum": 262440,
+            "max": 386,
+            "p50": 47,
+            "p95": 50,
+            "p99": 355
+          }
+        },
+        {
+          "requests": 3582,
+          "words": 14328,
+          "completions": 3582,
+          "ar_wait": 6736,
+          "outstanding": 58522,
+          "before_first": 47776,
+          "first": {
+            "count": 3582,
+            "sum": 47776,
+            "max": 16,
+            "p50": 12,
+            "p95": 16,
+            "p99": 16
+          },
+          "last": {
+            "count": 3582,
+            "sum": 58522,
+            "max": 19,
+            "p50": 15,
+            "p95": 19,
+            "p99": 19
+          }
+        },
+        {
+          "requests": 1641,
+          "words": 24372,
+          "completions": 1641,
+          "ar_wait": 8844,
+          "outstanding": 44599,
+          "before_first": 21868,
+          "first": {
+            "count": 1641,
+            "sum": 21868,
+            "max": 16,
+            "p50": 12,
+            "p95": 16,
+            "p99": 16
+          },
+          "last": {
+            "count": 1641,
+            "sum": 44599,
+            "max": 31,
+            "p50": 27,
+            "p95": 31,
+            "p99": 31
+          }
+        },
+        {
+          "requests": 5223,
+          "words": 38700,
+          "completions": 5223,
+          "ar_wait": 13514,
+          "outstanding": 103121,
+          "before_first": 69644,
+          "first": {
+            "count": 5223,
+            "sum": 69644,
+            "max": 16,
+            "p50": 12,
+            "p95": 16,
+            "p99": 16
+          },
+          "last": {
+            "count": 5223,
+            "sum": 103121,
+            "max": 31,
+            "p50": 19,
+            "p95": 31,
+            "p99": 31
+          }
+        }
+      ],
+      "cache": {
+        "cache_hits": 109718,
+        "cache_misses": 12266,
+        "cache_writebacks": 19205,
+        "cache_flush_entries": 44,
+        "cache_maintenance_cycles": 161824,
+        "cache_upstream_aw_wait": 381527,
+        "cache_upstream_w_wait": 751299,
+        "cache_downstream_write_words": 170250,
+        "cache_busy": 1566454
+      },
+      "limits": {
+        "0": {
+          "scan_latency": 0,
+          "audio_latency": 0,
+          "audio_queue_latency": 0
+        },
+        "1": {
+          "scan_latency": 386,
+          "audio_latency": 430,
+          "audio_queue_latency": 371
+        },
+        "2": {
+          "scan_latency": 386,
+          "audio_latency": 428,
+          "audio_queue_latency": 383
+        }
+      },
+      "warm_cycle_change": 0,
+      "warm_percent_change": 0.0,
+      "cache_delta_vs_baseline": {
+        "cache_hits": 0,
+        "cache_misses": 0,
+        "cache_writebacks": 0,
+        "cache_flush_entries": 0,
+        "cache_maintenance_cycles": 0,
+        "cache_upstream_aw_wait": 0,
+        "cache_upstream_w_wait": 0,
+        "cache_downstream_write_words": 0,
+        "cache_busy": 0
+      },
+      "partition_delta_vs_baseline": {
+        "idle_empty": 0,
+        "idle_cache_drain": 0,
+        "command_fetch": 0,
+        "command_execute": 0,
+        "command_barrier": 0,
+        "clear": 0,
+        "triangle_setup": 0,
+        "triangle_walk": 0,
+        "vertex_transform": 0,
+        "vertex_cache": 0,
+        "span_setup": 0,
+        "framebuffer_flush": 0,
+        "fragment_retire": 0,
+        "fragment_color_depth_response": 0,
+        "fragment_read_drain_or_setup": 0,
+        "fragment_write_backpressure": 0,
+        "fragment_depth_read_gate": 0,
+        "fragment_texture_starved": 0,
+        "fragment_perspective_starved": 0,
+        "fragment_local_hold": 0,
+        "fragment_pipeline_progress": 0,
+        "other": 0
+      }
+    },
+    "legacy-srw-v1": {
+      "oracle": "PASS_FULL_FUNCTIONAL_ORACLE_AND_HASH_BINDING",
+      "interval_cycles": [
+        3972383,
+        4358469
+      ],
+      "partition": {
+        "idle_empty": 2222484,
+        "idle_cache_drain": 130577,
+        "command_fetch": 28560,
+        "command_execute": 2780,
+        "command_barrier": 3526,
+        "clear": 199893,
+        "triangle_setup": 205965,
+        "triangle_walk": 10545,
+        "vertex_transform": 72716,
+        "vertex_cache": 23646,
+        "span_setup": 12354,
+        "framebuffer_flush": 1863,
+        "fragment_retire": 169971,
+        "fragment_color_depth_response": 707559,
+        "fragment_read_drain_or_setup": 81552,
+        "fragment_write_backpressure": 2020,
+        "fragment_depth_read_gate": 126735,
+        "fragment_texture_starved": 34515,
+        "fragment_perspective_starved": 111162,
+        "fragment_local_hold": 116484,
+        "fragment_pipeline_progress": 93562,
+        "other": 0
+      },
+      "reads": [
+        {
+          "requests": 14051,
+          "words": 111982,
+          "completions": 14051,
+          "ar_wait": 212039,
+          "outstanding": 577995,
+          "before_first": 443810,
+          "first": {
+            "count": 14051,
+            "sum": 443810,
+            "max": 479,
+            "p50": 4,
+            "p95": 106,
+            "p99": 383
+          },
+          "last": {
+            "count": 14051,
+            "sum": 577995,
+            "max": 493,
+            "p50": 11,
+            "p95": 120,
+            "p99": 397
+          }
+        },
+        {
+          "requests": 5198,
+          "words": 83168,
+          "completions": 5198,
+          "ar_wait": 120782,
+          "outstanding": 260659,
+          "before_first": 104719,
+          "first": {
+            "count": 5198,
+            "sum": 104719,
+            "max": 353,
+            "p50": 17,
+            "p95": 19,
+            "p99": 325
+          },
+          "last": {
+            "count": 5198,
+            "sum": 260659,
+            "max": 383,
+            "p50": 47,
+            "p95": 49,
+            "p99": 355
+          }
+        },
+        {
+          "requests": 3582,
+          "words": 14328,
+          "completions": 3582,
+          "ar_wait": 6848,
+          "outstanding": 58518,
+          "before_first": 47772,
+          "first": {
+            "count": 3582,
+            "sum": 47772,
+            "max": 16,
+            "p50": 12,
+            "p95": 16,
+            "p99": 16
+          },
+          "last": {
+            "count": 3582,
+            "sum": 58518,
+            "max": 19,
+            "p50": 15,
+            "p95": 19,
+            "p99": 19
+          }
+        },
+        {
+          "requests": 1641,
+          "words": 24372,
+          "completions": 1641,
+          "ar_wait": 8966,
+          "outstanding": 44603,
+          "before_first": 21872,
+          "first": {
+            "count": 1641,
+            "sum": 21872,
+            "max": 16,
+            "p50": 12,
+            "p95": 16,
+            "p99": 16
+          },
+          "last": {
+            "count": 1641,
+            "sum": 44603,
+            "max": 31,
+            "p50": 27,
+            "p95": 31,
+            "p99": 31
+          }
+        },
+        {
+          "requests": 5223,
+          "words": 38700,
+          "completions": 5223,
+          "ar_wait": 13527,
+          "outstanding": 103121,
+          "before_first": 69644,
+          "first": {
+            "count": 5223,
+            "sum": 69644,
+            "max": 16,
+            "p50": 12,
+            "p95": 16,
+            "p99": 16
+          },
+          "last": {
+            "count": 5223,
+            "sum": 103121,
+            "max": 31,
+            "p50": 19,
+            "p95": 31,
+            "p99": 31
+          }
+        }
+      ],
+      "cache": {
+        "cache_hits": 109707,
+        "cache_misses": 12277,
+        "cache_writebacks": 19215,
+        "cache_flush_entries": 47,
+        "cache_maintenance_cycles": 164494,
+        "cache_upstream_aw_wait": 737961,
+        "cache_upstream_w_wait": 1108805,
+        "cache_downstream_write_words": 170257,
+        "cache_busy": 1566952
+      },
+      "limits": {
+        "0": {
+          "scan_latency": 0,
+          "audio_latency": 0,
+          "audio_queue_latency": 0
+        },
+        "1": {
+          "scan_latency": 389,
+          "audio_latency": 417,
+          "audio_queue_latency": 363
+        },
+        "2": {
+          "scan_latency": 383,
+          "audio_latency": 433,
+          "audio_queue_latency": 388
+        }
+      },
+      "warm_cycle_change": -8248,
+      "warm_percent_change": -0.18888331897853697,
+      "cache_delta_vs_baseline": {
+        "cache_hits": -11,
+        "cache_misses": 11,
+        "cache_writebacks": 10,
+        "cache_flush_entries": 3,
+        "cache_maintenance_cycles": 2670,
+        "cache_upstream_aw_wait": 356434,
+        "cache_upstream_w_wait": 357506,
+        "cache_downstream_write_words": 7,
+        "cache_busy": 498
+      },
+      "partition_delta_vs_baseline": {
+        "idle_empty": 258,
+        "idle_cache_drain": 1171,
+        "command_fetch": 0,
+        "command_execute": 0,
+        "command_barrier": 196,
+        "clear": -59,
+        "triangle_setup": 0,
+        "triangle_walk": 0,
+        "vertex_transform": 0,
+        "vertex_cache": 0,
+        "span_setup": 0,
+        "framebuffer_flush": 0,
+        "fragment_retire": 0,
+        "fragment_color_depth_response": 215126,
+        "fragment_read_drain_or_setup": -86,
+        "fragment_write_backpressure": 8,
+        "fragment_depth_read_gate": -229273,
+        "fragment_texture_starved": 295,
+        "fragment_perspective_starved": 3396,
+        "fragment_local_hold": -3,
+        "fragment_pipeline_progress": 723,
+        "other": 0
+      }
+    },
+    "depth-v3": {
+      "oracle": "PASS_FULL_FUNCTIONAL_ORACLE_AND_HASH_BINDING",
+      "interval_cycles": [
+        3975229,
+        4358613
+      ],
+      "partition": {
+        "idle_empty": 2223418,
+        "idle_cache_drain": 133399,
+        "command_fetch": 28560,
+        "command_execute": 2780,
+        "command_barrier": 3312,
+        "clear": 200027,
+        "triangle_setup": 205965,
+        "triangle_walk": 10545,
+        "vertex_transform": 72716,
+        "vertex_cache": 23646,
+        "span_setup": 12354,
+        "framebuffer_flush": 1911,
+        "fragment_retire": 169971,
+        "fragment_color_depth_response": 712917,
+        "fragment_read_drain_or_setup": 81786,
+        "fragment_write_backpressure": 2009,
+        "fragment_depth_read_gate": 116854,
+        "fragment_texture_starved": 35044,
+        "fragment_perspective_starved": 111273,
+        "fragment_local_hold": 116489,
+        "fragment_pipeline_progress": 93637,
+        "other": 0
+      },
+      "reads": [
+        {
+          "requests": 14051,
+          "words": 111982,
+          "completions": 14051,
+          "ar_wait": 212241,
+          "outstanding": 583151,
+          "before_first": 448966,
+          "first": {
+            "count": 14051,
+            "sum": 448966,
+            "max": 511,
+            "p50": 4,
+            "p95": 106,
+            "p99": 388
+          },
+          "last": {
+            "count": 14051,
+            "sum": 583151,
+            "max": 525,
+            "p50": 11,
+            "p95": 120,
+            "p99": 402
+          }
+        },
+        {
+          "requests": 5198,
+          "words": 83168,
+          "completions": 5198,
+          "ar_wait": 126355,
+          "outstanding": 264430,
+          "before_first": 108490,
+          "first": {
+            "count": 5198,
+            "sum": 108490,
+            "max": 356,
+            "p50": 17,
+            "p95": 20,
+            "p99": 337
+          },
+          "last": {
+            "count": 5198,
+            "sum": 264430,
+            "max": 386,
+            "p50": 47,
+            "p95": 50,
+            "p99": 367
+          }
+        },
+        {
+          "requests": 3582,
+          "words": 14328,
+          "completions": 3582,
+          "ar_wait": 7128,
+          "outstanding": 58538,
+          "before_first": 47792,
+          "first": {
+            "count": 3582,
+            "sum": 47792,
+            "max": 16,
+            "p50": 12,
+            "p95": 16,
+            "p99": 16
+          },
+          "last": {
+            "count": 3582,
+            "sum": 58538,
+            "max": 19,
+            "p50": 15,
+            "p95": 19,
+            "p99": 19
+          }
+        },
+        {
+          "requests": 1641,
+          "words": 24372,
+          "completions": 1641,
+          "ar_wait": 9083,
+          "outstanding": 44583,
+          "before_first": 21852,
+          "first": {
+            "count": 1641,
+            "sum": 21852,
+            "max": 16,
+            "p50": 12,
+            "p95": 16,
+            "p99": 16
+          },
+          "last": {
+            "count": 1641,
+            "sum": 44583,
+            "max": 31,
+            "p50": 27,
+            "p95": 31,
+            "p99": 31
+          }
+        },
+        {
+          "requests": 5223,
+          "words": 38700,
+          "completions": 5223,
+          "ar_wait": 13533,
+          "outstanding": 103121,
+          "before_first": 69644,
+          "first": {
+            "count": 5223,
+            "sum": 69644,
+            "max": 16,
+            "p50": 12,
+            "p95": 16,
+            "p99": 16
+          },
+          "last": {
+            "count": 5223,
+            "sum": 103121,
+            "max": 31,
+            "p50": 19,
+            "p95": 31,
+            "p99": 31
+          }
+        }
+      ],
+      "cache": {
+        "cache_hits": 109719,
+        "cache_misses": 12277,
+        "cache_writebacks": 19215,
+        "cache_flush_entries": 47,
+        "cache_maintenance_cycles": 165190,
+        "cache_upstream_aw_wait": 748100,
+        "cache_upstream_w_wait": 1120709,
+        "cache_downstream_write_words": 170257,
+        "cache_busy": 1568881
+      },
+      "limits": {
+        "0": {
+          "scan_latency": 0,
+          "audio_latency": 0,
+          "audio_queue_latency": 0
+        },
+        "1": {
+          "scan_latency": 397,
+          "audio_latency": 417,
+          "audio_queue_latency": 365
+        },
+        "2": {
+          "scan_latency": 380,
+          "audio_latency": 434,
+          "audio_queue_latency": 387
+        }
+      },
+      "warm_cycle_change": -8104,
+      "warm_percent_change": -0.18558564706620556,
+      "cache_delta_vs_baseline": {
+        "cache_hits": 1,
+        "cache_misses": 11,
+        "cache_writebacks": 10,
+        "cache_flush_entries": 3,
+        "cache_maintenance_cycles": 3366,
+        "cache_upstream_aw_wait": 366573,
+        "cache_upstream_w_wait": 369410,
+        "cache_downstream_write_words": 7,
+        "cache_busy": 2427
+      },
+      "partition_delta_vs_baseline": {
+        "idle_empty": 1192,
+        "idle_cache_drain": 3993,
+        "command_fetch": 0,
+        "command_execute": 0,
+        "command_barrier": -18,
+        "clear": 75,
+        "triangle_setup": 0,
+        "triangle_walk": 0,
+        "vertex_transform": 0,
+        "vertex_cache": 0,
+        "span_setup": 0,
+        "framebuffer_flush": 48,
+        "fragment_retire": 0,
+        "fragment_color_depth_response": 220484,
+        "fragment_read_drain_or_setup": 148,
+        "fragment_write_backpressure": -3,
+        "fragment_depth_read_gate": -239154,
+        "fragment_texture_starved": 824,
+        "fragment_perspective_starved": 3507,
+        "fragment_local_hold": 2,
+        "fragment_pipeline_progress": 798,
+        "other": 0
+      }
+    },
+    "priority-v1": {
+      "oracle": "PASS_FULL_FUNCTIONAL_ORACLE_AND_HASH_BINDING",
+      "interval_cycles": [
+        3977229,
+        4367768
+      ],
+      "partition": {
+        "idle_empty": 2233551,
+        "idle_cache_drain": 145670,
+        "command_fetch": 28560,
+        "command_execute": 2780,
+        "command_barrier": 3544,
+        "clear": 199539,
+        "triangle_setup": 205965,
+        "triangle_walk": 10545,
+        "vertex_transform": 72716,
+        "vertex_cache": 23646,
+        "span_setup": 12354,
+        "framebuffer_flush": 2133,
+        "fragment_retire": 169971,
+        "fragment_color_depth_response": 604206,
+        "fragment_read_drain_or_setup": 141607,
+        "fragment_write_backpressure": 13623,
+        "fragment_depth_read_gate": 147761,
+        "fragment_texture_starved": 34447,
+        "fragment_perspective_starved": 111577,
+        "fragment_local_hold": 111775,
+        "fragment_pipeline_progress": 91798,
+        "other": 0
+      },
+      "reads": [
+        {
+          "requests": 14051,
+          "words": 111982,
+          "completions": 14051,
+          "ar_wait": 94683,
+          "outstanding": 592011,
+          "before_first": 457833,
+          "first": {
+            "count": 14051,
+            "sum": 457833,
+            "max": 539,
+            "p50": 4,
+            "p95": 108,
+            "p99": 380
+          },
+          "last": {
+            "count": 14051,
+            "sum": 592011,
+            "max": 553,
+            "p50": 11,
+            "p95": 122,
+            "p99": 394
+          }
+        },
+        {
+          "requests": 5197,
+          "words": 83152,
+          "completions": 5197,
+          "ar_wait": 115145,
+          "outstanding": 262663,
+          "before_first": 106753,
+          "first": {
+            "count": 5197,
+            "sum": 106753,
+            "max": 355,
+            "p50": 17,
+            "p95": 20,
+            "p99": 335
+          },
+          "last": {
+            "count": 5197,
+            "sum": 262663,
+            "max": 385,
+            "p50": 47,
+            "p95": 50,
+            "p99": 365
+          }
+        },
+        {
+          "requests": 3582,
+          "words": 14328,
+          "completions": 3582,
+          "ar_wait": 6641,
+          "outstanding": 58514,
+          "before_first": 47768,
+          "first": {
+            "count": 3582,
+            "sum": 47768,
+            "max": 16,
+            "p50": 12,
+            "p95": 16,
+            "p99": 16
+          },
+          "last": {
+            "count": 3582,
+            "sum": 58514,
+            "max": 19,
+            "p50": 15,
+            "p95": 19,
+            "p99": 19
+          }
+        },
+        {
+          "requests": 1641,
+          "words": 24372,
+          "completions": 1641,
+          "ar_wait": 8818,
+          "outstanding": 44607,
+          "before_first": 21876,
+          "first": {
+            "count": 1641,
+            "sum": 21876,
+            "max": 16,
+            "p50": 12,
+            "p95": 16,
+            "p99": 16
+          },
+          "last": {
+            "count": 1641,
+            "sum": 44607,
+            "max": 31,
+            "p50": 27,
+            "p95": 31,
+            "p99": 31
+          }
+        },
+        {
+          "requests": 5223,
+          "words": 38700,
+          "completions": 5223,
+          "ar_wait": 13497,
+          "outstanding": 103121,
+          "before_first": 69644,
+          "first": {
+            "count": 5223,
+            "sum": 69644,
+            "max": 16,
+            "p50": 12,
+            "p95": 16,
+            "p99": 16
+          },
+          "last": {
+            "count": 5223,
+            "sum": 103121,
+            "max": 31,
+            "p50": 19,
+            "p95": 31,
+            "p99": 31
+          }
+        }
+      ],
+      "cache": {
+        "cache_hits": 109702,
+        "cache_misses": 12270,
+        "cache_writebacks": 19211,
+        "cache_flush_entries": 55,
+        "cache_maintenance_cycles": 172533,
+        "cache_upstream_aw_wait": 866263,
+        "cache_upstream_w_wait": 1207826,
+        "cache_downstream_write_words": 170194,
+        "cache_busy": 1576887
+      },
+      "limits": {
+        "0": {
+          "scan_latency": 0,
+          "audio_latency": 0,
+          "audio_queue_latency": 0
+        },
+        "1": {
+          "scan_latency": 384,
+          "audio_latency": 428,
+          "audio_queue_latency": 383
+        },
+        "2": {
+          "scan_latency": 386,
+          "audio_latency": 434,
+          "audio_queue_latency": 373
+        }
+      },
+      "warm_cycle_change": 1051,
+      "warm_percent_change": 0.024068424860140925,
+      "cache_delta_vs_baseline": {
+        "cache_hits": -16,
+        "cache_misses": 4,
+        "cache_writebacks": 6,
+        "cache_flush_entries": 11,
+        "cache_maintenance_cycles": 10709,
+        "cache_upstream_aw_wait": 484736,
+        "cache_upstream_w_wait": 456527,
+        "cache_downstream_write_words": -56,
+        "cache_busy": 10433
+      },
+      "partition_delta_vs_baseline": {
+        "idle_empty": 11325,
+        "idle_cache_drain": 16264,
+        "command_fetch": 0,
+        "command_execute": 0,
+        "command_barrier": 214,
+        "clear": -413,
+        "triangle_setup": 0,
+        "triangle_walk": 0,
+        "vertex_transform": 0,
+        "vertex_cache": 0,
+        "span_setup": 0,
+        "framebuffer_flush": 270,
+        "fragment_retire": 0,
+        "fragment_color_depth_response": 111773,
+        "fragment_read_drain_or_setup": 59969,
+        "fragment_write_backpressure": 11611,
+        "fragment_depth_read_gate": -208247,
+        "fragment_texture_starved": 227,
+        "fragment_perspective_starved": 3811,
+        "fragment_local_hold": -4712,
+        "fragment_pipeline_progress": -1041,
+        "other": 0
+      }
+    }
+  },
+  "interpretation": [
+    "Small selective depth gate removes239154 cycles from the depth-gate partition but adds220484 cycles to response-wait; frame improves only8104 cycles,0.1855856%. This is predominantly wait relocation, not removal.",
+    "Read priority versus small gate reduces response-wait108711 cycles but increases depth-gate30907, read-drain/setup59821, write-backpressure11614, idle/cache-drain and other partitions. Warm frame becomes9155 cycles slower than small gate and1051 slower than baseline.",
+    "Cache miss counts change by at most11 of12266, and writebacks by at most10 of19205. These tiny shifts do not support a cache-capacity or dramatic traffic-reduction explanation.",
+    "Read priority increases cache upstream AW wait484736 and W wait456527 cycles versus baseline; these overlapping handshake-stall metrics are not additive wall time.",
+    "Cache maintenance grows161824->165190->172533 cycles (baseline/small/priority), with flush entries44->47->55. This is a secondary scheduling/locality effect, not proof of an independent removable bottleneck.",
+    "Retain the simpler baseline: no candidate demonstrates a material whole-frame benefit in these two prepared intervals; do not proceed to fit or deployment on this evidence."
+  ],
+  "scope": "Same ELF and fresh fixed fixture, exact color/depth/all buffer history, Surface pool, command stream, initial CPU state and all FP/FCSR; only established typed framebuffer/clear and later s5 timestamp normalization. Synthetic display/audio, two intervals; not sustained hardware FPS. No new simulation, RTL or fit performed by this audit.",
+  "evidence_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/input.cfg": "f20c502fd2a07ee7192376aa240e714ae34d3758c12a6da6e9b852d71db68322",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/run.log": "30b123f826bb3aad9c8cfc67e46deee8590688e47833c4fe7e56378b6281031f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/prepared-memory.json": "c73e16ee5fd01529e2ae93360240ddccc81541d3f54a0fa5ad68a345afbdbcee",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/prepared-front.json": "25178bef30d9ff44d5e461bd38f70a25168d0a6740c33febc5d5731e46b7557a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/commands.bin": "346df8f0cff9505a8d02f0e8f49dea5cfeacdef9878136c706f6a338318ed427",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/mmio.tsv": "f5a60b430d4ce741f47f3105c252b4749ea6edcfa17bb29c89d97f35f4e3f95f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/result.json": "34786464a9101d9a365bd376c2bc5d30ffc990758f8bac39e6cdec43322941ab",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/pc.csv": "916947d73e2e63929045ac8c8f2fc4c853c6698bc6071b7fa6afc406e199c4fb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/boundaries.tsv": "81b01f50415de8146509438b2723a2a52ca48ba39335faa5f4d19565a94cd42f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/entry-regs.bin": "4d8df4bcb157547fd99aa103366a3ce01126b9dc07601660da6509b434b5d4cf",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/entry-2.bin": "d5340a485f2774df4943822a8636fc4362951bdaaa947e7a9f20ae17a818dfc4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/frame-1.bin": "b7a2e67c63ec5f1ce5f787bedad2fff8743d2c7a1edadaf9bcb8d274fe3ac5bc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/frame-1-buffer0.bin": "b7a2e67c63ec5f1ce5f787bedad2fff8743d2c7a1edadaf9bcb8d274fe3ac5bc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/frame-1-buffer1.bin": "5087dc62a353e03130310ca0925575785854d33dc6233b6dfb158ba0c07bfeb4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/frame-1-buffer2.bin": "1a74bac257b8449c58783ab93cc39ec07d83ba9ff9289e19d1bc49310b58fe4a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/entry-3.bin": "640bba50d5c9aaf00da3b6a66bc2930b65020d9231b3f17b604d490cc2eb9736",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/frame-2.bin": "8988e7dc092d095848a747606969533a477157ab9dca917313200f90991538e3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/frame-2-buffer0.bin": "0fc3c70f9d86c5f4a655efa383ca56a2258c619a6ec004e8f80d684e476d210e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/frame-2-buffer1.bin": "a42df17ef68b61162980c48170bf3a307ce909b7d1c1ba265f1b3a1b2b1bb8eb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/frame-2-buffer2.bin": "8988e7dc092d095848a747606969533a477157ab9dca917313200f90991538e3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/surface-arena.bin": "5127c4dafb5f8e900ddd1c81203b6ec33a4680a7dadaf9d3ed1820d28b12e8b3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/surface-arena.physical.bin": "5127c4dafb5f8e900ddd1c81203b6ec33a4680a7dadaf9d3ed1820d28b12e8b3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/surface-arena.json": "21755e6ff1aad3a6e3646dac99ab1504718d779c5bc56efd677b51131f1d8002",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/import-stats.bin": "f1c19314208ec565b4e50664b650fc0d256b4eb5a177acdccefc78bef7543a6c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/import-stats.physical.bin": "f1c19314208ec565b4e50664b650fc0d256b4eb5a177acdccefc78bef7543a6c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/import-stats.json": "2c8d98601bba6223ef47daa3c0c1d5d763ca44aae714c7093f70e0c53200317c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/front-stats.bin": "f366f82b0177478c240783195f72602e8b14b8f4f683508ef88b05682d8ed539",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/front-stats.physical.bin": "f366f82b0177478c240783195f72602e8b14b8f4f683508ef88b05682d8ed539",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/front-stats.json": "05c1adc9de5ec2ac1025b9a844aaab7e4a9c7811cc0c20519c15e971c2a94474",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/frame.bin": "0fc3c70f9d86c5f4a655efa383ca56a2258c619a6ec004e8f80d684e476d210e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/stalls.json": "fd7ce6dadb1fc11bdbb26dd9b8659fe763ca573166bf6389a541d74374546d44",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/stalls-pcs.csv": "508a9a0fdc9b324638cf32a84b530d5c722ab83aef0a3b3ca24ce4861cb8993c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/stalls-pages.csv": "61964ec239103ff9da4d9d427097a0fec6929ebd354a3dabb9cc7421567765ec",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/first-word.json": "9069d6d173cf00056c345cbd1c330966d8e7072d0cb25da6148e2f68a087c610",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/gpu-profile.json": "61edd2b595f75f8199ac2af764d328219fc6eefc9667ee006a2c782d250ce418",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/gpu-profile-timeline.csv": "895eda6cc062892d31b4fc43063e4133feef46993bd55eee91c5eccd023f5402",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/gpu-profile-events.csv": "294df99f87d014f00d7b1f204a4b6641d39ebd388896f8495aee0f88800a8020",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/pc-phase-1.csv": "4b314e50eeac26a49da57c545c302a4b260c38af1241ec54d8d5dae1acb607bc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/pc-phase-2.csv": "3a23f8b5b6ec814db9aebbaa18fd2474048e0fb3c9ad131a9eab315d4532c35d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/process.json": "7a1ce944b29f18e7b0868978079a93736290609eb8ee41adf5bd6966e0128f5f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/run/manifest.json": "871436e39de952f86d5c06a599f302af829ca2f68f891207c53510cc5d3e6cf9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/baseline-v1/build.json": "bed02b0789009dc78bee4eb47534f29fbfdee044c3eaf937b78b7dd0585385f2",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/input.cfg": "f20c502fd2a07ee7192376aa240e714ae34d3758c12a6da6e9b852d71db68322",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/run.log": "aa6864edeb2740ada546b72ab4131db5e401285c4db1292fba373391a80ea66a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/prepared-memory.json": "c73e16ee5fd01529e2ae93360240ddccc81541d3f54a0fa5ad68a345afbdbcee",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/prepared-front.json": "25178bef30d9ff44d5e461bd38f70a25168d0a6740c33febc5d5731e46b7557a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/commands.bin": "346df8f0cff9505a8d02f0e8f49dea5cfeacdef9878136c706f6a338318ed427",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/mmio.tsv": "76ccd802405ce47af90bc3eeee154f439832eaa1c0ae9a7d1695c8382496bbe1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/result.json": "27b9ea7692436d3de03f55e5934ab14ea973b103f74aecea0b59fea05b6ab6bf",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/pc.csv": "ef7ae4ffa0a6644356145aa5a8ece05c94944b2b93600b8d5bfc6a5b55132fa3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/boundaries.tsv": "e1237e555854fc58d71a9e2e031044a6134be9bb7001f2fa168e9a6fc8056fa9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/entry-regs.bin": "4d8df4bcb157547fd99aa103366a3ce01126b9dc07601660da6509b434b5d4cf",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/entry-2.bin": "bcc18b3dadfe03a92baa8c005ca8e20ea35ca67513eb46d1db0833a97067354b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/frame-1.bin": "b7a2e67c63ec5f1ce5f787bedad2fff8743d2c7a1edadaf9bcb8d274fe3ac5bc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/frame-1-buffer0.bin": "b7a2e67c63ec5f1ce5f787bedad2fff8743d2c7a1edadaf9bcb8d274fe3ac5bc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/frame-1-buffer1.bin": "5087dc62a353e03130310ca0925575785854d33dc6233b6dfb158ba0c07bfeb4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/frame-1-buffer2.bin": "1a74bac257b8449c58783ab93cc39ec07d83ba9ff9289e19d1bc49310b58fe4a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/entry-3.bin": "52d7079b2fde577e5aa2848a6affae4770b8410f5765783b726d7c92054a4b67",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/frame-2.bin": "8988e7dc092d095848a747606969533a477157ab9dca917313200f90991538e3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/frame-2-buffer0.bin": "0fc3c70f9d86c5f4a655efa383ca56a2258c619a6ec004e8f80d684e476d210e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/frame-2-buffer1.bin": "a42df17ef68b61162980c48170bf3a307ce909b7d1c1ba265f1b3a1b2b1bb8eb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/frame-2-buffer2.bin": "8988e7dc092d095848a747606969533a477157ab9dca917313200f90991538e3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/surface-arena.bin": "5127c4dafb5f8e900ddd1c81203b6ec33a4680a7dadaf9d3ed1820d28b12e8b3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/surface-arena.physical.bin": "5127c4dafb5f8e900ddd1c81203b6ec33a4680a7dadaf9d3ed1820d28b12e8b3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/surface-arena.json": "21755e6ff1aad3a6e3646dac99ab1504718d779c5bc56efd677b51131f1d8002",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/import-stats.bin": "f1c19314208ec565b4e50664b650fc0d256b4eb5a177acdccefc78bef7543a6c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/import-stats.physical.bin": "f1c19314208ec565b4e50664b650fc0d256b4eb5a177acdccefc78bef7543a6c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/import-stats.json": "2c8d98601bba6223ef47daa3c0c1d5d763ca44aae714c7093f70e0c53200317c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/front-stats.bin": "f366f82b0177478c240783195f72602e8b14b8f4f683508ef88b05682d8ed539",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/front-stats.physical.bin": "f366f82b0177478c240783195f72602e8b14b8f4f683508ef88b05682d8ed539",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/front-stats.json": "05c1adc9de5ec2ac1025b9a844aaab7e4a9c7811cc0c20519c15e971c2a94474",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/frame.bin": "0fc3c70f9d86c5f4a655efa383ca56a2258c619a6ec004e8f80d684e476d210e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/stalls.json": "789aad032652549df3d0bc5cb92c73259ace4417fa91e598f3a838527b3ff286",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/stalls-pcs.csv": "cf84ae090a96be0dee551d525ad683710e99c619001d90e6fd8f7b6da66dd4e1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/stalls-pages.csv": "20e772a0832ce222f69e24cd34f51e0041c36491cd43a391ca6ec362306433b7",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/first-word.json": "0d5c53191ce46be0e3d04c805aee6f5f25ae0a8720dac7b98d8f21645d71758e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/gpu-profile.json": "a65301e005f7aad4f41fee5cbbd303f04199f70ea554e829314b6075172f2a5a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/gpu-profile-timeline.csv": "7d50cb3c9e8647b7b30d498b5a404b6a49db15257fdc6425209cc0c56822480c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/gpu-profile-events.csv": "8f8cce80a8f9f3ff85c98151b186193d575d930af0f80de9080544110f8c4e36",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/pc-phase-1.csv": "59860702566e93c6acfd25599c7214e9dcc1e5df526aa38a4a13debe864bf292",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/pc-phase-2.csv": "57f7f61af536533d22220ef2ee6ffed5aa87b6e498f4f07d93dfab07b8766a87",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/process.json": "83786df857f3a4a8a1ab6a8073f6d4d89cd64c126a4fb5a0d49fd81301bcfaef",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/run/manifest.json": "22cf2674b71fdd7ab873d53ea331c7819fdd49a3d5730f1cf8545ac7ac148884",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/legacy-srw-v1/build.json": "d706b3678e7b270c86a9ed9209776b14be80ed2be185b4dd955d3e7aa9dec028",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/input.cfg": "f20c502fd2a07ee7192376aa240e714ae34d3758c12a6da6e9b852d71db68322",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/run.log": "d4ca8159624155175b0956629e2770719e9555763514a277cfd31e0429a142eb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/prepared-memory.json": "c73e16ee5fd01529e2ae93360240ddccc81541d3f54a0fa5ad68a345afbdbcee",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/prepared-front.json": "25178bef30d9ff44d5e461bd38f70a25168d0a6740c33febc5d5731e46b7557a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/commands.bin": "346df8f0cff9505a8d02f0e8f49dea5cfeacdef9878136c706f6a338318ed427",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/mmio.tsv": "85b93a72e6ab1e4a4cd0d9795f97bcfd2cb5b04f4742bc09e2aa0197c463c56f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/result.json": "efe0921efc95f561b3cf3b2ec91a3018714517fa81e7bfa9249ee0742f46c0b3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/pc.csv": "56006946a4a0644d7574ae33049b4b95cef3b652483abbddf96ce99f4876f9b0",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/boundaries.tsv": "41a8f8654058326d8c7066320c615e80e5296760c30c4e3326ef3158f86da816",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/entry-regs.bin": "4d8df4bcb157547fd99aa103366a3ce01126b9dc07601660da6509b434b5d4cf",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/entry-2.bin": "a0314c4c3a9f2c699d8a74a0525d73882cf32d7c052bdd389f3df28d1e5cf597",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/frame-1.bin": "b7a2e67c63ec5f1ce5f787bedad2fff8743d2c7a1edadaf9bcb8d274fe3ac5bc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/frame-1-buffer0.bin": "b7a2e67c63ec5f1ce5f787bedad2fff8743d2c7a1edadaf9bcb8d274fe3ac5bc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/frame-1-buffer1.bin": "5087dc62a353e03130310ca0925575785854d33dc6233b6dfb158ba0c07bfeb4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/frame-1-buffer2.bin": "1a74bac257b8449c58783ab93cc39ec07d83ba9ff9289e19d1bc49310b58fe4a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/entry-3.bin": "8ff09e2a35909f9ce5b0eec0f41282afefff2df163b663569e0d84457ac4d334",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/frame-2.bin": "8988e7dc092d095848a747606969533a477157ab9dca917313200f90991538e3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/frame-2-buffer0.bin": "0fc3c70f9d86c5f4a655efa383ca56a2258c619a6ec004e8f80d684e476d210e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/frame-2-buffer1.bin": "a42df17ef68b61162980c48170bf3a307ce909b7d1c1ba265f1b3a1b2b1bb8eb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/frame-2-buffer2.bin": "8988e7dc092d095848a747606969533a477157ab9dca917313200f90991538e3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/surface-arena.bin": "5127c4dafb5f8e900ddd1c81203b6ec33a4680a7dadaf9d3ed1820d28b12e8b3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/surface-arena.physical.bin": "5127c4dafb5f8e900ddd1c81203b6ec33a4680a7dadaf9d3ed1820d28b12e8b3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/surface-arena.json": "21755e6ff1aad3a6e3646dac99ab1504718d779c5bc56efd677b51131f1d8002",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/import-stats.bin": "f1c19314208ec565b4e50664b650fc0d256b4eb5a177acdccefc78bef7543a6c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/import-stats.physical.bin": "f1c19314208ec565b4e50664b650fc0d256b4eb5a177acdccefc78bef7543a6c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/import-stats.json": "2c8d98601bba6223ef47daa3c0c1d5d763ca44aae714c7093f70e0c53200317c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/front-stats.bin": "f366f82b0177478c240783195f72602e8b14b8f4f683508ef88b05682d8ed539",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/front-stats.physical.bin": "f366f82b0177478c240783195f72602e8b14b8f4f683508ef88b05682d8ed539",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/front-stats.json": "05c1adc9de5ec2ac1025b9a844aaab7e4a9c7811cc0c20519c15e971c2a94474",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/frame.bin": "0fc3c70f9d86c5f4a655efa383ca56a2258c619a6ec004e8f80d684e476d210e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/stalls.json": "369ff2a45532c1959033fa9681c3ec6ca8a5b558bf4306505296a819da5a3eb2",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/stalls-pcs.csv": "0f274cc954a881852fde41021273a6c7e9a704da602449c196810e2b9d20bd1f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/stalls-pages.csv": "1adcc51d69e4d188eadd396a0d20591ab49702a7015f3066e832c0d8468bc914",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/first-word.json": "cee598936a8a64564130ef2e8c0db6f2db17917034f9b8aef5ce8be98a820053",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/gpu-profile.json": "c2323e891990c207ce1ed297bb945830f999f056921a7d62a381ddcecdfd1880",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/gpu-profile-timeline.csv": "4a6fc8cab78b1f18a7d5f1063b21dcb6ef06ae7fa471d685b55c573ad8b1cff0",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/gpu-profile-events.csv": "6135ff238551c78a9f565fe482716dfa54681541ce7e737a08d9e41b5a9d074f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/pc-phase-1.csv": "0c2e0a1960f655cb63bfc3e4755bad30007267691f1708abdb4f5998a37c8ba2",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/pc-phase-2.csv": "ab97f15a950d69e553fc246e51a842f987cbd7459e1102c3d253321eb5d715e6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/process.json": "7c9eb1f8ecd2021ea24950d1f74ecc60412509f2135adbd4ee9e2a5ad821f931",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/run/manifest.json": "3d3c464a6dcdc8172f7d053183e44110e6bdf52d67f2fe6fb5009e4d34df8550",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/depth-v3/build.json": "7836c67903956b410b5908b86214c39f3a6a433d51b8cdc8172ecdee388b400f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/input.cfg": "f20c502fd2a07ee7192376aa240e714ae34d3758c12a6da6e9b852d71db68322",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/run.log": "c467454682f04ab9bf5709de9b3ae548171d516ba997f0ccb825dc0c02e60cee",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/prepared-memory.json": "c73e16ee5fd01529e2ae93360240ddccc81541d3f54a0fa5ad68a345afbdbcee",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/prepared-front.json": "25178bef30d9ff44d5e461bd38f70a25168d0a6740c33febc5d5731e46b7557a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/commands.bin": "346df8f0cff9505a8d02f0e8f49dea5cfeacdef9878136c706f6a338318ed427",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/mmio.tsv": "f61697fd06dae60aad8b2c369af0b521045eb72851f9a9e5ee052db91f5f832f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/result.json": "b09de46079d802a7f4e346eecdd2686a34e22f6e5aa760e18df8d2bf53f441ed",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/pc.csv": "ba550de6fd34f7334c8456da290fa5998a872bf94fcd8ec6f539830d7598a04a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/boundaries.tsv": "698af08916aa73a198aa26c5a3c116db66c1d491041262495826a6a048ac5d2a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/entry-regs.bin": "4d8df4bcb157547fd99aa103366a3ce01126b9dc07601660da6509b434b5d4cf",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/entry-2.bin": "71a5304609e47bd7097aca25e5abe4d4a7c367d5f1997c1e7272b33bf0243543",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/frame-1.bin": "b7a2e67c63ec5f1ce5f787bedad2fff8743d2c7a1edadaf9bcb8d274fe3ac5bc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/frame-1-buffer0.bin": "b7a2e67c63ec5f1ce5f787bedad2fff8743d2c7a1edadaf9bcb8d274fe3ac5bc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/frame-1-buffer1.bin": "5087dc62a353e03130310ca0925575785854d33dc6233b6dfb158ba0c07bfeb4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/frame-1-buffer2.bin": "1a74bac257b8449c58783ab93cc39ec07d83ba9ff9289e19d1bc49310b58fe4a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/entry-3.bin": "a1c9b8dd4092504c01818953e4937cec4b01a0e735489dcc86948c253d327b9d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/frame-2.bin": "8988e7dc092d095848a747606969533a477157ab9dca917313200f90991538e3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/frame-2-buffer0.bin": "0fc3c70f9d86c5f4a655efa383ca56a2258c619a6ec004e8f80d684e476d210e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/frame-2-buffer1.bin": "a42df17ef68b61162980c48170bf3a307ce909b7d1c1ba265f1b3a1b2b1bb8eb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/frame-2-buffer2.bin": "8988e7dc092d095848a747606969533a477157ab9dca917313200f90991538e3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/surface-arena.bin": "5127c4dafb5f8e900ddd1c81203b6ec33a4680a7dadaf9d3ed1820d28b12e8b3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/surface-arena.physical.bin": "5127c4dafb5f8e900ddd1c81203b6ec33a4680a7dadaf9d3ed1820d28b12e8b3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/surface-arena.json": "21755e6ff1aad3a6e3646dac99ab1504718d779c5bc56efd677b51131f1d8002",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/import-stats.bin": "f1c19314208ec565b4e50664b650fc0d256b4eb5a177acdccefc78bef7543a6c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/import-stats.physical.bin": "f1c19314208ec565b4e50664b650fc0d256b4eb5a177acdccefc78bef7543a6c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/import-stats.json": "2c8d98601bba6223ef47daa3c0c1d5d763ca44aae714c7093f70e0c53200317c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/front-stats.bin": "f366f82b0177478c240783195f72602e8b14b8f4f683508ef88b05682d8ed539",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/front-stats.physical.bin": "f366f82b0177478c240783195f72602e8b14b8f4f683508ef88b05682d8ed539",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/front-stats.json": "05c1adc9de5ec2ac1025b9a844aaab7e4a9c7811cc0c20519c15e971c2a94474",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/frame.bin": "0fc3c70f9d86c5f4a655efa383ca56a2258c619a6ec004e8f80d684e476d210e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/stalls.json": "125b9f44737278421da1396ea5f4c0412b5e51ea630ceb5edadcd7110c095cf9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/stalls-pcs.csv": "03c336d8e407396b6c5e4fee362ac69b3ee3d8b0626597b9b14d48997a05692b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/stalls-pages.csv": "a79999dd66fea4e763997c889fe372a6de9ddb261c4bd4b45a6717cfcb02f91d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/first-word.json": "eec2ec82ac04115006054e8b37ed7d5f4929234c4ea43787ec9dba755b0bb480",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/gpu-profile.json": "0e9951a8e76e9dab5cd2cf166df2d49f07514b71e8555c1ad9a1032a8b8dbf9e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/gpu-profile-timeline.csv": "7d4a149d3f1edccf68e8c8a719330ee3393529182480974c74edb099c328c13d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/gpu-profile-events.csv": "9eb0b19404a781153cfdbe0ea224557a95c47b4af5fd7dee65cc5b3926fccf6e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/pc-phase-1.csv": "f296d54391cf081a650b4e327da24531ea9bb7657027dc2584b6d986747aaea3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/pc-phase-2.csv": "00b3a4ec9eeb2bffd63de66f7d739f997298f7847acb16571e18baced8c2b49f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/process.json": "036532f6ad3804396864499979be0bd17d8b81f2e4decd173bc18f037f6739d5",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/run/manifest.json": "5ad7dc704c676a535c85cda105e03db04b23d9a2511a9bdb3345e2b2cf56f610",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/priority-v1/build.json": "75cad7ef9ed7b1a3f5dbf872219867f33e87cf218f04e68a2ba3c165d56951b1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/review/audit_results_v1.py": "59cc5efebd05ec700deab0cb985e3a2e5535be16d40f18d1e45367f3f77a01ae",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/check_replays.py": "0b136a3a7d377af3e1268975d33995380fba9a5e275dbfdc2cd8e01497f70ba3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/tests/check_replays.py": "4dbf49fc2ccf0a416b21eadf4978dd93a1bd731a316e7e30c44b7caa140c92f9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/gpu-bottleneck-v1/review/check_runs.py": "cc73ef3582f0c4594162e3635bbb6704089ad5879f2c36441b8de04a5cef9793",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/fixture-v2/prepared.json": "439a3f2c21eb75beece65d263e0baa1b9aa4f812cf5f779f73fd5e821cf7969d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/observer-v3/gpu_observer.hpp": "2298256de292e981b87188358fe982dedc173b6e02adace4b7d1d28e62681bdb"
+  }
+}

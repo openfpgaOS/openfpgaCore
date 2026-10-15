@@ -1,0 +1,41 @@
+{
+  "passed": true,
+  "candidate_sha256": "9e4028bc2d32fa17d74d821f40b16daaf1cc6eed4f3383e23f22e12e3944255c",
+  "parent_sha256": "5b044c9835e64159c2185eec3c69391cf7f16227997943f9cbaa21f86c689ddc",
+  "parent_qualification_sha256": "87e5d8184566da64ad43ad050e5978ad6e65bb5a715d653c1bcdfd7fc84d25b3",
+  "reference_module_rename_only": true,
+  "patch_sha256": "0db103f7f76f739b6c721b571bb19a859dad62a096a2c1ae97e4b987ade30373",
+  "proof_sha256": "5fbdbfb55c4e0aaed72204e6b63b4a92852c1610231c551d6abbe604b9e5a724",
+  "added_registers": 0,
+  "added_cycles": 0,
+  "paired_gate": "lockstep-v1/receipt.json",
+  "paired_gate_sha256": "be81a6030af6bef41df7869f5a39227757eea04f2c7ce790a301dabd83b9681e",
+  "total_paired_cycles": 292142340,
+  "total_consumer_visits": 8559176,
+  "all_transcripts_direct_parent_identical": true,
+  "paired_counts": {
+    "inherited.log": {
+      "cycles": 4531366,
+      "consumer_visits": 25382
+    },
+    "reference.log": {
+      "cycles": 23059799,
+      "consumer_visits": 856866
+    },
+    "capacity.csv": {
+      "cycles": 264551175,
+      "consumer_visits": 7676928
+    }
+  },
+  "fixtures": {
+    "lockstep/audio_mixer_reference.v": "63b745856e2c2b5e3bb87a6468d4a4d72ae9eaeba933ef033c2846db02fb5bfc",
+    "lockstep/independent_reference.hpp": "4e192d76b02f48f558cce4eda0972d1484be250efa59577fb8c56098d3b21cad",
+    "lockstep/run.py": "ae5982efc6a4d3af60060e8c578a641a97376ff6cc6324fd7d36951d6e24240d",
+    "lockstep/sources/mister_audio_output.v": "d6788091160dae0689f9e7f649df7f90db5b4530d8111c8a3276dacadf6d378d",
+    "lockstep/sources/sync_fifo.v": "66545eaee0463d5e25e862cb5fbccb357b2d34948f93a9f8a706c04c536aa28c",
+    "lockstep/tb_audio_mixer.v": "68ecc9fb9aee771ecf3cf9b4f28a09a477fc97b6a2187d9d9b76b0e1dc218997",
+    "lockstep/tb_audio_mixer_main.cpp": "0e61bc7a7d3aec627aa9b91c3c803b3d688d42f8e30d086de986bd9f41d346cf"
+  },
+  "physical_timing_claim": false,
+  "dock_unchanged": true
+}

@@ -1,0 +1,3 @@
+PASS: 1920 mixed vertex batches, 7680 winding tests, 163988 exact output words, wrap/backpressure/enable/reset (3099045 cycles)
+PASS signed near-plane boundaries: 11 planes, 641 explicit legacy vertices, 88837 cycles
+PASS cycle lockstep 3188181 cycles, busy-publication 60835; divides raw=20701 clip=872 native=0 particle=0

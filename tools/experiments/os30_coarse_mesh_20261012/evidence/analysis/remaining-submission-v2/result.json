@@ -1,0 +1,687 @@
+{
+  "status": "READ_ONLY_MEASURED_SUBMISSION_ACCOUNTING_NOT_IMPLEMENTED",
+  "phase": "F28 warm",
+  "interval": {
+    "begin": 4807388,
+    "end": 9438247,
+    "candidate_cycles": 4630859,
+    "control_cycles": 4631100,
+    "delta_cycles": -241,
+    "delta_percent": -0.005203947226362082,
+    "candidate_retired": 2023020,
+    "control_retired": 2202217
+  },
+  "calls": {
+    "async_members": 103,
+    "frontend_requests": 33,
+    "group_requests": 19,
+    "single_requests": 14,
+    "legacy_loads": 223,
+    "acquire_calls": 223,
+    "actual_leases": 97,
+    "retained_lease_reuses": 126,
+    "release_if_pending_calls": 507,
+    "actual_pending_sequence_reads": 97,
+    "pending_releases": 83,
+    "new_quiescent_leases": 14,
+    "acquire_status_reads": 486,
+    "unsuccessful_status_iterations": 389,
+    "acquire_epoch_sequence_status_ticket_reads": 1360,
+    "service_calls": 777,
+    "service_status_reads": 777,
+    "warm_repairs": 0
+  },
+  "hardware_residence_cycles": {
+    "lease_granted": 1987610,
+    "lease_pending": 20328,
+    "raw_state": 203168,
+    "output_pending": 609306,
+    "group_active": 637496,
+    "repair_pending": 0,
+    "legacy_raw_active": 131497,
+    "lease_without_raw_active": 1856113,
+    "lease_and_old_async_output": 106537,
+    "lease_pending_and_raster": 13560
+  },
+  "output_pressure": {
+    "all": 4630859,
+    "output_full": 1028967,
+    "output_full_and_raster": 931824,
+    "lease_granted": 1987610,
+    "lease_pending": 20328
+  },
+  "lease_wait_distribution": {
+    "count": 97,
+    "min": 1,
+    "median": 1,
+    "max": 1667,
+    "sum": 20328,
+    "one_cycle": 75,
+    "greater_than_two_cycles": 22
+  },
+  "geo_mmio_writes": {
+    "candidate": {
+      "total": 4575,
+      "matrix": 2496,
+      "scalar": 1022,
+      "load_setup": 669,
+      "lease_protocol": 388,
+      "acquire_commands": 97,
+      "release_commands": 97,
+      "per_word": {
+        "0x2": 223,
+        "0x3": 223,
+        "0x4": 223,
+        "0x5": 156,
+        "0x6": 133,
+        "0x7": 133,
+        "0x8": 133,
+        "0x9": 133,
+        "0xa": 133,
+        "0xb": 99,
+        "0xc": 102,
+        "0x2b": 97,
+        "0x2c": 97,
+        "0x2d": 194,
+        "0x40": 156,
+        "0x41": 156,
+        "0x42": 156,
+        "0x43": 156,
+        "0x44": 156,
+        "0x45": 156,
+        "0x46": 156,
+        "0x47": 156,
+        "0x48": 156,
+        "0x49": 156,
+        "0x4a": 156,
+        "0x4b": 156,
+        "0x4c": 156,
+        "0x4d": 156,
+        "0x4e": 156,
+        "0x4f": 156
+      }
+    },
+    "control": {
+      "total": 2459,
+      "matrix": 1136,
+      "scalar": 345,
+      "load_setup": 978,
+      "lease_protocol": 0,
+      "acquire_commands": 0,
+      "release_commands": 0,
+      "per_word": {
+        "0x2": 326,
+        "0x3": 326,
+        "0x4": 326,
+        "0x5": 71,
+        "0x6": 53,
+        "0x7": 53,
+        "0x8": 53,
+        "0x9": 53,
+        "0xa": 53,
+        "0xb": 3,
+        "0xc": 6,
+        "0x40": 71,
+        "0x41": 71,
+        "0x42": 71,
+        "0x43": 71,
+        "0x44": 71,
+        "0x45": 71,
+        "0x46": 71,
+        "0x47": 71,
+        "0x48": 71,
+        "0x49": 71,
+        "0x4a": 71,
+        "0x4b": 71,
+        "0x4c": 71,
+        "0x4d": 71,
+        "0x4e": 71,
+        "0x4f": 71
+      }
+    }
+  },
+  "hypothetical_fused_acquire_transaction_count_only": {
+    "condition": "If target/ticket/control writes were replaced by one ticket-bearing ACQUIRE write with equivalent ownership/reset rules.",
+    "acquire_writes_before": 291,
+    "acquire_writes_after": 97,
+    "removed_writes": 194,
+    "fraction_of_candidate_geo_writes_percent": 4.240437158469946,
+    "removed_store_pc_charged_gap_cycles": 776,
+    "wall_time_saving": "UNMEASURED: posted-store retirement gaps are not end-to-end write latency; no cycle or FPS saving credited."
+  },
+  "selected_function_buckets": {
+    "gfx_gpu_async_raw_acquire": {
+      "candidate": [
+        17818,
+        96579
+      ],
+      "control": [
+        0,
+        0
+      ],
+      "delta": [
+        17818,
+        96579
+      ]
+    },
+    "gfx_gpu_async_raw_release_if_pending": {
+      "candidate": [
+        6153,
+        16372
+      ],
+      "control": [
+        1770,
+        2918
+      ],
+      "delta": [
+        4383,
+        13454
+      ]
+    },
+    "gfx_gpu_async_raw_release": {
+      "candidate": [
+        420,
+        3619
+      ],
+      "control": [
+        0,
+        0
+      ],
+      "delta": [
+        420,
+        3619
+      ]
+    },
+    "gfx_gpu_async_service": {
+      "candidate": [
+        14763,
+        27153
+      ],
+      "control": [
+        3980,
+        7601
+      ],
+      "delta": [
+        10783,
+        19552
+      ]
+    },
+    "gfx_async_try_load": {
+      "candidate": [
+        13883,
+        37277
+      ],
+      "control": [
+        0,
+        0
+      ],
+      "delta": [
+        13883,
+        37277
+      ]
+    },
+    "load_alias_vertex_legacy": {
+      "candidate": [
+        97507,
+        303247
+      ],
+      "control": [
+        115038,
+        299888
+      ],
+      "delta": [
+        -17531,
+        3359
+      ]
+    },
+    "gfx_run_dl": {
+      "candidate": [
+        106769,
+        328426
+      ],
+      "control": [
+        109915,
+        280211
+      ],
+      "delta": [
+        -3146,
+        48215
+      ]
+    },
+    "load_alias_materialize_all": {
+      "candidate": [
+        10153,
+        13557
+      ],
+      "control": [
+        594,
+        966
+      ],
+      "delta": [
+        9559,
+        12591
+      ]
+    },
+    "gfx_mesh_lookup_impl": {
+      "candidate": [
+        12487,
+        50428
+      ],
+      "control": [
+        0,
+        0
+      ],
+      "delta": [
+        12487,
+        50428
+      ]
+    },
+    "gfx_async_group_build": {
+      "candidate": [
+        4414,
+        20437
+      ],
+      "control": [
+        0,
+        0
+      ],
+      "delta": [
+        4414,
+        20437
+      ]
+    },
+    "gfx_async_sources": {
+      "candidate": [
+        3068,
+        18189
+      ],
+      "control": [
+        0,
+        0
+      ],
+      "delta": [
+        3068,
+        18189
+      ]
+    },
+    "gfx_async_route_task": {
+      "candidate": [
+        10633,
+        28914
+      ],
+      "control": [
+        0,
+        0
+      ],
+      "delta": [
+        10633,
+        28914
+      ]
+    },
+    "gfx_async_dead_caller": {
+      "candidate": [
+        2350,
+        5445
+      ],
+      "control": [
+        0,
+        0
+      ],
+      "delta": [
+        2350,
+        5445
+      ]
+    }
+  },
+  "top_added_charged_buckets": [
+    [
+      "gfx_gpu_async_raw_acquire",
+      [
+        17818,
+        96579
+      ]
+    ],
+    [
+      "gfx_mesh_lookup_impl",
+      [
+        12487,
+        50428
+      ]
+    ],
+    [
+      "gfx_run_dl",
+      [
+        -3146,
+        48215
+      ]
+    ],
+    [
+      "gfx_async_try_load",
+      [
+        13883,
+        37277
+      ]
+    ],
+    [
+      "gfx_async_route_task",
+      [
+        10633,
+        28914
+      ]
+    ],
+    [
+      "gfx_async_group_build",
+      [
+        4414,
+        20437
+      ]
+    ],
+    [
+      "gfx_gpu_async_service",
+      [
+        10783,
+        19552
+      ]
+    ],
+    [
+      "gfx_async_sources",
+      [
+        3068,
+        18189
+      ]
+    ],
+    [
+      "gfx_gpu_async_group",
+      [
+        3142,
+        14736
+      ]
+    ],
+    [
+      "gfx_gpu_async_raw_release_if_pending",
+      [
+        4383,
+        13454
+      ]
+    ],
+    [
+      "<before_first_ELF_symbol>",
+      [
+        -11,
+        12932
+      ]
+    ],
+    [
+      "load_alias_materialize_all",
+      [
+        9559,
+        12591
+      ]
+    ],
+    [
+      "emit_tri_state",
+      [
+        -1788,
+        8879
+      ]
+    ],
+    [
+      "gfx_gpu_async_job",
+      [
+        2517,
+        7611
+      ]
+    ],
+    [
+      "gfx_gpu_async_group_upload",
+      [
+        1697,
+        5864
+      ]
+    ]
+  ],
+  "selected_instruction_sites": {
+    "acquire_calls": {
+      "pc": "0x104deec0",
+      "instruction": "lui a5,0x11360",
+      "retired": 223,
+      "preceding_retirement_gap_cycles": 2355
+    },
+    "new_lease": {
+      "pc": "0x104df0ec",
+      "instruction": "lui a5,0x11363",
+      "retired": 97,
+      "preceding_retirement_gap_cycles": 835
+    },
+    "failed_poll": {
+      "pc": "0x104df07a",
+      "instruction": "lw a5,44(s0)",
+      "retired": 389,
+      "preceding_retirement_gap_cycles": 413
+    },
+    "acquire_initial_epoch": {
+      "pc": "0x104def5c",
+      "instruction": "lw a4,184(a5) # 4b0000b8 <__bss_end+0x39c9c71c>",
+      "retired": 97,
+      "preceding_retirement_gap_cycles": 1067
+    },
+    "held_epoch": {
+      "pc": "0x104deef0",
+      "instruction": "lw a4,184(a5) # 4b0000b8 <__bss_end+0x39c9c71c>",
+      "retired": 0,
+      "preceding_retirement_gap_cycles": 0
+    },
+    "sequence_precheck": {
+      "pc": "0x104def88",
+      "instruction": "lw a3,140(a5) # 4b00008c <__bss_end+0x39c9c6f0>",
+      "retired": 97,
+      "preceding_retirement_gap_cycles": 1067
+    },
+    "retry_epoch_without_flush": {
+      "pc": "0x104df0ba",
+      "instruction": "lw a4,184(a5) # 4b0000b8 <__bss_end+0x39c9c71c>",
+      "retired": 8,
+      "preceding_retirement_gap_cycles": 88
+    },
+    "retry_epoch_after_flush": {
+      "pc": "0x104def9c",
+      "instruction": "lw a4,184(a5) # 4b0000b8 <__bss_end+0x39c9c71c>",
+      "retired": 89,
+      "preceding_retirement_gap_cycles": 979
+    },
+    "target_write": {
+      "pc": "0x104defdc",
+      "instruction": "sw a2,172(a3) # 4b0000ac <__bss_end+0x39c9c710>",
+      "retired": 97,
+      "preceding_retirement_gap_cycles": 388
+    },
+    "ticket_write": {
+      "pc": "0x104defec",
+      "instruction": "sw a2,176(a4) # 4b0000b0 <__bss_end+0x39c9c714>",
+      "retired": 97,
+      "preceding_retirement_gap_cycles": 388
+    },
+    "acquire_command_write": {
+      "pc": "0x104df006",
+      "instruction": "sw a4,180(a5) # 4b0000b4 <__bss_end+0x39c9c718>",
+      "retired": 97,
+      "preceding_retirement_gap_cycles": 388
+    },
+    "loop_epoch": {
+      "pc": "0x104df084",
+      "instruction": "lw a4,0(s4)",
+      "retired": 486,
+      "preceding_retirement_gap_cycles": 5346
+    },
+    "loop_status": {
+      "pc": "0x104df05a",
+      "instruction": "lw a5,0(s2)",
+      "retired": 486,
+      "preceding_retirement_gap_cycles": 17636
+    },
+    "loop_ticket": {
+      "pc": "0x104df06a",
+      "instruction": "lw a3,0(s6)",
+      "retired": 97,
+      "preceding_retirement_gap_cycles": 1301
+    },
+    "release_if_pending_calls": {
+      "pc": "0x104d9200",
+      "instruction": "lui a5,0x11360",
+      "retired": 507,
+      "preceding_retirement_gap_cycles": 1731
+    },
+    "pending_epoch": {
+      "pc": "0x104d9224",
+      "instruction": "lw t1,184(a3) # 4b0000b8 <__bss_end+0x39c9c71c>",
+      "retired": 97,
+      "preceding_retirement_gap_cycles": 1067
+    },
+    "pending_sequence": {
+      "pc": "0x104d92de",
+      "instruction": "lw a6,140(a0) # 4b00008c <__bss_end+0x39c9c6f0>",
+      "retired": 97,
+      "preceding_retirement_gap_cycles": 1067
+    },
+    "pending_release_epoch": {
+      "pc": "0x104d92ee",
+      "instruction": "lw a3,0(a3)",
+      "retired": 83,
+      "preceding_retirement_gap_cycles": 1036
+    },
+    "pending_release_write": {
+      "pc": "0x104d92c8",
+      "instruction": "sw a2,180(a3) # 4b0000b4 <__bss_end+0x39c9c718>",
+      "retired": 83,
+      "preceding_retirement_gap_cycles": 332
+    },
+    "before_wait_calls": {
+      "pc": "0x104d9340",
+      "instruction": "addi sp,sp,-48",
+      "retired": 0,
+      "preceding_retirement_gap_cycles": 0
+    },
+    "before_wait_epoch": {
+      "pc": "0x104d9380",
+      "instruction": "lw a4,184(a5) # 4b0000b8 <__bss_end+0x39c9c71c>",
+      "retired": 0,
+      "preceding_retirement_gap_cycles": 0
+    },
+    "before_wait_sequence": {
+      "pc": "0x104d93c0",
+      "instruction": "lw a4,140(a5) # 4b00008c <__bss_end+0x39c9c6f0>",
+      "retired": 0,
+      "preceding_retirement_gap_cycles": 0
+    },
+    "before_wait_release_epoch": {
+      "pc": "0x104d93e8",
+      "instruction": "lw a4,184(a5) # 4b0000b8 <__bss_end+0x39c9c71c>",
+      "retired": 0,
+      "preceding_retirement_gap_cycles": 0
+    },
+    "before_wait_release_write": {
+      "pc": "0x104d942e",
+      "instruction": "sw a4,180(a5) # 4b0000b4 <__bss_end+0x39c9c718>",
+      "retired": 0,
+      "preceding_retirement_gap_cycles": 0
+    },
+    "service_calls": {
+      "pc": "0x104d94c0",
+      "instruction": "lui a5,0x11360",
+      "retired": 777,
+      "preceding_retirement_gap_cycles": 881
+    },
+    "service_status": {
+      "pc": "0x104d94e4",
+      "instruction": "lw a3,132(a5) # 4b000084 <__bss_end+0x39c9c6e8>",
+      "retired": 777,
+      "preceding_retirement_gap_cycles": 8547
+    },
+    "direct_release_calls": {
+      "pc": "0x104df180",
+      "instruction": "lui a5,0x11360",
+      "retired": 34,
+      "preceding_retirement_gap_cycles": 1712
+    },
+    "direct_release_epoch": {
+      "pc": "0x104df19e",
+      "instruction": "lw a1,184(a4) # 4b0000b8 <__bss_end+0x39c9c71c>",
+      "retired": 14,
+      "preceding_retirement_gap_cycles": 154
+    },
+    "direct_release_write": {
+      "pc": "0x104df1e4",
+      "instruction": "sw a3,180(a4) # 4b0000b4 <__bss_end+0x39c9c718>",
+      "retired": 14,
+      "preceding_retirement_gap_cycles": 56
+    }
+  },
+  "interpretation": [
+    "Priority/snapshot keeps most grants prompt:75 of97 pending intervals last one cycle; total pending20328cycles.",
+    "Lease-granted residence includes useful CPU rendering and canonical lifetime;1987610 granted cycles are not blocked CPU cycles.",
+    "The three-write acquire protocol is291 writes. Context matrix/scalar writes are3518, up2037 versus control because new leases invalidate legacy dirty/control caches.",
+    "Candidate executes223 legacy LOADs plus103 async members;19GROUPs and14single jobs reduce async frontend requests to33. Remaining legacy setup/admission/materialization persists.",
+    "The acquire charged bucket96579 includes software setup/polling/cache gaps; it is not all hardware ownership wait.",
+    "Fused acquisition alone would not change raw transformation, canonical readback, context reprogramming, material/admission lookup or raster/output pressure."
+  ],
+  "limits": [
+    "Two bounded native intervals; this report diagnoses warm only, not sustained Pocket FPS.",
+    "Function/instruction buckets charge the gap preceding retirement, not exclusive execution latency.",
+    "Hardware residence counters overlap; never sum them or subtract hypothetical eliminated work from frame cycles.",
+    "No new ABI, implementation, fit, or replay was performed."
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/remaining-submission-v2/analyze.py": "f12ecf9e79f1f0ccc6250319cc68d973c2618a5f1111e10aafac817c19c268ac",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/phases-v4.json": "2c62c9941c42a86012f04019e0610275cce6f98e208f3b7a7bb81cd77f56609f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/native-v4.json": "a1a7ed32fea63169e818246f6a558623faf0bba48d70182ea2ab527105e2cb44",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v4/evidence/app-build-v4/build-result.json": "b9ade6d031ec6bab86e0100211ab047aa83cefd33a70613fd2f1849b2ccd08a2",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v4/evidence/app-build-v4/app.dis": "598beb4bc19a62385d2eb63491f3e83cc2a11f5273fc12563d15b85933f58044",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/native-v2/prepared.json": "88e3f0a3d76a6c90a7a677e153c2564015dbb810aaa9610a52b472a1499fd5a0",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v4/check-independent-v4.json": "bed350ef8e75046d76c32fc36c3776e52084a294c1e17c81ef2cc003a14ac7a7",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v4/check-independent-v4.json": "c0dc733a5138a107fa7fff03d23d4377fbe509563bd83a6bfff4da92bd9b69b3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v4/src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "b4018e719dada1f54c07a2b7beadc114e431c0bfba6624efa159ae64fe89b145",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v4/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "6322db99282cc24f253125cf48cb21e7ff47910c98623f5f247c7e1886bd563d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/group_hooks_v2.py": "6d78b89bbce3893672eba2cc128dd74825be7daa64ab191de29ec06ca764be42",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v4/.obj/sm64-coarse-mesh-v4-perfdiag/app.elf": "7294008468ae3760e6aac7fda5539e5dadd255c604e3b4a6c66bc028f68e422b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v4/run/boundaries.tsv": "48d1f7945177e651e9e525adb7abdc914f77d3db3ad94eeb6a0da9d3dc652e9c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v4/run/mmio.tsv": "40d32a0f309b616560fe48ebd17390d8ab5eba02d2ef4ea2beff191b3d5bbd10",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v4/run/boundaries.tsv": "284571673f0b9815f1a1231019973ab9040bf8f6c60227393aab9868e413d990",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v4/run/mmio.tsv": "6d4f291160d6e1c7ced9d41534b9b09bec931f7a9126b01f47d0d1857cc3616a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v4/run/pc-phase-2.csv": "fc3a7f6bfb6ab72424cb7d64d865f2c6768dbcab7a73e915c2c1eda98ef37692",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v4/run/async-events.tsv": "5c293a0c341bf51c02b6163bed8728344c2e7e5019b315b226a73d62ba6689a7",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v4/run/async-overlap.tsv": "f09785d13383a40ae8445b31fafb76abf3994f6d4f5e2fa74b98b0d511e4d7d4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/remaining-submission-v1/result.json": "d94e2fa85028abee9d7490be708970e1642847e464030f5aca3892b7be8e87ce",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/phases-v4-vs-single.json": "6f73fc1f43e5d9ff9aff0854e69cf92fc64f5147df65be524ac027070e308d7f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/single-v4/check-independent-v4.json": "bbfda3bab27aaa42935fb85039c5bc6b1e83f9b7b569e70186b006ee751bfbea",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/f28-dl-binding-v1.json": "e9732e24cecfab1b3f69a8c9fddb30908736c97d25fd01fbb507cc4697aae8aa"
+  },
+  "strict_validation": {
+    "candidate-v4": "PASS_AJ03_SAME_ELF_FULL_NATIVE_FUNCTIONAL_AND_ORDERED_SEMANTICS",
+    "control-v4": "PASS_SAME_ELF_CAPABILITY_OFF_NATIVE_ORACLE",
+    "single-v4": "PASS_AJ02_SAME_ELF_FULL_NATIVE_FUNCTIONAL_AND_ORDERED_SEMANTICS"
+  },
+  "full_intervals": {
+    "candidate": [
+      4806008,
+      4630859
+    ],
+    "control": [
+      4256732,
+      4631100
+    ],
+    "combined_delta_cycles": 549035
+  },
+  "comparison_to_f27_candidate": {
+    "cycle_delta": -93403,
+    "note": "Different app ELF; descriptive measured candidate comparison, not a same-ELF architectural comparison.",
+    "legacy_load_delta": -27,
+    "real_lease_delta": -6,
+    "geo_write_delta": -337,
+    "lease_wait_delta": 5061
+  },
+  "same_elf_aj02_warm": {
+    "cycles": 4649518,
+    "candidate_delta_cycles": -18659,
+    "candidate_delta_percent": -0.4013104154022007
+  }
+}

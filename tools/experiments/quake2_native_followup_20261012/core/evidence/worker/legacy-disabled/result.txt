@@ -1,0 +1,1 @@
+PASS: 1920 mixed vertex batches, 7680 winding tests, 159071 exact output words, wrap/backpressure/enable/reset (2999128 cycles)

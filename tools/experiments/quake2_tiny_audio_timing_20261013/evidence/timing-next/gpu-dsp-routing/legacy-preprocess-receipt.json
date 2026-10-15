@@ -1,0 +1,34 @@
+{
+  "passed": true,
+  "candidate_sha256": "57258b3a4a76c75f3619661dd052fdc5c3ae5716f455c8830eafe00234a1f72e",
+  "cases": [
+    {
+      "macros": [],
+      "identical_preprocessed_tokens": true,
+      "sha256": "285fe1381e7862138005a759a3ebd84edab12029634f265161ba058f35ebdbcc"
+    },
+    {
+      "macros": [
+        "+define+INCLUDE_PSS_SPECULATIVE_STEP"
+      ],
+      "identical_preprocessed_tokens": true,
+      "sha256": "1a0dcaddd7fbdcc6870612b448d301ac97e97ca4eb5eb3a5ae9fa50f2427e6f5"
+    },
+    {
+      "macros": [
+        "+define+INCLUDE_SPAN_OPERAND_DEFAULT"
+      ],
+      "identical_preprocessed_tokens": true,
+      "sha256": "6ebcbe06288e2d9cd6fb74c365f2917adfe1ba35a57e193ec1c46fc2b94d9f16"
+    },
+    {
+      "macros": [
+        "+define+INCLUDE_SPAN_OPERAND_DEFAULT",
+        "+define+INCLUDE_PSS_SPECULATIVE_STEP"
+      ],
+      "identical_preprocessed_tokens": true,
+      "sha256": "e4e97afae251f04870b473ab06c4b4463b7819a3b9c6aac2c0e7c2de106eee47"
+    }
+  ],
+  "scope": "No dedicated span macro: old/new complete GPU preprocessed token streams identical for both operand-default and PSS speculative choices."
+}

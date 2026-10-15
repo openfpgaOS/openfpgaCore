@@ -1,0 +1,28 @@
+{
+  "returncode": 0,
+  "seconds": 4.417924504959956,
+  "command": [
+    "verilator",
+    "--cc",
+    "--exe",
+    "--build",
+    "-j",
+    "4",
+    "-Wno-fatal",
+    "--top-module",
+    "tb_front",
+    "--Mdir",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/front-v2/obj",
+    "-CFLAGS",
+    "-O2",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/front-v2/tb_front.v",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/front-v2/gpu_mesh_job_front.v",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/front-v2/test_front.cpp"
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/front/tb_front.v": "3a84f0fe033cbc35f1527a5d90ae82f44b78ee6f3396d7c88e7cdb91384226ac",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/front/test_front.cpp": "2a6f3b68ee7f3f338895fcad81650cbbd3f3187482c9d1a5c22082a820ddedae",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-core/frozen/src/fpga/common/gpu_mesh_job_front.v": "6ce9d7549958228fe7e5a03446a8a00208c6aaea34d5e70b386fcf02ffd59c78",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/front/run.py": "00e57c900ee71e330ef3478a5327871d38139ed9f18958e8016bc7cbf7cd482c"
+  }
+}

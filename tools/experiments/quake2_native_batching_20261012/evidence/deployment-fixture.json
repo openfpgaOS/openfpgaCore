@@ -1,0 +1,16 @@
+{
+  "passed": true,
+  "checks": [
+    "Normal app/core/metadata installed and verified; config, saves, loader, OS and launcher preserved",
+    "Profile mode selects diagnostic ELF at unchanged launch filename",
+    "Verified restore returns all target bytes to original snapshot",
+    "Tampered package refused before any target changes",
+    "Mismatched OS boot ELF refused before copying",
+    "Source change after preflight rejected against pinned expected checksum",
+    "Read-only mount refused without staging files",
+    "Mid-replacement failure restores old app and removes all temporary files",
+    "Failed rollback reports remaining changed file instead of claiming no modification"
+  ],
+  "installer_sha256": "1313665b6de91fa316fa3c64c00d33036469314f15e64d326f6187d9f83e33e2",
+  "scope": "Private temporary card fixtures only; source files from the existing local package and synthetic saves/settings; no physical card access."
+}

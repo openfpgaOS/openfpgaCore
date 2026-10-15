@@ -1,0 +1,47 @@
+{
+  "status": "PASS_BOUND_INDEPENDENT_EXPECTED_SCENE_OUTCOMES",
+  "per_phase": {
+    "1": {
+      "tasks": 319,
+      "input_triangles": 2459,
+      "raw_words_compared": 32272,
+      "CPU_cull_rejected": 1028,
+      "CPU_kept_before_scope": 1000,
+      "fallback_tasks": 75,
+      "fallback_input_triangles": 455,
+      "fallback_partial_clip": 58,
+      "CPU_clip_rejected": 431,
+      "accepted_geometry_tasks": 244,
+      "accepted_input_triangles": 2004,
+      "emitted_triangles": 754,
+      "emitted_packet_words": 13154,
+      "fully_rejected_accepted_tasks": 80,
+      "fallback_W": 17
+    },
+    "2": {
+      "tasks": 319,
+      "input_triangles": 2459,
+      "raw_words_compared": 32272,
+      "CPU_cull_rejected": 1023,
+      "CPU_kept_before_scope": 997,
+      "fallback_tasks": 75,
+      "fallback_input_triangles": 451,
+      "fallback_partial_clip": 58,
+      "CPU_clip_rejected": 439,
+      "accepted_geometry_tasks": 244,
+      "accepted_input_triangles": 2008,
+      "emitted_triangles": 757,
+      "emitted_packet_words": 13223,
+      "fully_rejected_accepted_tasks": 79,
+      "fallback_W": 17
+    }
+  },
+  "scope": "Captured geometry-only admission with exact current CPU cull oracle. Material eligibility/raster binding not established; counts are not wholeframe speedup predictions.",
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/analyze_scene.py": "3daf220423ca3af49a7eee0431ddd73eff947c7c133b50538c467bff8d9d6fc1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/native-vectors-v3/vectors.json": "cb1bb8ee2bd4474a4da37a69baf8ce947abd7f52903388e7d73a4e4b4491681b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/scene-cull-oracle-v1/inputs.json": "e84a58d7a9e80b4133b809f0a0e9daa236026875b17fa007fd228f629dc9f285",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/scene-cull-oracle-v1/outputs.bin": "082db91cc1412fef6c013c7b567bee752f23ebe48ff3e4ed8b25d8e3e955ce9f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/scene-chain-v1/manifest.json": "d582790692c975938d523b1d1bb607e08532972a5088be46c834b3e36d120031"
+  }
+}

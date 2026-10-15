@@ -1,0 +1,153 @@
+{
+  "passed": true,
+  "configurations": [
+    {
+      "ADDR_BITS": 1,
+      "QUEUE_BITS": 1
+    },
+    {
+      "ADDR_BITS": 2,
+      "QUEUE_BITS": 1
+    },
+    {
+      "ADDR_BITS": 2,
+      "QUEUE_BITS": 2
+    },
+    {
+      "ADDR_BITS": 3,
+      "QUEUE_BITS": 1
+    },
+    {
+      "ADDR_BITS": 3,
+      "QUEUE_BITS": 3
+    },
+    {
+      "ADDR_BITS": 4,
+      "QUEUE_BITS": 1
+    },
+    {
+      "ADDR_BITS": 4,
+      "QUEUE_BITS": 2
+    },
+    {
+      "ADDR_BITS": 4,
+      "QUEUE_BITS": 4
+    },
+    {
+      "ADDR_BITS": 6,
+      "QUEUE_BITS": 1
+    },
+    {
+      "ADDR_BITS": 6,
+      "QUEUE_BITS": 4
+    },
+    {
+      "ADDR_BITS": 6,
+      "QUEUE_BITS": 6
+    },
+    {
+      "ADDR_BITS": 10,
+      "QUEUE_BITS": 1
+    },
+    {
+      "ADDR_BITS": 10,
+      "QUEUE_BITS": 4
+    },
+    {
+      "ADDR_BITS": 10,
+      "QUEUE_BITS": 8
+    },
+    {
+      "ADDR_BITS": 10,
+      "QUEUE_BITS": 10
+    },
+    {
+      "ADDR_BITS": 11,
+      "QUEUE_BITS": 1
+    },
+    {
+      "ADDR_BITS": 11,
+      "QUEUE_BITS": 4
+    },
+    {
+      "ADDR_BITS": 11,
+      "QUEUE_BITS": 9
+    },
+    {
+      "ADDR_BITS": 11,
+      "QUEUE_BITS": 11
+    },
+    {
+      "ADDR_BITS": 12,
+      "QUEUE_BITS": 1
+    },
+    {
+      "ADDR_BITS": 12,
+      "QUEUE_BITS": 4
+    },
+    {
+      "ADDR_BITS": 12,
+      "QUEUE_BITS": 10
+    },
+    {
+      "ADDR_BITS": 12,
+      "QUEUE_BITS": 12
+    },
+    {
+      "ADDR_BITS": 16,
+      "QUEUE_BITS": 1
+    },
+    {
+      "ADDR_BITS": 16,
+      "QUEUE_BITS": 4
+    },
+    {
+      "ADDR_BITS": 16,
+      "QUEUE_BITS": 14
+    },
+    {
+      "ADDR_BITS": 16,
+      "QUEUE_BITS": 16
+    },
+    {
+      "ADDR_BITS": 31,
+      "QUEUE_BITS": 1
+    },
+    {
+      "ADDR_BITS": 31,
+      "QUEUE_BITS": 4
+    },
+    {
+      "ADDR_BITS": 31,
+      "QUEUE_BITS": 29
+    },
+    {
+      "ADDR_BITS": 31,
+      "QUEUE_BITS": 31
+    },
+    {
+      "ADDR_BITS": 32,
+      "QUEUE_BITS": 1
+    },
+    {
+      "ADDR_BITS": 32,
+      "QUEUE_BITS": 4
+    },
+    {
+      "ADDR_BITS": 32,
+      "QUEUE_BITS": 30
+    },
+    {
+      "ADDR_BITS": 32,
+      "QUEUE_BITS": 32
+    }
+  ],
+  "sources": {
+    "main.cpp": "b9529fc3375fcb634e88b6628a2eebd88cf9f58337881267d91a308de51b1574",
+    "width_proof.v": "398006d007b23ebd963dd80e59d1f998c4c3d5ec4d767f2dcea52424d237b9b9",
+    "gpu_geometry_worker.v": "e0f4ffbd20f2a20ab416543a0e9d830d7ec6b4d8d55df094479428b67f933fbb"
+  },
+  "result": "PASS 1851968 pointer/consume vectors across 35 ADDR_BITS/QUEUE_BITS configurations, including widths1/32, underflow, exact capacity and wrap\n",
+  "executable_sha256": "5b57051f007cbfbb27f301c05a5d538ad0c7a4d50ad61253d2d73419a4ba9306",
+  "scope": "Actual Verilog expression-width semantics, exhaustive all pointer combinations through6 bits plus capacity/wrap boundaries and one million full32-bit random pointer vectors; no occupancy-range assumption."
+}

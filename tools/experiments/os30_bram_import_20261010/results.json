@@ -1,0 +1,329 @@
+{
+  "status": "CORRECT_EXPERIMENT_REJECTED_FOR_PERFORMANCE",
+  "decision": "Retain current deployed baseline; no FPGA fit, deployment, seed sweep, or production source edits for this candidate.",
+  "scope": "os30 SM64, two deterministic diagnostic replay intervals per exact same-ELF A/B pair; synthetic fixed-cadence scan/audio; not sustained hardware FPS or Quake2 validation.",
+  "implementation": "BIM2 two immutable BRAM snapshots, nonblocking claim with CPU fallback, GPU direct reads and ordered releases; producer held only during copy.",
+  "final_elf_sha256": "ee5ca16356a4ec5f96b271044da3623dca0474f35be6a023c603d9ff4d31cc51",
+  "final_model_prepared_sha256": "28ce740b111802fec664004ba1c2f359429396bb92f5b6fc22c82d5a2e5c0d77",
+  "runs": [
+    {
+      "design": "Shared raw bank",
+      "baseline": "baseline-v2",
+      "candidate": "imported-v3",
+      "baseline_cycles": [
+        3902946,
+        4308650
+      ],
+      "baseline_warm_upload_words": 23000,
+      "baseline_stats": {
+        "claim_attempts": 0,
+        "accepted": 0,
+        "imported_vertices": 0,
+        "releases": 0,
+        "waits": 0,
+        "poll_iterations": 0,
+        "failures": 0,
+        "absent_probe": 2
+      },
+      "baseline_run_manifest": {
+        "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/bram-import-v1/baseline-v2/run/manifest.json",
+        "sha256": "618ec7f588cb5b7e713744da3aa3660a162af336975e929b5e19a7dad0cba2b1"
+      },
+      "candidate_cycles": [
+        5012596,
+        5357737
+      ],
+      "candidate_warm_upload_words": 15608,
+      "candidate_stats": {
+        "claim_attempts": 391,
+        "accepted": 391,
+        "imported_vertices": 2854,
+        "releases": 391,
+        "waits": 200,
+        "poll_iterations": 136899,
+        "failures": 0,
+        "absent_probe": 1
+      },
+      "candidate_run_manifest": {
+        "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/bram-import-v1/imported-v3/run/manifest.json",
+        "sha256": "56f0699f97fe9686290fc074b6f90ac3a3e3f944bd597534fc4234425a31fc98"
+      },
+      "cycle_change_percent": [
+        28.431087696319658,
+        24.348392187808244
+      ]
+    },
+    {
+      "design": "Shared bank, end publication",
+      "baseline": "baseline-v3",
+      "candidate": "imported-v4",
+      "baseline_cycles": [
+        3902958,
+        4308401
+      ],
+      "baseline_warm_upload_words": 23000,
+      "baseline_stats": {
+        "claim_attempts": 0,
+        "accepted": 0,
+        "imported_vertices": 0,
+        "releases": 0,
+        "waits": 0,
+        "poll_iterations": 0,
+        "failures": 0,
+        "absent_probe": 2
+      },
+      "baseline_run_manifest": {
+        "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/bram-import-v1/baseline-v3/run/manifest.json",
+        "sha256": "d312a13ccd35c5d9ce8c40fd5149b6908e2e3e0945888d4cb0d6b8fbb687ca1a"
+      },
+      "candidate_cycles": [
+        4875087,
+        5237296
+      ],
+      "candidate_warm_upload_words": 15608,
+      "candidate_stats": {
+        "claim_attempts": 391,
+        "accepted": 391,
+        "imported_vertices": 2854,
+        "releases": 391,
+        "waits": 209,
+        "poll_iterations": 123474,
+        "failures": 0,
+        "absent_probe": 1
+      },
+      "candidate_run_manifest": {
+        "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/bram-import-v1/imported-v4/run/manifest.json",
+        "sha256": "55219ead442ab1c6763e894986bb008365ffaaad9655f83e0ca5601f859c6ac1"
+      },
+      "cycle_change_percent": [
+        24.907493239742774,
+        21.56008690927329
+      ]
+    },
+    {
+      "design": "Shared bank, idle admission",
+      "baseline": "baseline-v4",
+      "candidate": "imported-v5",
+      "baseline_cycles": [
+        3910397,
+        4309403
+      ],
+      "baseline_warm_upload_words": 23000,
+      "baseline_stats": {
+        "claim_attempts": 0,
+        "accepted": 0,
+        "imported_vertices": 0,
+        "releases": 0,
+        "waits": 0,
+        "poll_iterations": 0,
+        "failures": 0,
+        "absent_probe": 2
+      },
+      "baseline_run_manifest": {
+        "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/bram-import-v1/baseline-v4/run/manifest.json",
+        "sha256": "b33fb5d26a1ad93a850a16deafbdeaaf6eadb60c61f29c1bdbf590af6dd57732"
+      },
+      "candidate_cycles": [
+        3930256,
+        4326590
+      ],
+      "candidate_warm_upload_words": 23000,
+      "candidate_stats": {
+        "claim_attempts": 0,
+        "accepted": 0,
+        "imported_vertices": 0,
+        "releases": 0,
+        "waits": 0,
+        "poll_iterations": 0,
+        "failures": 0,
+        "absent_probe": 1
+      },
+      "candidate_run_manifest": {
+        "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/bram-import-v1/imported-v5/run/manifest.json",
+        "sha256": "45e23e52229ff27d0ca87699c3b1d2a8757c9f6ae211fe44b47103a3f83c2fec"
+      },
+      "cycle_change_percent": [
+        0.5078512488629672,
+        0.3988255449768774
+      ]
+    },
+    {
+      "design": "Two snapshots",
+      "baseline": "baseline-v5",
+      "candidate": "snapshot-v1",
+      "baseline_cycles": [
+        3909458,
+        4303590
+      ],
+      "baseline_warm_upload_words": 23000,
+      "baseline_stats": {
+        "claim_attempts": 0,
+        "accepted": 0,
+        "imported_vertices": 0,
+        "releases": 0,
+        "waits": 0,
+        "poll_iterations": 0,
+        "failures": 0,
+        "absent_probe": 2
+      },
+      "baseline_run_manifest": {
+        "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/bram-import-v1/baseline-v5/run/manifest.json",
+        "sha256": "fa96224d3333eef429c11b49f6237f36dd64443c658279d3e23a26bab3a4a050"
+      },
+      "candidate_cycles": [
+        4013223,
+        4372522
+      ],
+      "candidate_warm_upload_words": 19196,
+      "candidate_stats": {
+        "claim_attempts": 391,
+        "accepted": 175,
+        "imported_vertices": 1457,
+        "releases": 175,
+        "waits": 0,
+        "poll_iterations": 0,
+        "failures": 0,
+        "absent_probe": 1
+      },
+      "candidate_run_manifest": {
+        "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/bram-import-v1/snapshot-v1/run/manifest.json",
+        "sha256": "3394f91e7c4dc1e969eecda0bc311f0b92bd1a85f329706be3efcad7007829b3"
+      },
+      "cycle_change_percent": [
+        2.654204240076252,
+        1.6017325070464494
+      ]
+    },
+    {
+      "design": "Snapshots, deferred threshold batching",
+      "baseline": "baseline-v6",
+      "candidate": "snapshot-v2",
+      "baseline_cycles": [
+        3914552,
+        4317744
+      ],
+      "baseline_warm_upload_words": 23000,
+      "baseline_stats": {
+        "claim_attempts": 0,
+        "accepted": 0,
+        "imported_vertices": 0,
+        "releases": 0,
+        "waits": 0,
+        "poll_iterations": 0,
+        "failures": 0,
+        "absent_probe": 2
+      },
+      "baseline_run_manifest": {
+        "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/bram-import-v1/baseline-v6/run/manifest.json",
+        "sha256": "d2b6daa812998fc53df6e0c6df0fc4cb0c4cd65551df91ff5c6d59533f5d2557"
+      },
+      "candidate_cycles": [
+        4034837,
+        4389211
+      ],
+      "candidate_warm_upload_words": 21788,
+      "candidate_stats": {
+        "claim_attempts": 391,
+        "accepted": 64,
+        "imported_vertices": 475,
+        "releases": 64,
+        "waits": 0,
+        "poll_iterations": 0,
+        "failures": 0,
+        "absent_probe": 1
+      },
+      "candidate_run_manifest": {
+        "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/bram-import-v1/snapshot-v2/run/manifest.json",
+        "sha256": "0099fb98a2dc13bd48d8c2de33dc5cd1738ec153a859a20a0978200e020ee69a"
+      },
+      "cycle_change_percent": [
+        3.072765414790757,
+        1.6551930823133665
+      ]
+    },
+    {
+      "design": "Snapshots, early capacity check and overlap",
+      "baseline": "baseline-v7",
+      "candidate": "snapshot-v3",
+      "baseline_cycles": [
+        3919417,
+        4317710
+      ],
+      "baseline_warm_upload_words": 23000,
+      "baseline_stats": {
+        "claim_attempts": 0,
+        "accepted": 0,
+        "imported_vertices": 0,
+        "releases": 0,
+        "waits": 0,
+        "poll_iterations": 0,
+        "failures": 0,
+        "absent_probe": 2
+      },
+      "baseline_run_manifest": {
+        "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/bram-import-v1/baseline-v7/run/manifest.json",
+        "sha256": "e99e1b68d5465625c83ffc3ea4f76555c76afa121810e1a4843b26195abb8802"
+      },
+      "candidate_cycles": [
+        3947444,
+        4350839
+      ],
+      "candidate_warm_upload_words": 19238,
+      "candidate_stats": {
+        "claim_attempts": 161,
+        "accepted": 161,
+        "imported_vertices": 1313,
+        "releases": 161,
+        "waits": 0,
+        "poll_iterations": 0,
+        "failures": 0,
+        "absent_probe": 1
+      },
+      "candidate_run_manifest": {
+        "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/bram-import-v1/snapshot-v3/run/manifest.json",
+        "sha256": "615a748eb12b260ca1c68f13788634db1bc095f73da2528a82118d46be285124"
+      },
+      "cycle_change_percent": [
+        0.7150808398289854,
+        0.7672817303616908
+      ]
+    }
+  ],
+  "remaining_cpu_work": [
+    "Full canonical readback/copy",
+    "Display-list decoding",
+    "Exact CPU clip/cull tests",
+    "Material, texture and alpha handling",
+    "Dirty-slot tracking and job construction",
+    "Fallback payload preparation"
+  ],
+  "hardware_status": {
+    "fitted": false,
+    "timing_qualified": false,
+    "baseline_alm_spare": 311,
+    "baseline_m10k_spare": 4,
+    "snapshot_ram_expected_m10k": 2,
+    "baseline_clock_mhz": 90,
+    "baseline_fmax_mhz": 90.28,
+    "seed": 3
+  },
+  "evidence_root": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/bram-import-v1",
+  "test_evidence": {
+    "tests/qualified-v2/result.json": "9cd5fa8df8aeab09777601e7185bbcc991331c4f8c3f1a3805792d55e7bb351f",
+    "tests/snapshot-qualified-v1/result.json": "8f5c50ca26b4561d2d4de64fd893bc8f299438be733c890e035cd61b75c36340",
+    "gpu-snapshot-tests/report.json": "66a5fefd33a7c6f2e80ec5bcc1566f8338b8e6e100c1e1501135e2edd888cc0a",
+    "review/app-v7-final-cost-analysis.json": "414d7f21ee33c99cebb1f0f63ed3023ecd12aa62d26d65eeeaa5154d8c1d2185",
+    "tests/baseline-v2-review.json": "2b1a674d5088a3a1fbb857f8196ec8eda7652d11cdaa72f8170bc2358490c9fb",
+    "tests/baseline-v3-review.json": "8c1be9af2db33f42ac07c07d58de2f41c26c1b701ebdfb3c1669a34ce9d1b6dd",
+    "tests/baseline-v4-review.json": "75501579aa70a1d52f1d4a50f4103c991c4354d9d62e14f0d8f54eda5b52d02c",
+    "tests/baseline-v5-review.json": "432bfad8e5a4beb6e16ccf6141340e713033d10dbfa1ad5be1503f18443814e9",
+    "tests/baseline-v6-review.json": "9fe9268c9874471071458e0f8f43dc819f9a04e5ad3dcc570037df02b03ef733",
+    "tests/baseline-v7-review.json": "4fac580ffd4188e775974e6ebd22f29f1b95e16d4eaa4ea1936cb5e23aa8a741",
+    "tests/imported-v3-review.json": "720404528cc1eb6cf1aabe43f3cba5b1d47948dc6c9d18dbfcd9a87086106e98",
+    "tests/imported-v4-review.json": "60470db5c3ef0c40b0612437461f84beb150ca46c1c407478e1479abbe9e2a17",
+    "tests/imported-v5-review.json": "6a34265c8b6bd2f71b09ebd5c592e26bfad27d907b0c59534fb6997ee3dea320",
+    "tests/snapshot-v1-review.json": "2a1602759288b1f2a0ada50f19e88800ae97761dbc9fcb9da4caaf29ac24ddc6",
+    "tests/snapshot-v2-review.json": "09c75c671592a59003c86423dbee6c65dad437b03065c0daa10fb2d9feed5ce4",
+    "tests/snapshot-v3-review.json": "7856079fb041bc845f31393c8f737f1cd654a9ac144551e9aaf37cc5a80c0c62"
+  }
+}

@@ -1,0 +1,85 @@
+Quake2 particle draw architecture: simulation qualification
+Baseline: deployed native5 application c08bed78555f08252c9694c1f019db968e2ce79809ff41b909cfdd61b30e743b
+Selected application: v5 46d2206d655e663aab7c15b56ff0c88b7a1c547bb6b3516e921780d795c9b753
+Selected logical worker: 1fcb82a61c8e8653717b8ba831d2802127784c897ceebc3aab9676f3c9bb123c
+Selected logical GPU: 452b36860161c1d3c73c7cdaaf2d1d3d5006096027169f101273a297d3e2ab43
+
+Result
+The selected producer and real GPU/PSRAM RTL improve modeled throughput by
+22.89% across the three preselected busy frames together. Individual gains
+are 14.60%, 34.74%, and 21.40%; the result is not a universal 20% improvement.
+All eight sampled frames improve, with the smaller gains occurring where
+particle preparation was a smaller part of the original frame cost.
+This report does not assert physical timing, device FPS, or release approval.
+
+Whole-frame producer/consumer replay
+                  native5 cycles     selected cycles     throughput gain
+main 20                4,864,878            3,762,501            29.30%
+main 80                5,019,454            4,539,088            10.58%
+main 92                7,416,421            6,471,577            14.60%
+main 94                7,036,799            5,222,567            34.74%
+main 148               6,646,207            5,474,816            21.40%
+main 180               5,729,971            4,999,025            14.62%
+main 300               3,393,667            3,250,158             4.42%
+live 81               13,415,394           12,647,306             6.07%
+The authoritative exact cycle values are in particles-v5-qualification.json.
+The replay retains CPU publication, ring capacity, fences, and MMIO upload
+waits. It does not replace the full CPU/memory/video system. Live81 still
+contains roughly 2.09 million additional cycles waiting for cold uploads.
+
+CPU workloads
+720 fixed-scene frames complete with identical CPU framebuffer, game/frame
+invariants, and sound service counts. CPU cycle estimates decrease by 16.31%
+in main, 15.43% in sound, and 8.45% in live. Demo2 contains no eligible particle
+jobs and changes by +0.117%; its complete command stream remains identical.
+The scalar/cache model is not a measurement of Vexii IPC or Pocket FPS.
+
+Independent correctness gates
+1. Hardware versus canonical integer geometry: all eight real worker/raster/
+   shared-PSRAM samples exactly match an independent Python expansion rendered
+   through the existing GPU. Paced and unpaced outputs also match exactly.
+   The Python reference separately matches the C canonical helper in 30,000
+   randomized cases and 30,015 signed rounding/boundary cases under UBSan.
+2. Existing core compatibility: 720 native-capability/particle-capability-off,
+   600 legacy-worker, and 600 no-geometry frames preserve every command word,
+   order, frame assignment, CPU framebuffer byte, and sound service count.
+   Old-core actual GPU rendering is checked separately in the final receipt.
+3. Legacy versus new particle convention: intentionally NOT bit-identical.
+   Changed RGB565 pixels in the eight samples are 216, 52, 28, 113, 252, 178,
+   55, and 14 of 76,800. Maximum is 0.328125% of a frame. Differences remain
+   localized to particle speckles; scene geometry and resolution are preserved.
+   Ordered matching covers the emitted particle triangles. Projected positions
+   differ by at most 1/16 pixel, depth-test inputs by at most 6.47 parts/million.
+   Five baseline triangles omitted by the new bounding-box test are wholly
+   outside the viewport. Colors and effective alpha agree for matched triangles.
+   The constant perspective factor changes some texture sampling: individual
+   changed pixels may differ substantially, despite a small whole-image average.
+   Unchanged depth memory alone is not evidence of unchanged particle depth
+   tests, because particles normally disable depth writes.
+4. Physical qualification: external to these tests. Neither a passing synthesis
+   nor the simulation numbers establish a passing fitted clock or real FPS.
+
+Evidence
+particles-v5-qualification.json contains separate gates and per-sample values.
+image-comparisons/particles-v5-{main,live}-v2 contains panels, full RGB/depth
+error statistics, connected-component bounds, and projected input comparisons.
+comparisons/particles-v5-* contains exact compatibility results.
+reference-test/result.json pins both reference implementations and UBSan test.
+The profile companion uses 75db4eca10e3b7412771e977620770d0450047b283e9be68e33c64cbc512b0c7;
+its fixed-workload smoke run is separate from every speed measurement.
+
+Earlier variants are retained as rejected or intermediate evidence. V1-v3
+changed rare old-core floating-point command values; v4 restored exact output
+but added hot code footprint and reached only 19.63% busy aggregate. V5 moves
+the exceptional submission-failure replay out of the hot helper, preserving
+v4 output while recovering the lost performance. None of these intermediate
+results should be substituted for the selected v5 measurements.
+
+Evidence integrity
+One short diagnostic inherited an absolute QSIM_TIMELINE output path and
+overwrote the previous main timeline. The recovery reran the exact frozen
+baseline into a new directory, matched the original pinned SHA256, and only
+then restored that file. Every original input/evidence pin verifies again.
+timeline-recovery/incident-recovery.json records the incident and recovery.
+Regular benchmark output paths were audited; no source, ELF, screenshot, SD
+card content, or other previous evidence was modified by that diagnostic.

@@ -1,0 +1,21 @@
+--- final-mixer/audio_mixer.v
++++ mixer-loop-valid/audio_mixer.v
+@@ -885,7 +885,6 @@
+     // is a single adder off the RAM read.
+     S_RD_LSTART_W: begin
+         cur_loop_start <= vtbl_cpu_q[21:0];
+-        cur_loop_valid <= !position_alu[22] && (position_alu[21:0] != 22'd0);
+         if (cur_stream) begin
+             vtbl_a_addr <= {cur_voice, VTBL_WPTR};
+             state       <= S_STREAM_WPTR_W;
+@@ -962,6 +961,10 @@
+     // TAP0_AR / TAP0_R / TAP1_R: drive AR with chosen ARLEN, receive
+     //                            beat 0, optionally receive beat 1.
+     S_FETCH_TAP0_CALC: begin
++        // LOOP_START and LOOP_END are already captured. The first consumer
++        // is two states later; stream starvation skips every consumer.
++        // Keep RAM bypass and shared-ALU selection out of this comparison.
++        cur_loop_valid <= cur_loop_end > cur_loop_start;
+         // Terminating voices do not consume this speculative read. Avoid
+         // length-comparison feedback into the inferred RAM read enable.
+         vtbl_a_addr <= {cur_voice, VTBL_ADDR};

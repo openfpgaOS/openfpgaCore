@@ -1,0 +1,215 @@
+{
+  "status": "PASS_SOURCE_AUDITED_STRUCTURAL_COVERAGE",
+  "cases": {
+    "cold_same_list": {
+      "candidate_spans": 320,
+      "old_proved": 146,
+      "proved": 148,
+      "new_spans": 2,
+      "new_triangles": 4,
+      "new_hardware_LOADs": 2,
+      "new_by_route": {
+        "suffix_opcode": 2
+      },
+      "new_by_prior_reason": {
+        "state_or_list_0xfd": 2
+      },
+      "new_by_returns": {
+        "0": 2
+      },
+      "new_by_skipped_opcode": {
+        "LOADBLOCK": 2,
+        "LOADSYNC": 2,
+        "SETTIMG": 2
+      },
+      "remaining_failures": {
+        "state_or_list_0xdf": 170,
+        "state_or_list_0xdc": 2
+      },
+      "single_opcode_new": {
+        "TEXTURE": 0,
+        "SETTIMG": 0,
+        "TILESYNC": 0,
+        "PIPESYNC": 0,
+        "GEOMETRYMODE": 0,
+        "SETENVCOLOR": 0,
+        "SETTILE": 0,
+        "SETTILESIZE": 0,
+        "LOADBLOCK": 0,
+        "LOADTILE": 0,
+        "LOADTLUT": 0,
+        "SETPRIMCOLOR": 0,
+        "SETCOMBINE": 0,
+        "SETFOGCOLOR": 0,
+        "LOADSYNC": 0,
+        "FULLSYNC": 0
+      },
+      "lost_new_if_removed": {
+        "TEXTURE": 0,
+        "SETTIMG": 2,
+        "TILESYNC": 0,
+        "PIPESYNC": 0,
+        "GEOMETRYMODE": 0,
+        "SETENVCOLOR": 0,
+        "SETTILE": 0,
+        "SETTILESIZE": 0,
+        "LOADBLOCK": 2,
+        "LOADTILE": 0,
+        "LOADTLUT": 0,
+        "SETPRIMCOLOR": 0,
+        "SETCOMBINE": 0,
+        "SETFOGCOLOR": 0,
+        "LOADSYNC": 2,
+        "FULLSYNC": 0
+      }
+    },
+    "warm_same_list": {
+      "candidate_spans": 320,
+      "old_proved": 146,
+      "proved": 148,
+      "new_spans": 2,
+      "new_triangles": 4,
+      "new_hardware_LOADs": 2,
+      "new_by_route": {
+        "suffix_opcode": 2
+      },
+      "new_by_prior_reason": {
+        "state_or_list_0xfd": 2
+      },
+      "new_by_returns": {
+        "0": 2
+      },
+      "new_by_skipped_opcode": {
+        "LOADBLOCK": 2,
+        "LOADSYNC": 2,
+        "SETTIMG": 2
+      },
+      "remaining_failures": {
+        "state_or_list_0xdf": 170,
+        "state_or_list_0xdc": 2
+      },
+      "single_opcode_new": {
+        "TEXTURE": 0,
+        "SETTIMG": 0,
+        "TILESYNC": 0,
+        "PIPESYNC": 0,
+        "GEOMETRYMODE": 0,
+        "SETENVCOLOR": 0,
+        "SETTILE": 0,
+        "SETTILESIZE": 0,
+        "LOADBLOCK": 0,
+        "LOADTILE": 0,
+        "LOADTLUT": 0,
+        "SETPRIMCOLOR": 0,
+        "SETCOMBINE": 0,
+        "SETFOGCOLOR": 0,
+        "LOADSYNC": 0,
+        "FULLSYNC": 0
+      },
+      "lost_new_if_removed": {
+        "TEXTURE": 0,
+        "SETTIMG": 2,
+        "TILESYNC": 0,
+        "PIPESYNC": 0,
+        "GEOMETRYMODE": 0,
+        "SETENVCOLOR": 0,
+        "SETTILE": 0,
+        "SETTILESIZE": 0,
+        "LOADBLOCK": 2,
+        "LOADTILE": 0,
+        "LOADTLUT": 0,
+        "SETPRIMCOLOR": 0,
+        "SETCOMBINE": 0,
+        "SETFOGCOLOR": 0,
+        "LOADSYNC": 2,
+        "FULLSYNC": 0
+      }
+    },
+    "cold_with_immutable_callers": {
+      "candidate_spans": 320,
+      "old_proved": 146,
+      "proved": 202,
+      "new_spans": 56,
+      "new_triangles": 258,
+      "new_hardware_LOADs": 56,
+      "new_by_route": {
+        "suffix_opcode": 56
+      },
+      "new_by_prior_reason": {
+        "state_or_list_0xdf": 54,
+        "state_or_list_0xfd": 2
+      },
+      "new_by_returns": {
+        "1": 54,
+        "0": 2
+      },
+      "new_by_skipped_opcode": {
+        "SETTILESIZE": 11,
+        "LOADSYNC": 53,
+        "LOADBLOCK": 53,
+        "SETTILE": 11,
+        "SETTIMG": 53,
+        "TILESYNC": 11,
+        "TEXTURE": 3,
+        "PIPESYNC": 3,
+        "SETCOMBINE": 3
+      },
+      "remaining_failures": {
+        "state_or_list_0xe3": 13,
+        "state_or_list_0xdc": 12,
+        "mutable_or_unknown_command": 91,
+        "state_or_list_0xe2": 2
+      },
+      "single_opcode_new": {
+        "TEXTURE": 0,
+        "SETTIMG": 0,
+        "TILESYNC": 0,
+        "PIPESYNC": 0,
+        "GEOMETRYMODE": 0,
+        "SETENVCOLOR": 0,
+        "SETTILE": 0,
+        "SETTILESIZE": 0,
+        "LOADBLOCK": 0,
+        "LOADTILE": 0,
+        "LOADTLUT": 0,
+        "SETPRIMCOLOR": 0,
+        "SETCOMBINE": 0,
+        "SETFOGCOLOR": 0,
+        "LOADSYNC": 0,
+        "FULLSYNC": 0
+      },
+      "lost_new_if_removed": {
+        "TEXTURE": 3,
+        "SETTIMG": 53,
+        "TILESYNC": 11,
+        "PIPESYNC": 3,
+        "GEOMETRYMODE": 0,
+        "SETENVCOLOR": 0,
+        "SETTILE": 11,
+        "SETTILESIZE": 11,
+        "LOADBLOCK": 53,
+        "LOADTILE": 0,
+        "LOADTLUT": 0,
+        "SETPRIMCOLOR": 0,
+        "SETCOMBINE": 3,
+        "SETFOGCOLOR": 0,
+        "LOADSYNC": 53,
+        "FULLSYNC": 0
+      }
+    }
+  },
+  "limits": [
+    "Only liveness proof advances past the listed state opcodes; actual dispatcher and GROUP span boundaries remain unchanged.",
+    "Counts establish structural dead-slot coverage, not material eligibility, transformed arithmetic support or frame-time improvement. Previously suffix-blocked paths have not reached later material admission.",
+    "Current-list warm proofs use exact immutable command words and measured warm call identities. Caller-aware results are cold-only, from the independently matched full snapshot graph; warm caller stacks are not assumed.",
+    "Mutable commands/targets/callers, all unlisted state operations, live TRI reads, loops and depth/scan limits remain rejection barriers.",
+    "Opcode canonical-read/fog safety is independently reviewed before implementation; this report does not itself authorize skipping those instructions at runtime."
+  ],
+  "source_safety_scope": "Skip only these16 opcodes when proving omitted CPU canonical rows dead; actual dispatcher still executes all opcodes and GROUP construction still stops at every state/list boundary. No source edit.",
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/state-liveness-v1/native-traversal-v2/result.json": "545ad1d9788086b777feb7abcb92178620095ab68a2a8544d0a73cada5b12213",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/state-liveness-v1/source-audit-v1.json": "f657997c723022919354016da4865bd22e46eaaf6b2c76fbb213e3c0ce76099d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/state-liveness-v1/native-traversal-v2/finalize.py": "e732c41bcc0338771710935c32cf4e71ad97e95b0b5226b1f6d4f1fd9b48a864"
+  },
+  "implementation_or_speed_claim": false
+}

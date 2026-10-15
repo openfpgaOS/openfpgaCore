@@ -1,0 +1,57 @@
+{
+  "status": "PASS",
+  "checks": 273230,
+  "atomic_bundle_cases": 1024,
+  "mask_cases": 6336,
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app/evidence/test_priority.py": "aa2438f6d18a9eb92048e8b7b2d3256ce4acd4d8c863cb1203753735d57c1335",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app/src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "70bd78b5fd138544163e7f990f9d3e29c1605b5b0cad0673f40f2c238398c2ba",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "ce45f09d42b4c148d517d8c7b2df180e2332147c073e558837382d854f355b62",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app/src/sm64/sm64/src/pc/gfx/gfx_gpu.h": "8226f0dddf490babe23f606792a4bf9cd6ae477e8e11c044881e61d61b3b0926",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app/src/sm64/sm64/src/pc/gfx/async_mesh_repair.h": "0aeb6d69e84a5f5345d62f14227fea76bd2169932ec0a5960a5c3d9b63b530ef",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app/evidence/priority-tests-v2/test.c": "23b6bb989f7ad2580a92e63d0fac36db41b1202b3683b7d9215e79d32e7f46b1"
+  },
+  "extracted_functions_sha256": {
+    "gpu_async_epoch_check": "f6da02d6eb23405277e52aca2f439290afaf0994b2009c0ee5a791f14aed1707",
+    "gpu_async_raw_blocks_jobs": "15c5c3e9feb0237714ccdb7e17fa7f44db69ab10d9fe6053ad4d908fa62107db",
+    "gfx_gpu_async_raw_release_if_pending": "dfcb66b683deb72ae5aa253795cd9223b764909f445cca5aa264b45ef3c90613",
+    "gfx_gpu_async_before_wait": "59bced97ef360fe37a1dc004e4dd2e6ead255931462dfce3cf9ae0aaad2b863c",
+    "gfx_gpu_wait_service": "1e4c57d00c7b747064b0a63d53cf3d9623d47ea7dd061bb776cb6f073f7388b4",
+    "gfx_gpu_async_raw_release": "4f0549b171d73cf5163829cf47a90b8f6c04644e1b082046c5ca0ec35f4b8b06",
+    "gfx_gpu_async_raw_acquire": "5e86cafe8115ae60f21902626efd9e0ecac099a91d3f7993e847daa81bcb0b69",
+    "gfx_gpu_async_job": "4eb4b1886af9ef20c0600e5c54282ba477d4df5a8e0834c66e5e382b54ecaf33",
+    "load_alias_copy": "613825a4c473241e9742d34365a6b47b7007bb5eda89d19ba7dd8dd7a879aa35",
+    "load_alias_materialize": "09a9a34e96cd96f4ee0d9fb8114ce5613d73c7a5e57ec786ae8e5b9c9bd4443b",
+    "load_alias_materialize_all": "bd40b3aceebca30d43be0115cedcac5496c0fabd75203a88141c776461e0c22b",
+    "gfx_async_materialize_raw": "2e85c840481fb600937e3c1ec26fca7285690f1222c3958ec45cc5925170883f"
+  },
+  "substitutions": [
+    "MMIO accesses use independent model read/write functions; raw status uses a delayed completion model; target fence becomes an observed host fence; trap becomes longjmp. Conditions and control flow unchanged.",
+    "Canonical/raw storage layout is exact nine/eight words; reserve/commit/MMIO/other GPU calls are host stubs that check ownership and emission order. This is not RTL equivalence or timing evidence."
+  ],
+  "source_order_checks": [
+    "Source resolution and pending submit precede last-safe-point acquisition/context writes.",
+    "Result lazy mask is registered before transaction flag clears.",
+    "New async submission explicitly releases the previous raw lease.",
+    "SDK wait macro, explicit flip fence and source lifetime drain invoke the central nonemitting yield.",
+    "One42-word reserve/claim/commit carries complete context+JOB; sequence increments only after reservation."
+  ],
+  "commands": [
+    [
+      "cc",
+      "-std=c11",
+      "-O1",
+      "-g",
+      "-fsanitize=address,undefined",
+      "-I/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app/src/sm64/sm64/src/pc/gfx",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app/evidence/priority-tests-v2/test.c",
+      "-lm",
+      "-o",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app/evidence/priority-tests-v2/test"
+    ],
+    [
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app/evidence/priority-tests-v2/test"
+    ]
+  ],
+  "sanitizers": "ASan+UBSan; LSan disabled under ptrace"
+}

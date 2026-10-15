@@ -1,0 +1,56 @@
+{
+  "status": "PASS",
+  "package_manifest_sha256": "85a7cd3e4b29bf792b5cf88d586a9540e0c7785339d02a0928864808a7839554",
+  "command": "python3 tools/experiments/os30_mesh_integrated_20261012/verify.py --patches --evidence",
+  "source_only_inventory": true,
+  "inventory_files": 90,
+  "patches_forward_reverse_zero_fuzz_zero_offset": 6,
+  "external_frozen_evidence_hashes": 398,
+  "nested_app_v4_manifest_in_inventory": true,
+  "historical_v3_verification_sha256": "7d2918707d54463b24a3241c1ce22180e5da58cf996455fc0dc6c81d34f50a6a",
+  "v3_focused_sources_unchanged": true,
+  "preserved_v3_copied_inputs": 45,
+  "adaptive_packaged_test": {
+    "status": "PASS",
+    "source": "/home/alberto/Repos/openfpgaCore/tools/experiments/os30_mesh_integrated_20261012/additions/app-v4/actual_feed_test.c",
+    "source_sha256": "fced40751818036a3902eba8e079d0f7054dd455d63657285e0c03d27cdbd17a",
+    "command": [
+      "gcc",
+      "-std=c11",
+      "-O2",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-fsanitize=address,undefined",
+      "-fno-omit-frame-pointer",
+      "/home/alberto/Repos/openfpgaCore/tools/experiments/os30_mesh_integrated_20261012/additions/app-v4/actual_feed_test.c",
+      "-o",
+      "/tmp/os30-mesh-integrated-v4-package-test-20261012/feed-test"
+    ],
+    "result": {
+      "pass": true,
+      "cases": 655360,
+      "checks": 1966080,
+      "wrap_cases": 66656
+    },
+    "limits": "Actual adaptive publication policy with SDK kicks and mocked MMIO, no runtime performance inference."
+  },
+  "strict_receipts": {
+    "receipts/native/appv4-control-strict.json": {
+      "sha256": "df5cb6b519efbdcad74c60308d433b61a1c7f0164034874d2d853229aa919189",
+      "status": "PASS_SAME_ELF_CAPABILITY_OFF_NATIVE_ORACLE"
+    },
+    "receipts/native/appv4-candidate-strict.json": {
+      "sha256": "d794ac0697e328efde57e18fee4e55155fa2af2d0bb25b7b5a1322058f718ef4",
+      "status": "PASS_MTF2_SAME_ELF_FULL_NATIVE_FUNCTIONAL_AND_ORDERED_SEMANTICS"
+    },
+    "receipts/native/appv4-source-proof.json": {
+      "sha256": "81600a47ed71d4a951949af776d731e1622e7a26e17e8511321ff1ccdacb5f49",
+      "status": "PASS_EXACT_PER_CALL_SOURCE_AND_CACHE_EXHAUSTION_PROOF"
+    }
+  },
+  "results_sha256": "c69beb6f12d515cec4e4d21f0e16a06740b98eb39e005ce8dd7c8f47d23a9a0f",
+  "decision": "RETAIN_QUALIFIED_BASELINE_NO_PHYSICAL_FIT_OR_DEPLOYMENT",
+  "unqualified": true,
+  "deployed": false
+}

@@ -1,0 +1,724 @@
+{
+  "schema": 1,
+  "app": "particles-v5",
+  "core": "particles-compact-v1",
+  "normal_elf_sha256": "46d2206d655e663aab7c15b56ff0c88b7a1c547bb6b3516e921780d795c9b753",
+  "baseline_elf_sha256": "c08bed78555f08252c9694c1f019db968e2ce79809ff41b909cfdd61b30e743b",
+  "rtl_source_pins": {
+    "rtl/tb_gpu.v": "0dd4cb6318e253cc59894a450988f1106eaeee26e959ec26bfd2e523006c1c90",
+    "rtl/tb_gpu_retained_main.cpp": "2bebfdaae861825ce4cc4d31ad00e3219c744a9677f293337b012435e9f6a865",
+    "rtl/tb_gpu_acceptance_main.cpp": "e51fa7953bb381f22c20717eb3424b96d28d4296ce461e419bb4ff6e49eb5b05",
+    "rtl/sdram_model_full.v": "a777d648d2fe8dd85af047cbc1350c65811b75838af4ffc5e3eaec3e4242302b",
+    "rtl/pocket_sdram_timing_checker.sv": "bfdddd46c78b2bc8de3c5880215279a6b1b7a3f84c98712bb26e55a318f40ad5",
+    "rtl/altsyncram_stub.v": "3ac5420a4ae4fc0e10bdbb73d02c3ef523eb4159c8c9bd4d1002970bfc332db2",
+    "rtl/liveness_watchdog.h": "35bd255daeafdaf5a29b24a120496ffaf25763abfe6abcd60698ae2cf6d0ce31",
+    "rtl/doom_capture_replay.h": "96c599ad1484e6ef58dcd75cad295b537f48a62afaae09994194a43481a7f9d6",
+    "rtl/gpu_geometry.h": "753781f6cb5ad4c3c41ad49161c68ebbe0b402e4a6b321037260aa1ac68b9735",
+    "rtl/synch_3.v": "212da69c34bb5329b0fd9b9b67415be853c0c1c43744c1ee8c95bf39db9c431c",
+    "rtl/io_sdram_pocket_test.v": "b328c80fb48695ea83a36393f434c5ec3e05dcee290782b5eb53b8d324623951",
+    "rtl/tb_sdram_cont.v": "7c545a47681087680c3ba2b949eb17668b68513684c0f864a9473e74acfa3b6e",
+    "rtl/replay.cpp": "8c75545eb6d583339c9d001005221a4baf3668810e046908776e616dab234821",
+    "rtl/gpuvec.h": "e7e831555b366ff5852c13f6356f7344558232a318e2e3249629599765aa1b5f",
+    "rtl/observer.hpp": "6c2258d9b1fb48d1b17e9f4344cf26418f206f43b89f553748563d2c17970066",
+    "rtl/cram1_controller.v": "b494189e1fe1b2eb084ab225246c4efb861f5af9e5023feb759be5c5e44528fc",
+    "rtl/cram1_phy.sv": "f78292e36aaba83aa3fc96f9b5a057ce615535c0bb3a3a4b3d003bfa76ca9c53",
+    "rtl/gpu_cram1_tex_adapter.v": "5f36cf1ae1e4d7e986a8b9175e83bfd05f1bdd7f3e8a11cca32fb0fd2a8a814f",
+    "rtl/cram_chip_model.v": "40c5bd22ad190e85c822a9fbf2ced49dbb982c523f6871ba861e372685cf5632",
+    "rtl/altddio_out_stub.v": "0a564ec8d8a6c427d5d6c5104f34968e0c02629f48eadf546187136a71d0503f",
+    "rtl/texture_memory.sv": "fe64a29f714a03a52be45afe92112960228919ec8de214af8305312420a7fc50",
+    "rtl/texture_observer.hpp": "884b95ad97255e815de4b4b617cbe13013098a63183b30e927fbd6b0327a20d4",
+    "rtl/texture_map.hpp": "01fc94ab2948470238fe77356bb4ae9e49dc3e2b1e0dac7855859df151f1d620",
+    "rtl/mesh_observer.hpp": "74ffb07e5016bd59023f9bfe92ea1fe8b656d40473d796c000e763971621a6c3",
+    "rtl/common/axi_register_slice.v": "e9a408b3d558e099f42d669ea4c052350d4cc5dc0099046cb2c8b2bab67f2666",
+    "rtl/common/sync_fifo.v": "66545eaee0463d5e25e862cb5fbccb357b2d34948f93a9f8a706c04c536aa28c",
+    "rtl/common/cpu_target_port_per.v": "119c0f1f6baa76448e483a6f7782ae19119478bca91bebbc2e9206922ec3339d",
+    "rtl/common/skid_buffer.v": "f13c26d8d7cd89cb0259af5b299fbee722cbf2a106f2bee25df9d444dd1e81b8",
+    "rtl/common/cpu_target_port.v": "92017b80d7414766b12b9b09994a785998a803b55d82a14f2e9a1aacd048bc78",
+    "rtl/common/audio_mixer.v": "b530d3c7bba3c1e0e809008131bdaade03af8f2ecf9b5375822d6bb273d779f3",
+    "rtl/common/gpu_tex_cache.v": "c3fdc0adfe5ed583c37bf09ad3dbbbecb1e3c6ae1f5714cab5064eacc328e51c",
+    "rtl/common/axi_sdram_slave.v": "8a0e120d569812f176f83908bb18d9cf1459403999faf7be0d2853c591cfaa4e",
+    "rtl/common/video_CRT_scanout_indexed_BRAM.v": "e93c6acc58e3e335fc5c9f3f90e410e168a9b6a7201b97c5edd60363391197cf",
+    "rtl/common/gpu_edge_walker.v": "69ef2238babab6716ddc9e7c004943982190d179547895081a9e69a94259e5d3",
+    "rtl/common/axi_sdram_arbiter.v": "9d1bfed762e317ad937f67c34219ca3ac44fa5e8781c989e7a92aceefad1d706",
+    "rtl/common/axi_periph_slave.v": "03269e468c2e1a025897c846e513435cadd6d60267efbacf5dfe52946477b087",
+    "rtl/common/cpu_system.v": "2960fe6b493b0de3de53b04f841a6667205c5141ce86a05b1b228cda9ab86833",
+    "rtl/common/gpu_color_depth_cache.sv": "ab1f1aeeb135cd2f80e44adb39616c35f28f1e164ab639b2f5645fbb447000ae",
+    "rtl/common/gpu_core.v": "452b36860161c1d3c73c7cdaaf2d1d3d5006096027169f101273a297d3e2ab43",
+    "rtl/common/axi_sdram_clock_bridge.v": "09a7418a0a04c40b5afa2ee96acdeec323a097bc74ac83f17a9ecb2b0299e9f6",
+    "rtl/common/gpu_geometry_worker.v": "a646460450f97918b33394ad2027165df78c33c9c8436df6aaa0cc2c5bcce161",
+    "rtl/common/phase10_cram1_read_arbiter.v": "b82f0725555682a14006e90a6a8546d320e822c71f34c25d057942aaf653c303"
+  },
+  "canonical_reference_tests": {
+    "passed": true,
+    "random_cases": 30000,
+    "rounding_boundary_cases": 30015,
+    "cases": {
+      "basis_overflow": 10468,
+      "outside": 15765,
+      "draw": 1366,
+      "invalid": 879,
+      "culled": 698,
+      "depth_range": 282,
+      "uv_range": 430,
+      "alpha_zero": 112
+    },
+    "header_sha256": "851e87c7bda7edb49037b894ad4feec0a9b9f078e0646ffa6918e5258b47447e",
+    "python_sha256": "f84a839753f1809c7bf67d7f59e36f7415f2a9d01f586a1b478c84fb08933a1c",
+    "compile_command": [
+      "cc",
+      "-shared",
+      "-fPIC",
+      "-O2",
+      "-fsanitize=undefined",
+      "-fno-sanitize-recover=undefined",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-gpu-draws-20261013/validation/reference-test/reference.c",
+      "-o",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-gpu-draws-20261013/validation/reference-test/reference.so"
+    ],
+    "scope": "Independent Python integers vs actual C canonical header under UBSan; rendered differences from legacy remain separate."
+  },
+  "gates": {
+    "canonical_hardware_vs_integer_reference": {
+      "passed": true,
+      "actual_gpu_samples": 8
+    },
+    "old_core_command_and_cpu_framebuffer_parity": {
+      "passed": true,
+      "comparisons": [
+        {
+          "mode": "particles-v5-capoff",
+          "workload": "main",
+          "passed": true,
+          "command_stream_exact": true,
+          "cpu_framebuffer_exact": true,
+          "modeled_cpu_change_percent": -0.4362528561272838
+        },
+        {
+          "mode": "particles-v5-capoff",
+          "workload": "sound",
+          "passed": true,
+          "command_stream_exact": true,
+          "cpu_framebuffer_exact": true,
+          "modeled_cpu_change_percent": -0.5440533538794812
+        },
+        {
+          "mode": "particles-v5-capoff",
+          "workload": "live",
+          "passed": true,
+          "command_stream_exact": true,
+          "cpu_framebuffer_exact": true,
+          "modeled_cpu_change_percent": -0.23866277222696075
+        },
+        {
+          "mode": "particles-v5-demo2-capoff",
+          "workload": "demo2",
+          "passed": true,
+          "command_stream_exact": true,
+          "cpu_framebuffer_exact": true,
+          "modeled_cpu_change_percent": 0.11665802835565398
+        },
+        {
+          "mode": "particles-v5-worker",
+          "workload": "main",
+          "passed": true,
+          "command_stream_exact": true,
+          "cpu_framebuffer_exact": true,
+          "modeled_cpu_change_percent": -0.8115149072481898
+        },
+        {
+          "mode": "particles-v5-worker",
+          "workload": "sound",
+          "passed": true,
+          "command_stream_exact": true,
+          "cpu_framebuffer_exact": true,
+          "modeled_cpu_change_percent": -1.1579021982715765
+        },
+        {
+          "mode": "particles-v5-worker",
+          "workload": "live",
+          "passed": true,
+          "command_stream_exact": true,
+          "cpu_framebuffer_exact": true,
+          "modeled_cpu_change_percent": -0.5314147284986803
+        },
+        {
+          "mode": "particles-v5-cpu",
+          "workload": "main",
+          "passed": true,
+          "command_stream_exact": true,
+          "cpu_framebuffer_exact": true,
+          "modeled_cpu_change_percent": -1.1555207430621883
+        },
+        {
+          "mode": "particles-v5-cpu",
+          "workload": "sound",
+          "passed": true,
+          "command_stream_exact": true,
+          "cpu_framebuffer_exact": true,
+          "modeled_cpu_change_percent": -1.4084283754803084
+        },
+        {
+          "mode": "particles-v5-cpu",
+          "workload": "live",
+          "passed": true,
+          "command_stream_exact": true,
+          "cpu_framebuffer_exact": true,
+          "modeled_cpu_change_percent": -0.8344942251770404
+        }
+      ]
+    },
+    "legacy_new_path_appearance": {
+      "bit_exact": false,
+      "max_changed_pixels": 252,
+      "maximum_changed_percent": 0.328125,
+      "max_projected_xy_error_pixels": 0.0625,
+      "max_depth_test_input_relative_error": 6.4661559813999346e-06,
+      "depth_memory_exact": true,
+      "decision": "Requires explicit review of localized particle appearance differences; not a legacy-bit-exact claim."
+    },
+    "performance": {
+      "busy_three_sample_aggregate_gain_percent": 22.892865962760702,
+      "aggregate_reaches_20_percent": true,
+      "minimum_sample_gain_percent": 4.415446879813234,
+      "every_sample_reaches_20_percent": false
+    },
+    "physical_qualification": {
+      "status": "external; compact source fit not asserted by this simulation report"
+    },
+    "old_core_rendering_parity": {
+      "passed": true,
+      "elf_sha256": "46d2206d655e663aab7c15b56ff0c88b7a1c547bb6b3516e921780d795c9b753",
+      "frames": [
+        {
+          "frame": 92,
+          "color_exact": true,
+          "depth_exact": true,
+          "limits": "12-byte dump metadata excluded from color/depth parity"
+        },
+        {
+          "frame": 94,
+          "color_exact": true,
+          "depth_exact": true,
+          "limits": "12-byte dump metadata excluded from color/depth parity"
+        },
+        {
+          "frame": 148,
+          "color_exact": true,
+          "depth_exact": true,
+          "limits": "12-byte dump metadata excluded from color/depth parity"
+        }
+      ]
+    }
+  },
+  "cpu_workloads": [
+    {
+      "workload": "main",
+      "frames": 360,
+      "elf_sha256": "46d2206d655e663aab7c15b56ff0c88b7a1c547bb6b3516e921780d795c9b753",
+      "modeled_cycles_per_frame": 2877469.6088235294,
+      "baseline_cycles_per_frame": 3438326.3852941175,
+      "modeled_time_reduction_percent": 16.311912064817314,
+      "command_words_per_frame": 15369.15,
+      "particle_contexts": 3748,
+      "particle_records": 117567,
+      "invariant_columns": [
+        "frame",
+        "host_framecount",
+        "buffer",
+        "hash_px",
+        "hash_pal",
+        "mem_hazards"
+      ],
+      "invariants_exact": true,
+      "cpu_framebuffer_exact": true,
+      "audio_services_exact": true,
+      "commands_exact": false
+    },
+    {
+      "workload": "sound",
+      "frames": 120,
+      "elf_sha256": "46d2206d655e663aab7c15b56ff0c88b7a1c547bb6b3516e921780d795c9b753",
+      "modeled_cycles_per_frame": 3194969.78,
+      "baseline_cycles_per_frame": 3777980.57,
+      "modeled_time_reduction_percent": 15.431810174714588,
+      "command_words_per_frame": 17930.34,
+      "particle_contexts": 1305,
+      "particle_records": 36837,
+      "invariant_columns": [
+        "frame",
+        "host_framecount",
+        "buffer",
+        "hash_px",
+        "hash_pal",
+        "mem_hazards"
+      ],
+      "invariants_exact": true,
+      "cpu_framebuffer_exact": true,
+      "audio_services_exact": true,
+      "commands_exact": false
+    },
+    {
+      "workload": "live",
+      "frames": 120,
+      "elf_sha256": "46d2206d655e663aab7c15b56ff0c88b7a1c547bb6b3516e921780d795c9b753",
+      "modeled_cycles_per_frame": 3619733.09,
+      "baseline_cycles_per_frame": 3953934.63,
+      "modeled_time_reduction_percent": 8.452378991404819,
+      "command_words_per_frame": 15355.89,
+      "particle_contexts": 1665,
+      "particle_records": 22282,
+      "invariant_columns": [
+        "frame",
+        "host_framecount",
+        "buffer",
+        "hash_px",
+        "hash_pal",
+        "mem_hazards"
+      ],
+      "invariants_exact": true,
+      "cpu_framebuffer_exact": true,
+      "audio_services_exact": true,
+      "commands_exact": false
+    },
+    {
+      "workload": "demo2",
+      "frames": 120,
+      "elf_sha256": "46d2206d655e663aab7c15b56ff0c88b7a1c547bb6b3516e921780d795c9b753",
+      "modeled_cycles_per_frame": 3040556.36,
+      "baseline_cycles_per_frame": 3037013.44,
+      "modeled_time_reduction_percent": -0.11665802835565398,
+      "command_words_per_frame": 14848.51,
+      "particle_contexts": 0,
+      "particle_records": 0,
+      "invariant_columns": [
+        "frame",
+        "host_framecount",
+        "buffer",
+        "hash_px",
+        "hash_pal",
+        "mem_hazards"
+      ],
+      "invariants_exact": true,
+      "cpu_framebuffer_exact": true,
+      "audio_services_exact": true,
+      "commands_exact": true
+    }
+  ],
+  "actual_gpu_samples": [
+    {
+      "workload": "main",
+      "frame": 20,
+      "canonical_complete_output_exact": true,
+      "paced_vs_unpaced_exact": true,
+      "baseline_whole_frame_cycles": 4864878,
+      "candidate_whole_frame_cycles": 3762501,
+      "modeled_throughput_gain_percent": 29.29904869128275,
+      "candidate_cycle_breakdown": {
+        "cpu_cycles": 2861919,
+        "cpu_overlap": 1893363,
+        "ring_wait": 687977,
+        "fence_wait": 212474,
+        "final_drain": 128,
+        "prior_frame_fences": 0,
+        "upload_wait": 0
+      },
+      "legacy_color_changed_pixels": 216,
+      "legacy_color_changed_percent": 0.28125,
+      "legacy_depth_memory_changed_pixels": 0,
+      "rgb8_max_error": [
+        107,
+        32,
+        33
+      ],
+      "rgb8_mean_absolute_error": [
+        0.10313802083333333,
+        0.020104166666666666,
+        0.0076302083333333335
+      ],
+      "projected_xy_max_error_pixels": 0.0625,
+      "depth_test_input_max_relative_error": 8.280460294226836e-07,
+      "matched_particle_triangles": 680,
+      "offscreen_triangles_omitted": 0,
+      "panel": "image-comparisons/particles-v5-main-v2/frame_00020.png",
+      "previous_area_rtl_complete_output_exact": true,
+      "previous_area_rtl_all_counters_exact": true
+    },
+    {
+      "workload": "main",
+      "frame": 80,
+      "canonical_complete_output_exact": true,
+      "paced_vs_unpaced_exact": true,
+      "baseline_whole_frame_cycles": 5019454,
+      "candidate_whole_frame_cycles": 4539088,
+      "modeled_throughput_gain_percent": 10.582874797756725,
+      "candidate_cycle_breakdown": {
+        "cpu_cycles": 3298189,
+        "cpu_overlap": 2156858,
+        "ring_wait": 574078,
+        "fence_wait": 666690,
+        "final_drain": 128,
+        "prior_frame_fences": 0,
+        "upload_wait": 0
+      },
+      "legacy_color_changed_pixels": 52,
+      "legacy_color_changed_percent": 0.06770833333333333,
+      "legacy_depth_memory_changed_pixels": 0,
+      "rgb8_max_error": [
+        90,
+        89,
+        90
+      ],
+      "rgb8_mean_absolute_error": [
+        0.016848958333333334,
+        0.0119140625,
+        0.011809895833333334
+      ],
+      "projected_xy_max_error_pixels": 0.0625,
+      "depth_test_input_max_relative_error": 1.8226505284185527e-06,
+      "matched_particle_triangles": 349,
+      "offscreen_triangles_omitted": 2,
+      "panel": "image-comparisons/particles-v5-main-v2/frame_00080.png",
+      "previous_area_rtl_complete_output_exact": true,
+      "previous_area_rtl_all_counters_exact": true
+    },
+    {
+      "workload": "main",
+      "frame": 92,
+      "canonical_complete_output_exact": true,
+      "paced_vs_unpaced_exact": true,
+      "baseline_whole_frame_cycles": 7416421,
+      "candidate_whole_frame_cycles": 6471577,
+      "modeled_throughput_gain_percent": 14.599903547466099,
+      "candidate_cycle_breakdown": {
+        "cpu_cycles": 4900486,
+        "cpu_overlap": 2240448,
+        "ring_wait": 98082,
+        "fence_wait": 1284874,
+        "final_drain": 128,
+        "prior_frame_fences": 0,
+        "upload_wait": 188004
+      },
+      "legacy_color_changed_pixels": 28,
+      "legacy_color_changed_percent": 0.036458333333333336,
+      "legacy_depth_memory_changed_pixels": 0,
+      "rgb8_max_error": [
+        140,
+        68,
+        24
+      ],
+      "rgb8_mean_absolute_error": [
+        0.018515625,
+        0.005481770833333333,
+        0.0015625
+      ],
+      "projected_xy_max_error_pixels": 0.0625,
+      "depth_test_input_max_relative_error": 4.579996673159224e-06,
+      "matched_particle_triangles": 758,
+      "offscreen_triangles_omitted": 1,
+      "panel": "image-comparisons/particles-v5-main-v2/frame_00092.png",
+      "previous_area_rtl_complete_output_exact": true,
+      "previous_area_rtl_all_counters_exact": true
+    },
+    {
+      "workload": "main",
+      "frame": 94,
+      "canonical_complete_output_exact": true,
+      "paced_vs_unpaced_exact": true,
+      "baseline_whole_frame_cycles": 7036799,
+      "candidate_whole_frame_cycles": 5222567,
+      "modeled_throughput_gain_percent": 34.73831929777062,
+      "candidate_cycle_breakdown": {
+        "cpu_cycles": 4167612,
+        "cpu_overlap": 2606720,
+        "ring_wait": 414238,
+        "fence_wait": 640586,
+        "final_drain": 128,
+        "prior_frame_fences": 0,
+        "upload_wait": 0
+      },
+      "legacy_color_changed_pixels": 113,
+      "legacy_color_changed_percent": 0.14713541666666666,
+      "legacy_depth_memory_changed_pixels": 0,
+      "rgb8_max_error": [
+        190,
+        133,
+        57
+      ],
+      "rgb8_mean_absolute_error": [
+        0.08283854166666667,
+        0.040677083333333336,
+        0.011549479166666666
+      ],
+      "projected_xy_max_error_pixels": 0.0625,
+      "depth_test_input_max_relative_error": 3.157610576694685e-06,
+      "matched_particle_triangles": 1018,
+      "offscreen_triangles_omitted": 2,
+      "panel": "image-comparisons/particles-v5-main-v2/frame_00094.png",
+      "previous_area_rtl_complete_output_exact": true,
+      "previous_area_rtl_all_counters_exact": true
+    },
+    {
+      "workload": "main",
+      "frame": 148,
+      "canonical_complete_output_exact": true,
+      "paced_vs_unpaced_exact": true,
+      "baseline_whole_frame_cycles": 6646207,
+      "candidate_whole_frame_cycles": 5474816,
+      "modeled_throughput_gain_percent": 21.395988467922944,
+      "candidate_cycle_breakdown": {
+        "cpu_cycles": 4867643,
+        "cpu_overlap": 2243884,
+        "ring_wait": 449957,
+        "fence_wait": 157085,
+        "final_drain": 128,
+        "prior_frame_fences": 0,
+        "upload_wait": 0
+      },
+      "legacy_color_changed_pixels": 252,
+      "legacy_color_changed_percent": 0.328125,
+      "legacy_depth_memory_changed_pixels": 0,
+      "rgb8_max_error": [
+        165,
+        137,
+        49
+      ],
+      "rgb8_mean_absolute_error": [
+        0.21139322916666667,
+        0.05852864583333333,
+        0.009921875
+      ],
+      "projected_xy_max_error_pixels": 0.0625,
+      "depth_test_input_max_relative_error": 1.8892572503198945e-06,
+      "matched_particle_triangles": 856,
+      "offscreen_triangles_omitted": 0,
+      "panel": "image-comparisons/particles-v5-main-v2/frame_00148.png",
+      "previous_area_rtl_complete_output_exact": true,
+      "previous_area_rtl_all_counters_exact": true
+    },
+    {
+      "workload": "main",
+      "frame": 180,
+      "canonical_complete_output_exact": true,
+      "paced_vs_unpaced_exact": true,
+      "baseline_whole_frame_cycles": 5729971,
+      "candidate_whole_frame_cycles": 4999025,
+      "modeled_throughput_gain_percent": 14.621771245392857,
+      "candidate_cycle_breakdown": {
+        "cpu_cycles": 3733556,
+        "cpu_overlap": 1904462,
+        "ring_wait": 661445,
+        "fence_wait": 603893,
+        "final_drain": 128,
+        "prior_frame_fences": 0,
+        "upload_wait": 0
+      },
+      "legacy_color_changed_pixels": 178,
+      "legacy_color_changed_percent": 0.23177083333333334,
+      "legacy_depth_memory_changed_pixels": 0,
+      "rgb8_max_error": [
+        115,
+        118,
+        124
+      ],
+      "rgb8_mean_absolute_error": [
+        0.0351953125,
+        0.0301953125,
+        0.028893229166666666
+      ],
+      "projected_xy_max_error_pixels": 0.0625,
+      "depth_test_input_max_relative_error": 6.4661559813999346e-06,
+      "matched_particle_triangles": 478,
+      "offscreen_triangles_omitted": 0,
+      "panel": "image-comparisons/particles-v5-main-v2/frame_00180.png",
+      "previous_area_rtl_complete_output_exact": true,
+      "previous_area_rtl_all_counters_exact": true
+    },
+    {
+      "workload": "main",
+      "frame": 300,
+      "canonical_complete_output_exact": true,
+      "paced_vs_unpaced_exact": true,
+      "baseline_whole_frame_cycles": 3393667,
+      "candidate_whole_frame_cycles": 3250158,
+      "modeled_throughput_gain_percent": 4.415446879813234,
+      "candidate_cycle_breakdown": {
+        "cpu_cycles": 2612498,
+        "cpu_overlap": 1741367,
+        "ring_wait": 240517,
+        "fence_wait": 397012,
+        "final_drain": 128,
+        "prior_frame_fences": 0,
+        "upload_wait": 0
+      },
+      "legacy_color_changed_pixels": 55,
+      "legacy_color_changed_percent": 0.07161458333333333,
+      "legacy_depth_memory_changed_pixels": 0,
+      "rgb8_max_error": [
+        90,
+        85,
+        90
+      ],
+      "rgb8_mean_absolute_error": [
+        0.023567708333333333,
+        0.020234375,
+        0.0207421875
+      ],
+      "projected_xy_max_error_pixels": 0.0625,
+      "depth_test_input_max_relative_error": 8.159608469347207e-07,
+      "matched_particle_triangles": 214,
+      "offscreen_triangles_omitted": 0,
+      "panel": "image-comparisons/particles-v5-main-v2/frame_00300.png",
+      "previous_area_rtl_complete_output_exact": true,
+      "previous_area_rtl_all_counters_exact": true
+    },
+    {
+      "workload": "live",
+      "frame": 81,
+      "canonical_complete_output_exact": true,
+      "paced_vs_unpaced_exact": true,
+      "baseline_whole_frame_cycles": 13415394,
+      "candidate_whole_frame_cycles": 12647306,
+      "modeled_throughput_gain_percent": 6.073135259002993,
+      "candidate_cycle_breakdown": {
+        "cpu_cycles": 9419363,
+        "cpu_overlap": 1545152,
+        "ring_wait": 70640,
+        "fence_wait": 1068496,
+        "final_drain": 128,
+        "prior_frame_fences": 0,
+        "upload_wait": 2088676
+      },
+      "legacy_color_changed_pixels": 14,
+      "legacy_color_changed_percent": 0.018229166666666668,
+      "legacy_depth_memory_changed_pixels": 0,
+      "rgb8_max_error": [
+        140,
+        109,
+        189
+      ],
+      "rgb8_mean_absolute_error": [
+        0.012213541666666666,
+        0.007395833333333333,
+        0.004140625
+      ],
+      "projected_xy_max_error_pixels": 0.0625,
+      "depth_test_input_max_relative_error": 4.080781518630196e-07,
+      "matched_particle_triangles": 547,
+      "offscreen_triangles_omitted": 0,
+      "panel": "image-comparisons/particles-v5-live-v2/frame_00081.png",
+      "previous_area_rtl_complete_output_exact": true,
+      "previous_area_rtl_all_counters_exact": true
+    }
+  ],
+  "limits": [
+    "CPU timing is a scalar OS25-derived cache model, not measured Vexii IPC or Pocket FPS.",
+    "Paced GPU replay uses real worker/raster/shared PSRAM RTL and observed CPU publication/fence/MMIO-upload timing.",
+    "CPU-side D-cache misses and video/audio/background physical contention are not fully coupled.",
+    "Particles ordinarily disable depth writes: unchanged depth memory alone is not a depth-test input correctness proof.",
+    "GPU profile instrumentation is a separate companion build and is not used for these speed measurements.",
+    "Averages and eight deterministic snapshots do not establish a universal game-wide improvement."
+  ],
+  "profile_smoke": {
+    "passed": true,
+    "frames": 120,
+    "workload": "sound",
+    "elf_sha256": "75db4eca10e3b7412771e977620770d0450047b283e9be68e33c64cbc512b0c7",
+    "unmapped_mmio": 0,
+    "ring_overflows": 0,
+    "scope": "Instrumentation companion smoke only; excluded from performance metrics."
+  },
+  "app_source_receipt": {
+    "source_date_epoch": 1791806400,
+    "compiler": "riscv64-elf-gcc (Arch Linux Repositories) 15.2.0",
+    "normal_elf": "obj-final/app.elf",
+    "normal_sha256": "46d2206d655e663aab7c15b56ff0c88b7a1c547bb6b3516e921780d795c9b753",
+    "profile_elf": "obj-profile/app.elf",
+    "profile_sha256": "75db4eca10e3b7412771e977620770d0450047b283e9be68e33c64cbc512b0c7",
+    "build_recipe": "SOURCE_DATE_EPOCH=1791806400 make -C src/quake2 -j8 USE_SDK_CONTAINER=0 GPU_PROFILE={0|1} OBJ_DIR={absolute_obj_path} {absolute_obj_path}/app.elf",
+    "tests": {
+      "renderer.log": {
+        "exit_status": 0,
+        "sha256": "9956f8c5b458bad439b3f85b83fd3cb4c570de161a3b18723a3165c87545dfc7"
+      },
+      "geometry.log": {
+        "exit_status": 0,
+        "sha256": "1487b3a8b72238f85df5663fe6e4c751470ec67f23ece9c5d858313184969203"
+      },
+      "textures.json": {
+        "exit_status": 0,
+        "sha256": "08660a78aede3af7357d27352757ec670301f652a31c4e60e5babab8402c1769"
+      },
+      "textures.log": {
+        "exit_status": 0,
+        "sha256": "3d94081f0b9775a1e0170d5bef17e79a33f843a2c037c2daf49f038d2c1fc4f1"
+      },
+      "profile-tests.log": {
+        "exit_status": 0,
+        "sha256": "9b7f8fb07bcbdc93b7b8b4eb3773d61b101aa88d9629250734567dfdd289d4e0"
+      },
+      "profile-tests/results.json": {
+        "exit_status": 0,
+        "sha256": "bb12feb36cbed00a809792b3e1ea20108615398df02ede6e030520b930651ac5"
+      }
+    },
+    "source_pins_sha256": "07568e9d47fa1e36a41d6f789039b768056f3affb9118ef8b3e900a1803c9800",
+    "v5_change_from_frozen_v4": "Outline only unexpected native submission failure into a noinline legacy-replay bridge; retain unchanged always-inline original legacy caller. Exact cap-off and v4-native command/CPU-framebuffer/audio comparisons pass over600 frames.",
+    "limits": [
+      "Canonical integer geometry is a distinct documented convention; legacy image changes and actual RTL parity are qualified by the independent validation tree.",
+      "Host fake-MMIO tests do not establish physical fit, timing or Pocket FPS."
+    ]
+  },
+  "simulation_qualified": true,
+  "release_qualified": false,
+  "release_pending": "Physical fit/timing and device trial; local particle appearance differences require the review already described.",
+  "selected_evidence_pins": {
+    "validation/final-validation.json": "474ed05f48f4babe23ed2879b958bf18b40f8bca6c875af0fdf57477fd0b8e17",
+    "validation/qualify_compact.py": "618597b195d8ced30cf651c384940b6dfd034b78d4dcf1279666d86fd6a81c48",
+    "validation/build_gpu_compact.py": "b2f288926732af2fba654de9f72397dfb7de3259ba4e04274601e5e7965e7733",
+    "validation/compact-cycle-sensitivity.json": "0854166e6118d9b5d1070d0b0f66724ded700d1c2439d5621ad7967938219ddb",
+    "validation/paced-gpu/particles-compact-v1/source-pins.json": "3ce9a7a86739133e0e236668c4bdd9f9b408fb3f4d33b4bb720b2e1ca765fd9c",
+    "validation/paced-gpu/particles-compact-v1/build-command.json": "36dd01b0114c08719dab71aabb6486b6f27224048e9ab09bd302059651c76979",
+    "validation/paced-gpu/particles-compact-v1/build-result.json": "5a934f7dcdfed3e7d725e443fc92fd62abe6d89283df34fcaf7cf59c4ea0c46c",
+    "worker-compact-tests/equivalence-v2.json": "031a888c1bd8efa8828e21c9cad17c2ad10f572e4f06dc35f85f00714636bd35",
+    "worker-compact-tests/gates-v2/receipt.json": "64f978a481c2b0bf31faae0798a680cb9e54a7a0c33082024d9eedae0172ed8a",
+    "validation/paced-replays/particles-v5-main-v2-particles-compact-v1/frame_00020.json": "d1e1a9585bc04b20f8e2879a8c44f44dcafca3fab8c3125d9d7e4102c6ef7b09",
+    "validation/paced-replays/particles-v5-main-v2-particles-compact-v1/frame_00020.paced.log": "ce67d7f9bc50175fc212348d3ce7b65b027b8588cbc7a462e5d60b6ccfc61f08",
+    "validation/paced-replays/particles-v5-main-v2-particles-compact-v1/frame_00020.unpaced.log": "45230fd446746de46ba39d40acf3a01544a70612662a72d87b425f60baab6601",
+    "validation/paced-vectors/particles-v5-main-v2/frame_00020.json": "3ae3845f0cbac362f652983cd5e68a727130e1d7b9cb89fc5b40bf84626d9bef",
+    "validation/paced-replays/particles-v5-main-v2-particles-compact-v1/frame_00080.json": "535d44d9a393d2f509203d2335b207c6e562e8f2fcb77272a13d26a840570225",
+    "validation/paced-replays/particles-v5-main-v2-particles-compact-v1/frame_00080.paced.log": "d75a9cdd51dd88a388945747432410c45d503062a9d2e63c9abfdd459ecb5e89",
+    "validation/paced-replays/particles-v5-main-v2-particles-compact-v1/frame_00080.unpaced.log": "9e468c17465ef7e1b8888bb36ec54da93eff45713b747406475840f39fd1a34e",
+    "validation/paced-vectors/particles-v5-main-v2/frame_00080.json": "1e20935356b3b510eea031ead3fca64ff4e18f1cd0232d4cc3c4831658db4fe8",
+    "validation/paced-replays/particles-v5-main-v2-particles-compact-v1/frame_00092.json": "8037e86500273678286c528088443633b43cee3ea13134d987979ccf552b4e6c",
+    "validation/paced-replays/particles-v5-main-v2-particles-compact-v1/frame_00092.paced.log": "805137dea13a6e15c5e30dda5290a3e59293d08736701d47b507ea52804bb4a4",
+    "validation/paced-replays/particles-v5-main-v2-particles-compact-v1/frame_00092.unpaced.log": "845f1b366077eb3d44a7083c05071195f00a17de8ae338de74f648a555dc4bb6",
+    "validation/paced-vectors/particles-v5-main-v2/frame_00092.json": "766fadb1133e6993e184a655eef5eadad6b9321314c3ccd02256b1dc22165eb8",
+    "validation/paced-replays/particles-v5-main-v2-particles-compact-v1/frame_00094.json": "35c8f0d637568c5ffdb678e97347f24915dd5521729b28bb03a2f14d900a505a",
+    "validation/paced-replays/particles-v5-main-v2-particles-compact-v1/frame_00094.paced.log": "bad2897f7aa59d9c91c03280743eefc74b0f0535acb93573f0faf058c277baee",
+    "validation/paced-replays/particles-v5-main-v2-particles-compact-v1/frame_00094.unpaced.log": "776f43b4623a78e4721d2f1f972814e132f12595c59b453c918d2f4b47a100f1",
+    "validation/paced-vectors/particles-v5-main-v2/frame_00094.json": "a2cd001a1dd691defb54bce105177efd14a586c904e5ae0b9a71bb77a78bd349",
+    "validation/paced-replays/particles-v5-main-v2-particles-compact-v1/frame_00148.json": "13a46c24ecf3a1e9e20b2881750698634ebc0f39aaf947d7c892d249634ad1d2",
+    "validation/paced-replays/particles-v5-main-v2-particles-compact-v1/frame_00148.paced.log": "9aabd43281190505f8b7bc89b03964c1190ecad622a89602a1d55329e40728d4",
+    "validation/paced-replays/particles-v5-main-v2-particles-compact-v1/frame_00148.unpaced.log": "ecd0f4a830dc814014752af7ef0e8c06d359f5b21e14a2feb414ef3c2c5a9541",
+    "validation/paced-vectors/particles-v5-main-v2/frame_00148.json": "78156984e587fb573275305e47ed740f01f270f4e902873dc601d40bb8cdccfe",
+    "validation/paced-replays/particles-v5-main-v2-particles-compact-v1/frame_00180.json": "4a46a63021d9519ac82223123ce2579e11b92fa8e007eb6c9274a27096147655",
+    "validation/paced-replays/particles-v5-main-v2-particles-compact-v1/frame_00180.paced.log": "9ed413c843c9cc0d09d21572734de85222349e29a84b106436c3c8b40d256f4f",
+    "validation/paced-replays/particles-v5-main-v2-particles-compact-v1/frame_00180.unpaced.log": "20bd4192aa9916980527f96e3c78dfb61a6ffa7c6a5e031b8c40c5102211a319",
+    "validation/paced-vectors/particles-v5-main-v2/frame_00180.json": "ff2d64f7742a923b72930a2c6b7b40f1d5a41f95a3b7b9654954b446255a8ff3",
+    "validation/paced-replays/particles-v5-main-v2-particles-compact-v1/frame_00300.json": "a9ccf2880b5ad870a5d0e41f14c84e5abc3e7ac7eaf30844b4821ff5de895e77",
+    "validation/paced-replays/particles-v5-main-v2-particles-compact-v1/frame_00300.paced.log": "ea3fc0ccfbf7e7859247b71c936905668d1fe628ddbb54e625a74142ebc37070",
+    "validation/paced-replays/particles-v5-main-v2-particles-compact-v1/frame_00300.unpaced.log": "7f873af025fefaebffcc7b8dbe76c4b3a4d2909e7446670747ebcb68fcdf0e96",
+    "validation/paced-vectors/particles-v5-main-v2/frame_00300.json": "149cc329db0ff2042383ab6cd35548ad2ec3eef35dd2a87d602ca9e2a2c7d651",
+    "validation/paced-replays/particles-v5-live-v2-particles-compact-v1/frame_00081.json": "921260f8a1aa1bf5be1b5eb2cb972789c3ffb78bf36822bcbe27fe6940de2623",
+    "validation/paced-replays/particles-v5-live-v2-particles-compact-v1/frame_00081.paced.log": "1250d708064dabe4bc6cf15b6f48fd76b3fd0c93bc67b938e6e0835a7080bc7f",
+    "validation/paced-replays/particles-v5-live-v2-particles-compact-v1/frame_00081.unpaced.log": "6b54113afde6db6fa89ed18a2b740e39d5e1c28388245753053b63c219fd8db6",
+    "validation/paced-vectors/particles-v5-live-v2/frame_00081.json": "34ea8288ebb8e1b79a86b2fe37435041828c379b782e041f7877ad56a95f2c1e"
+  },
+  "frozen_baseline_inputs_and_evidence_exact": true,
+  "reused_application_validation": {
+    "path": "final-validation.json",
+    "sha256": "474ed05f48f4babe23ed2879b958bf18b40f8bca6c875af0fdf57477fd0b8e17",
+    "scope": "Same frozen app ELF, commands, CPU timing, host tests, canonical reference, image/input bounds, old-core rendering and profile proofs."
+  },
+  "previous_application_evidence_pins_preserved": true
+}

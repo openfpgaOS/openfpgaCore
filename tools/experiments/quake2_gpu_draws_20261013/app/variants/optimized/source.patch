@@ -1,0 +1,632 @@
+--- a/src/quake2/Makefile
++++ b/src/quake2/Makefile
+@@ -171,6 +171,8 @@
+ SRCS_CXX =
+ 
+ CFLAGS  = -I. -I$(YQ2)
++PARTICLE_REFERENCE ?= 0
++CFLAGS += -DOFGL_PARTICLE_REFERENCE=$(PARTICLE_REFERENCE)
+ CFLAGS += -DOFQ2_GPU_PROFILE=$(GPU_PROFILE)
+ CFLAGS += -I$(YQ2)/common/header -I$(YQ2)/client/header -I$(YQ2)/client/input/header
+ CFLAGS += -I$(YQ2)/client/sound/header -I$(YQ2)/client/vid/header
+--- a/src/quake2/openfpga/of_emit_q2.c
++++ b/src/quake2/openfpga/of_emit_q2.c
+@@ -259,6 +259,8 @@
+ 		if (geometry_status & (1u << 11)) ofq2_caps |= OFQ2_CAP_GEOMETRY_WORKER;
+ 		if ((geometry_status & (3u << 11)) == (3u << 11))
+ 			ofq2_caps |= OFQ2_CAP_NATIVE_MESH;
++        if ((geometry_status & (0xbu << 10)) == (0xbu << 10))
++            ofq2_caps |= OFQ2_CAP_PARTICLES;
+ 	}
+ 	/* full texel*C+D colour combiner (22-word 0x4E + control bit 30) */
+ 	if ((ofq2_caps & OFQ2_CAP_VCOLOR) && (hw & OF_HW_GPU_COMBINE))
+@@ -1121,6 +1123,28 @@
+ 	ofq2_objstate_valid = false;
+ 	ofq2_pending = true;
+ 	return 1;
++}
++
++int
++OFQ2_DrawParticles(const uint32_t context[OFQ2_PARTICLE_CONTEXT_WORDS],
++    const uint32_t *records, unsigned count)
++{
++    if (!context || !records || !count || count > OFQ2_PARTICLE_BATCH_MAX ||
++        !OFQ2_Supports(OFQ2_CAP_PARTICLES) || !ofq2_tristate_valid || ofq2_tristate_dirty)
++        return 0;
++    unsigned words = 2u + OFQ2_PARTICLE_CONTEXT_WORDS + count * OFQ2_PARTICLE_WORDS;
++    _gpu_stream_reserve_words(words);
++    uint32_t *out = _gpu_ring_claim();
++    *out++ = 0x61000000u | OFQ2_PARTICLE_CONTEXT_WORDS;
++    memcpy(out, context, OFQ2_PARTICLE_CONTEXT_WORDS * sizeof(*out));
++    out += OFQ2_PARTICLE_CONTEXT_WORDS;
++    *out++ = 0x62000000u | (count * OFQ2_PARTICLE_WORDS);
++    memcpy(out, records, count * OFQ2_PARTICLE_WORDS * sizeof(*out));
++    _gpu_ring_commit(words);
++    ofq2_tristate_dirty = true;
++    ofq2_objstate_valid = false;
++    ofq2_pending = true;
++    return 1;
+ }
+ 
+ int
+--- a/src/quake2/openfpga/of_emit_q2.h
++++ b/src/quake2/openfpga/of_emit_q2.h
+@@ -158,6 +158,13 @@
+ #define OFQ2_CAP_GEOMETRY_WORKER  (1u << 18)	/* independent worker: up to 32 raw vertices/packet */
+ #define OFQ2_CAP_NATIVE_MESH      (1u << 19) /* 0x60 native MD2 mesh jobs, status bit 12 */
+ 
++#define OFQ2_CAP_PARTICLES        (1u << 20) /* context0x61/billboards0x62; status13 */
++#include "of_particles.h"
++/* Synchronous copy; accepted jobs may run after the caller returns. Any
++ * subsequent regular surface state must be rebound: worker changes alpha. */
++int OFQ2_DrawParticles(const uint32_t context[OFQ2_PARTICLE_CONTEXT_WORDS],
++    const uint32_t *records, unsigned count);
++
+ #define OFQ2_NATIVE_WORDS 164u
+ /* Reserve one immutable asset block from the shared texture allocator. Upload
+  * is load-time only; reserve drains previous work once, not once per draw. */
+--- a/src/quake2/openfpga/of_gl1.c
++++ b/src/quake2/openfpga/of_gl1.c
+@@ -2902,7 +2902,198 @@
+ 	ofgl_va_vertex = saved;
+ }
+ 
+-int
++/* Native particles have a separate, explicitly fixed reference convention.
++ * The original floating-point path remains the capability/precision fallback.
++ * A camera-facing billboard has constant camera depth: tiny transformed basis
++ * Z components are floating-point roundoff, not perspective deformation. */
++#ifndef OFGL_PARTICLE_REFERENCE
++#define OFGL_PARTICLE_REFERENCE 0
++#endif
++static int
++ofgl_particle_context(uint32_t context[OFQ2_PARTICLE_CONTEXT_WORDS],
++    const float up[3], const float right[3], float tw, float th)
++{
++    if (!OFQ2_Supports(OFQ2_CAP_PARTICLES) || !ofgl_blend_on ||
++        ofgl_depth_mask || !ofgl_depth_test || ofgl_depth_scale != 1.0f ||
++        !(tw > 0 && th > 0 && tw <= 64 && th <= 64) ||
++        !(ofgl_pc_xs > 0 && ofgl_pc_xs <= 1024 &&
++          ofgl_pc_ys > 0 && ofgl_pc_ys <= 1024) ||
++        !ofgl_finite(ofgl_pc_xc) || !ofgl_finite(ofgl_pc_yc) ||
++        fabsf(ofgl_pc_xc) > 2048 || fabsf(ofgl_pc_yc) > 2048 ||
++        !ofgl_finite(ofgl_pc_near) || ofgl_pc_near > 4096) return 0;
++    const float *mv = OFGL_MV;
++    for (unsigned vector = 0; vector < 2; ++vector) {
++        const float *basis = vector ? right : up;
++        for (unsigned row = 0; row < 3; ++row) {
++            float value = mv[row] * basis[0] + mv[4 + row] * basis[1] +
++                mv[8 + row] * basis[2];
++            if (!ofgl_finite(value) || fabsf(value) > 2.0f ||
++                (row == 2 && fabsf(value) >= 0.00001f)) return 0;
++            context[vector * 3 + row] = row == 2 ? 0 :
++                (uint32_t)(int32_t)lrintf(value * 65536.0f);
++        }
++    }
++    context[6] = (uint32_t)(int32_t)lrintf(ofgl_pc_xc * 65536.0f);
++    context[7] = (uint32_t)(int32_t)lrintf(ofgl_pc_yc * 65536.0f);
++    context[8] = (uint32_t)(int32_t)lrintf(ofgl_pc_xs * 65536.0f);
++    context[9] = (uint32_t)(int32_t)lrintf(ofgl_pc_ys * 65536.0f);
++    context[10] = (uint32_t)(int32_t)ceilf(fmaxf(16.0f, ofgl_pc_near) * 65536.0f);
++    context[11] = (uint32_t)(int32_t)lrintf(0.0625f * tw * 65536.0f);
++    context[12] = (uint32_t)(int32_t)lrintf(1.0625f * tw * 65536.0f);
++    context[13] = (uint32_t)(int32_t)lrintf(0.0625f * th * 65536.0f);
++    context[14] = (uint32_t)(int32_t)lrintf(1.0625f * th * 65536.0f);
++    context[15] = ofgl_cull_on ?
++        ((ofgl_cull_face == GL_FRONT) == (ofgl_front_face == GL_CCW) ? 1u : 2u) : 0u;
++    return 1;
++}
++
++static int
++ofgl_particle_flush(const uint32_t context[OFQ2_PARTICLE_CONTEXT_WORDS],
++    const uint32_t *records, unsigned count)
++{
++    if (!count) return 1;
++    /* Particle alpha is written by the worker, so bind a complete base surface
++     * before each bounded job and invalidate the frontend alpha shortcut. */
++    ofgl_setup_tri_state(ofgl_batch_tex, 255);
++#if OFGL_PARTICLE_REFERENCE
++    {
++        const int clip[4] = {ofgl_vp_x, ofgl_vp_y,
++            ofgl_vp_x + ofgl_vp_w, ofgl_vp_y + ofgl_vp_h};
++        for (unsigned i = 0; i < count; ++i) {
++            uint32_t words[17];
++            const uint32_t *record = records + i * OFQ2_PARTICLE_WORDS;
++            if (ofq2_particle_reference(context, record, clip, words) > 0) {
++                ofgl_setup_tri_state(ofgl_batch_tex, (record[4] >> 16) & 255u);
++                OFQ2_DrawVertTriRGBPacked(words);
++            }
++        }
++    }
++#else
++    if (!OFQ2_DrawParticles(context, records, count)) return 0;
++#endif
++    ofgl_batch_alpha = -1;
++    /* Worker projection owns slots0..2. Future indexed draw code must never
++     * mistake a pre-particle slot for an unchanged client-array vertex. */
++    ofgl_gpu_slots_valid = 0;
++    return 1;
++}
++
++int OFGL_ParticlesAvailable(void) { return OFQ2_Supports(OFQ2_CAP_PARTICLES); }
++
++/* Keep the exceptional rejected-submit replay out of the hot producer.
++ * The original caller still inlines its unchanged legacy billboard math. */
++static int __attribute__((noinline))
++ofgl_particle_replay_legacy(const float *origins, const int *colours,
++    const float *alphas, size_t stride, int count, const float up[3],
++    const float right[3], const float view_origin[3], const float forward[3],
++    const uint32_t palette[256], const uint8_t gamma[256])
++{
++    return OFGL_DrawParticleBillboards(origins, colours, alphas, stride, count,
++        up, right, view_origin, forward, palette, gamma);
++}
++
++int __attribute__((noinline))
++OFGL_DrawNativeParticleBillboards(const float *origins, const int *colours,
++	const float *alphas, size_t stride, int count, const float up[3],
++	const float right[3], const float view_origin[3], const float forward[3],
++	const uint32_t palette[256], const uint8_t gamma[256])
++{
++	if (!origins || !colours || !alphas || count < 1 ||
++		!ofgl_draw_enabled(OFGL_DRAW_ARRAYS) || !ofgl_tex2d_enabled ||
++		ofgl_tex2d_on[1] || ofgl_texenv_mode(0) != GL_MODULATE) return 0;
++	ofgl_array_t saved = ofgl_va_vertex;
++	float positions[3][3];
++	ofgl_va_vertex.ptr = (const byte *)positions;
++	ofgl_va_vertex.size = 3;
++	ofgl_va_vertex.stride = sizeof(positions[0]);
++	const ofq2_texture_t *tex;
++	float tw, th;
++	if (!ofgl_begin3d(&tex, &tw, &th))
++	{
++		ofgl_va_vertex = saved;
++		return 0;
++	}
++	const float s[3] = {0.0625f * tw, 1.0625f * tw, 0.0625f * tw};
++	const float t[3] = {0.0625f * th, 0.0625f * th, 1.0625f * th};
++    uint32_t particle_context[OFQ2_PARTICLE_CONTEXT_WORDS];
++    uint32_t particle_records[OFQ2_PARTICLE_BATCH_MAX * OFQ2_PARTICLE_WORDS];
++    unsigned pending = 0;
++#define OFGL_PARTICLE_FLUSH(end) do { \
++    if (pending && !ofgl_particle_flush(particle_context, particle_records, pending)) { \
++        size_t first = ((size_t)(end) - pending) * stride; \
++        ofgl_particle_replay_legacy((const float *)((const byte *)origins + first), \
++            (const int *)((const byte *)colours + first), \
++            (const float *)((const byte *)alphas + first), stride, pending, \
++            up, right, view_origin, forward, palette, gamma); \
++    } \
++    pending = 0; \
++} while (0)
++    int native_particles = ofgl_particle_context(particle_context, up, right, tw, th);
++	for (int i = 0; i < count; ++i)
++	{
++		const float *origin = (const float *)((const byte *)origins + (size_t)i * stride);
++		int colour = *(const int *)((const byte *)colours + (size_t)i * stride);
++		float alpha = *(const float *)((const byte *)alphas + (size_t)i * stride);
++		float scale = (origin[0] - view_origin[0]) * forward[0] +
++			(origin[1] - view_origin[1]) * forward[1] +
++			(origin[2] - view_origin[2]) * forward[2];
++		scale = scale < 20.0f ? 1.0f : 1.0f + scale * 0.004f;
++		uint32_t c = palette[colour];
++		uint16_t rgb = ofgl_rgba_to_565(gamma[c & 255u] |
++			((uint32_t)gamma[(c >> 8) & 255u] << 8) |
++			((uint32_t)gamma[(c >> 16) & 255u] << 16));
++		uint8_t a = (uint8_t)(alpha * 255.0f);
++        if (native_particles) {
++            const float *mv = OFGL_MV;
++            float cx = mv[0] * origin[0] + mv[4] * origin[1] + mv[8] * origin[2] + mv[12];
++            float cy = mv[1] * origin[0] + mv[5] * origin[1] + mv[9] * origin[2] + mv[13];
++            float cz = -(mv[2] * origin[0] + mv[6] * origin[1] + mv[10] * origin[2] + mv[14]);
++            /* These conservative bounds keep center+basis*size in signedQ16,
++             * the Q20 reciprocal ratio in signed32, and viewport products in
++             * the worker's52-bit accumulator. Unsupported primitives retain
++             * the established floating-point clipper in original draw order. */
++            if (ofgl_finite(cx) && ofgl_finite(cy) && ofgl_finite(cz) &&
++                ofgl_finite(scale) && scale > 0 && scale <= 32 &&
++                cz >= fmaxf(16.0f, ofgl_pc_near) && cz <= 4096 &&
++                fabsf(cx) <= 32000 && fabsf(cy) <= 32000 &&
++                fabsf(cx) <= cz * 8 && fabsf(cy) <= cz * 8) {
++                uint32_t *record = particle_records + pending * OFQ2_PARTICLE_WORDS;
++                record[0] = (uint32_t)(int32_t)lrintf(cx * 65536.0f);
++                record[1] = (uint32_t)(int32_t)lrintf(cy * 65536.0f);
++                record[2] = (uint32_t)(int32_t)lrintf(cz * 65536.0f);
++                record[3] = (uint32_t)(int32_t)lrintf(scale * 65536.0f);
++                record[4] = rgb | (uint32_t)a << 16;
++                if ((int32_t)record[2] >= (int32_t)particle_context[10]) {
++                    if (++pending == OFQ2_PARTICLE_BATCH_MAX) OFGL_PARTICLE_FLUSH(i + 1);
++                    continue;
++                }
++            }
++            OFGL_PARTICLE_FLUSH(i);
++        }
++        for (int k = 0; k < 3; ++k) {
++            positions[0][k] = origin[k];
++            positions[1][k] = origin[k] + up[k] * scale;
++            positions[2][k] = origin[k] + right[k] * scale;
++        }
++		ofgl_cvert_t vertices[3];
++		for (int k = 0; k < 3; ++k)
++		{
++			ofgl_fetch_position(k, &vertices[k]);
++			ofgl_classify_cvert(&vertices[k]);
++			vertices[k].s = s[k]; vertices[k].t = t[k];
++			vertices[k].rgb = rgb; vertices[k].a = a;
++			vertices[k].attrs_valid = 1;
++		}
++		ofgl_cached_tri(0, 1, 2, vertices, vertices + 1, vertices + 2, tw, th);
++	}
++    OFGL_PARTICLE_FLUSH(count);
++#undef OFGL_PARTICLE_FLUSH
++	ofgl_va_vertex = saved;
++	ofgl_end3d();
++	return 1;
++}
++
++inline int __attribute__((always_inline, gnu_inline))
+ OFGL_DrawParticleBillboards(const float *origins, const int *colours,
+ 	const float *alphas, size_t stride, int count, const float up[3],
+ 	const float right[3], const float view_origin[3], const float forward[3],
+--- /dev/null
++++ b/src/quake2/openfpga/of_particles.h
+@@ -0,0 +1,88 @@
++/* Experimental native billboard ABI and independent CPU rendering reference.
++ * All integer arithmetic here defines the wire-format convention. It does not
++ * claim bit identity with the legacy floating-point GL path. */
++#ifndef OF_PARTICLES_H
++#define OF_PARTICLES_H
++#include <stdint.h>
++#include <limits.h>
++#define OFQ2_PARTICLE_CONTEXT_WORDS 16u
++#define OFQ2_PARTICLE_WORDS 5u
++#define OFQ2_PARTICLE_BATCH_MAX 64u
++#define OFQ2_PARTICLE_ZI (1u << 24)
++
++/* Signed round-to-nearest, ties-to-even, without signed left shifts. */
++static inline int64_t ofq2_particle_rne(int64_t value, unsigned shift)
++{
++    int64_t divisor = INT64_C(1) << shift;
++    int64_t q = value / divisor, r = value % divisor;
++    uint64_t magnitude = r < 0 ? (uint64_t)-r : (uint64_t)r;
++    if (magnitude > (uint64_t)(divisor / 2) ||
++        (magnitude == (uint64_t)(divisor / 2) && (q & 1)))
++        q += value < 0 ? -1 : 1;
++    return q;
++}
++static inline int64_t ofq2_particle_floor(int64_t value, unsigned shift)
++{
++    int64_t divisor = INT64_C(1) << shift;
++    int64_t q = value / divisor;
++    return q - (value < 0 && value % divisor != 0);
++}
++static inline int32_t ofq2_particle_sat16(int64_t value)
++{
++    return value < INT16_MIN ? INT16_MIN : value > INT16_MAX ? INT16_MAX : (int32_t)value;
++}
++
++/* Context: up XYZ, right XYZ, viewport center XY, viewport scales XY, near,
++ * U0,U1,V0,V1, cull. All signed Q16 except cull. Up/right Z must be zero.
++ * Record: camera XYZ (positive Y up), size Q16, RGB565|alpha<<16.
++ * Return -1 for unsupported/malformed input, 0 for an invisible primitive,
++ * 1 with the exact 17-word 0x4E reference payload. clip may be NULL, otherwise
++ * it is the surface state's [x0,y0,x1,y1] in integer pixels. */
++static inline int ofq2_particle_reference(const uint32_t context[16],
++    const uint32_t record[5], const int clip[4], uint32_t words[17])
++{
++    if (context[2] || context[5] || context[15] > 2 ||
++        (int32_t)context[8] <= 0 || (int32_t)context[9] <= 0 ||
++        (int32_t)context[10] <= 0 || (int32_t)record[3] <= 0 ||
++        (record[4] & 0xff000000u)) return -1;
++    if (!(record[4] & 0xff0000u)) return 0;
++    int32_t z = (int32_t)record[2];
++    if (z < (int32_t)context[10] || z < 16 * 65536 || z > 4096 * 65536) return -1;
++    for (unsigned i = 11; i <= 14; ++i)
++        if ((int32_t)context[i] < 0 || context[i] >= 128u * 65536u) return -1;
++    uint32_t depth = (uint32_t)((UINT64_C(1) << 46) / (uint32_t)z);
++    int32_t x[3], y[3];
++    for (unsigned vertex = 0; vertex < 3; ++vertex) {
++        int64_t cx = (int32_t)record[0], cy = (int32_t)record[1];
++        if (vertex) {
++            unsigned basis = (vertex - 1) * 3;
++            cx += ofq2_particle_rne((int64_t)(int32_t)context[basis] * (int32_t)record[3], 16);
++            cy += ofq2_particle_rne((int64_t)(int32_t)context[basis + 1] * (int32_t)record[3], 16);
++        }
++        if (cx < INT32_MIN || cx > INT32_MAX || cy < INT32_MIN || cy > INT32_MAX) return -1;
++        int64_t rx = ofq2_particle_floor(cx * depth, 26);
++        int64_t ry = ofq2_particle_floor(cy * depth, 26);
++        if (rx < INT32_MIN || rx > INT32_MAX || ry < INT32_MIN || ry > INT32_MAX) return -1;
++        int64_t px = rx * (int32_t)context[8] + (int64_t)(int32_t)context[6] * 1048576;
++        int64_t py = (int64_t)(int32_t)context[7] * 1048576 - ry * (int32_t)context[9];
++        x[vertex] = ofq2_particle_sat16(ofq2_particle_rne(px, 32));
++        y[vertex] = ofq2_particle_sat16(ofq2_particle_rne(py, 32));
++        words[vertex] = (uint32_t)(uint16_t)x[vertex] | (uint32_t)(uint16_t)y[vertex] << 16;
++        words[3 + vertex] = context[vertex == 1 ? 12 : 11];
++        words[6 + vertex] = context[vertex == 2 ? 14 : 13];
++        words[9 + vertex] = OFQ2_PARTICLE_ZI;
++        words[14 + vertex] = depth;
++    }
++    if (clip && ((x[0] < clip[0] * 16 && x[1] < clip[0] * 16 && x[2] < clip[0] * 16) ||
++        (x[0] >= clip[2] * 16 && x[1] >= clip[2] * 16 && x[2] >= clip[2] * 16) ||
++        (y[0] < clip[1] * 16 && y[1] < clip[1] * 16 && y[2] < clip[1] * 16) ||
++        (y[0] >= clip[3] * 16 && y[1] >= clip[3] * 16 && y[2] >= clip[3] * 16))) return 0;
++    int64_t determinant = (int64_t)(x[1] - x[0]) * (y[2] - y[0]) -
++        (int64_t)(x[2] - x[0]) * (y[1] - y[0]);
++    if (context[15] && (!determinant ||
++        (context[15] == 1 && determinant < 0) || (context[15] == 2 && determinant > 0))) return 0;
++    words[12] = (record[4] & 65535u) * 65537u;
++    words[13] = record[4] & 65535u;
++    return 1;
++}
++#endif
+--- a/src/quake2/openfpga/of_world.h
++++ b/src/quake2/openfpga/of_world.h
+@@ -33,6 +33,11 @@
+ 
+ /* Strided particle fields are consumed synchronously. Preserve the existing
+  * world-space billboard construction without staging three GL arrays. */
++int OFGL_ParticlesAvailable(void);
++int OFGL_DrawNativeParticleBillboards(const float *origins, const int *colours,
++    const float *alphas, size_t stride, int count, const float up[3],
++    const float right[3], const float view_origin[3], const float forward[3],
++    const uint32_t palette[256], const uint8_t gamma[256]);
+ int OFGL_DrawParticleBillboards(const float *origins, const int *colours,
+     const float *alphas, size_t stride, int count, const float up[3],
+     const float right[3], const float view_origin[3], const float forward[3],
+--- a/src/quake2/src/client/refresh/gl1/gl1_main.c
++++ b/src/quake2/src/client/refresh/gl1/gl1_main.c
+@@ -415,11 +415,42 @@
+ 	R_EnableMultitexture(false);
+ }
+ 
++#ifdef YQ2_OPENFPGA
++/* Keep these local basis arrays in a separate call boundary. Letting them
++ * escape the original particle function changes GCC's fast-math reassociation
++ * of the legacy shader even when the new capability is absent. */
++static int __attribute__((noinline))
++R_DrawNativeParticles(int count, const particle_t *particles, const unsigned *colortable)
++{
++    vec3_t native_up, native_right;
++    VectorScale(vup, 1.5, native_up);
++    VectorScale(vright, 1.5, native_right);
++    R_Bind(r_particletexture->texnum);
++    glDepthMask(GL_FALSE);
++    glEnable(GL_BLEND);
++    R_TexEnv(GL_MODULATE);
++    int handled = OFGL_DrawNativeParticleBillboards(particles[0].origin,
++        &particles[0].color, &particles[0].alpha, sizeof(*particles),
++        count, native_up, native_right, r_origin, vpn, colortable, gammatable);
++    if (handled) {
++        glDisableClientState(GL_VERTEX_ARRAY);
++        glDisableClientState(GL_TEXTURE_COORD_ARRAY);
++        glDisableClientState(GL_COLOR_ARRAY);
++        glDisable(GL_BLEND);
++        glColor4f(1, 1, 1, 1);
++        glDepthMask(GL_TRUE);
++        R_TexEnv(GL_REPLACE);
++    }
++    return handled;
++}
++#endif
++
+ void
+ R_DrawParticles2(int num_particles, const particle_t particles[],
+ 		const unsigned *colortable)
+ {
+ #ifdef YQ2_OPENFPGA
++    if (OFGL_ParticlesAvailable() && R_DrawNativeParticles(num_particles, particles, colortable)) return;
+ 	vec3_t direct_up, direct_right;
+ 	VectorScale(vup, 1.5, direct_up);
+ 	VectorScale(vright, 1.5, direct_right);
+--- a/tools/check_quake2_geometry.py
++++ b/tools/check_quake2_geometry.py
+@@ -14,7 +14,7 @@
+                      'OFQ2_TexReset', 'OFQ2_TexCreate', 'OFQ2_TexBindDomain', 'OFQ2_Shutdown']
+     geometry_names = ['OFQ2_Supports', 'OFQ2_DrawGeometryFan', 'OFQ2_DrawGeometryPackets', 'OFQ2_DrawClipIndexed',
+                       'OFQ2_NativeReserve', 'OFQ2_NativeUpload', 'OFQ2_DrawNativeMesh',
+-                      'OFQ2_NativeReset', 'OFQ2_NativeGeneration']
++                      'OFQ2_NativeReset', 'OFQ2_NativeGeneration', 'OFQ2_DrawParticles']
+     for name, functions in [('texture', texture_names), ('geometry', geometry_names)]:
+         (work / ('extracted_' + name + '_functions.inc')).write_text(
+             '\n'.join(function(source, name) for name in functions))
+--- a/tools/check_quake2_renderer.py
++++ b/tools/check_quake2_renderer.py
+@@ -23,6 +23,7 @@
+         ("texturebits", []),
+         ("visibility", []),
+         ("particledirect", []),
++        ("particleworker", []),
+         ("worldgeometry", []),
+         ("worldposition", []),
+         ("worldpackets", []),
+--- a/tools/tests/quake2_geometry_test.c
++++ b/tools/tests/quake2_geometry_test.c
+@@ -31,7 +31,7 @@
+ static void test_capabilities(void)
+ {
+     for (unsigned dependencies = 0; dependencies < 8; dependencies++)
+-    for (unsigned status = 0; status < 8; status++)
++    for (unsigned status = 0; status < 16; status++)
+     {
+         setup(0, 4);
+         caps.hw_features = OF_HW_GPU_SPAN |
+@@ -45,10 +45,47 @@
+         assert(!!OFQ2_Supports(OFQ2_CAP_GEOMETRY_WORKER) ==
+             (dependencies == 7 && (status & 3) == 3));
+         assert(!!OFQ2_Supports(OFQ2_CAP_NATIVE_MESH) ==
+-            (dependencies == 7 && status == 7));
++            (dependencies == 7 && (status & 7) == 7));
++        assert(!!OFQ2_Supports(OFQ2_CAP_PARTICLES) ==
++            (dependencies == 7 && (status & 11) == 11));
+         OFQ2_Shutdown();
+         assert(!OFQ2_Supports(OFQ2_CAP_GEOMETRY_WORKER));
+     }
++}
++
++static void test_particle_packets(void)
++{
++    setup(4096, 4);
++    ofq2_caps = OFQ2_CAP_PARTICLES;
++    uint32_t context[16], records[65 * 5];
++    for (unsigned i = 0; i < 16; ++i) context[i] = 0x17482738u + i;
++    for (unsigned i = 0; i < 65 * 5; ++i) records[i] = 0x9182a937u + 83u * i;
++    unsigned sizes[] = {1, 31, 32, 33, 63, 64};
++    for (unsigned i = 0; i < sizeof(sizes)/sizeof(sizes[0]); ++i) {
++        unsigned n = sizes[i];
++        reset_ring(); ofq2_tristate_valid = ofq2_objstate_valid = true;
++        ofq2_tristate_dirty = false;
++        unsigned before = finish_count;
++        assert(OFQ2_DrawParticles(context, records, n));
++        assert(reservations == 1 && commits == 1 && committed_words == 18 + 5*n);
++        assert(ring_words[0] == 0x61000010u && !memcmp(ring_words+1, context, sizeof(context)));
++        assert(ring_words[17] == (0x62000000u | (5*n)));
++        assert(!memcmp(ring_words+18, records, n*5*sizeof(uint32_t)));
++        assert(ring_words[18+5*n] == 0xa5a5a5a5u);
++        assert(ofq2_tristate_dirty && !ofq2_objstate_valid && ofq2_pending);
++        assert(finish_count == before);
++    }
++    reset_ring(); ofq2_tristate_valid = true; ofq2_tristate_dirty = false;
++    assert(!OFQ2_DrawParticles(NULL, records, 1));
++    assert(!OFQ2_DrawParticles(context, NULL, 1));
++    assert(!OFQ2_DrawParticles(context, records, 0));
++    assert(!OFQ2_DrawParticles(context, records, 65));
++    ofq2_tristate_dirty = true; assert(!OFQ2_DrawParticles(context, records, 1));
++    ofq2_tristate_dirty = false; ofq2_tristate_valid = false;
++    assert(!OFQ2_DrawParticles(context, records, 1));
++    ofq2_tristate_valid = true; ofq2_caps = OFQ2_CAP_NATIVE_MESH;
++    assert(!OFQ2_DrawParticles(context, records, 1));
++    assert(!reservations && !commits && !ofq2_pending);
+ }
+ 
+ static void test_native_packets(void)
+@@ -253,6 +290,7 @@
+ int main(void)
+ {
+     test_capabilities();
++    test_particle_packets();
+     test_fan_packets();
+     test_clip_packets_unchanged();
+     test_cached_packet_batches();
+--- /dev/null
++++ b/tools/tests/quake2_particleworker_test.c
+@@ -0,0 +1,80 @@
++#define main renderer_existing_main
++#include "quake2_renderer_test.c"
++#undef main
++
++typedef struct { float xyz[3]; int colour; float alpha; } input_t;
++static uint32_t palette[256];
++static uint8_t particle_gamma[256];
++static const float up[3] = {0,1.5f,0}, right[3] = {1.5f,0,0};
++static const float eye[3] = {0,0,0}, forward[3] = {0,0,-1};
++static void prepare(input_t *p, unsigned n)
++{
++    for (unsigned i=0; i<n; ++i) {
++        p[i] = (input_t){{0,0,-100}, (int)(i&255), (i&1) ? .5f : 1};
++    }
++    setup_world_arrays(p[0].xyz);
++    ofgl_tex2d_on[1] = 0;
++    ofgl_TexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
++    ofgl_Enable(GL_BLEND); ofgl_DepthMask(GL_FALSE);
++    gpu_particles = 1; particle_fail = 0;
++    particle_total = particle_calls = 0;
++    reset_geometry_recording();
++    record_order = 1; render_order_count = 0;
++}
++static void draw(input_t *p, unsigned n)
++{
++    assert((gpu_particles ? OFGL_DrawNativeParticleBillboards : OFGL_DrawParticleBillboards)(p[0].xyz, &p[0].colour, &p[0].alpha,
++        sizeof(*p), n, up, right, eye, forward, palette, particle_gamma));
++}
++static void canonical(void)
++{
++    assert(ofq2_particle_rne(1,1)==0 && ofq2_particle_rne(3,1)==2);
++    assert(ofq2_particle_rne(-1,1)==0 && ofq2_particle_rne(-3,1)==-2);
++    assert(ofq2_particle_floor(-1,1)==-1 && ofq2_particle_floor(-3,1)==-2);
++    uint32_t ctx[16] = {0,98304,0,98304,0,0,10452992,7831552,
++        10485760,10485760,1048576,32768,557056,32768,557056,0};
++    uint32_t rec[5] = {0,0,6553600,91750,0x80ffff};
++    uint32_t words[17]; int clip[4]={0,0,320,240};
++    assert(ofq2_particle_reference(ctx,rec,clip,words)==1);
++    assert((int16_t)words[0]==2552 && (int16_t)(words[0]>>16)==1912);
++    assert((int16_t)words[1]==2552 && (int16_t)(words[1]>>16)==1858);
++    assert((int16_t)words[2]==2606 && (int16_t)(words[2]>>16)==1912);
++    for (unsigned i=0;i<3;++i) assert(words[9+i]==(1u<<24) && words[14+i]==10737418);
++    assert(words[12]==0xffffffffu && words[13]==65535);
++    rec[4] &= 65535; assert(ofq2_particle_reference(ctx,rec,clip,words)==0);
++    rec[4] |= 0x800000; rec[2]=15*65536;
++    assert(ofq2_particle_reference(ctx,rec,clip,words)==-1);
++    rec[2]=100*65536; ctx[2]=1;
++    assert(ofq2_particle_reference(ctx,rec,clip,words)==-1);
++    ctx[2]=0; ctx[8]=0xffffffff;
++    assert(ofq2_particle_reference(ctx,rec,clip,words)==-1);
++}
++int main(void)
++{
++    canonical();
++    assert(RI_InitContext(NULL));
++    for (unsigned i=0;i<256;++i) { palette[i]=0xffffffu; particle_gamma[i]=i; }
++    input_t p[132]; prepare(p,132); draw(p,132);
++    assert(particle_calls==3 && particle_total==132);
++    assert(particle_counts[0]==64 && particle_counts[1]==64 && particle_counts[2]==4);
++    assert(!draws && render_order_count==3 && !ofgl_gpu_slots_valid);
++    for (unsigned i=0;i<132;++i) {
++        assert(particle_records_seen[i][2]==100*65536);
++        assert((particle_records_seen[i][4]>>16)==((i&1)?127:255));
++    }
++    assert(!particle_context_seen[2] && !particle_context_seen[5]);
++    prepare(p,5); p[2].xyz[2]=-8; draw(p,5);
++    assert(particle_calls==2 && particle_counts[0]==2 && particle_counts[1]==2);
++    assert(draws==1 && render_order_count==3 && !memcmp(render_order,"PCP",3));
++    assert(ofgl_batch_alpha==-1); /* a later CPU draw must rebind alpha */
++    prepare(p,4); particle_fail=1; draw(p,4);
++    assert(!particle_calls && draws==4); /* legacy fallback on refused native job */
++    assert(alpha_seen[0]==255 && alpha_seen[1]==127);
++    prepare(p,4); gpu_particles=0; draw(p,4);
++    assert(!particle_calls && draws==4); /* old core follows old shader */
++    prepare(p,4); ofgl_DepthMask(GL_TRUE); draw(p,4);
++    assert(!particle_calls && draws==4); /* unsupported depth state */
++    RI_ShutdownContext();
++    puts("PASS: particle ABI batching64, mixed near fallback/order, alpha rebinding, canonical CPU fallback, old-core capability and precision state guards");
++    return 0;
++}
+--- a/tools/tests/quake2_renderer_test.c
++++ b/tools/tests/quake2_renderer_test.c
+@@ -23,7 +23,10 @@
+ static int display_mode, check_mode_error, set_mode_error, missing_surface;
+ static int reject_color_mode, color_mode_calls;
+ static int gpu_init_ok = 1, gpu_rgb = 1;
+-static int gpu_geometry;
++static int gpu_geometry, gpu_particles;
++static unsigned particle_calls, particle_total, particle_counts[128];
++static uint32_t particle_context_seen[16], particle_records_seen[4096][5];
++static int particle_fail;
+ static int pending_menu_quad;
+ 
+ void R_ApplyGLBuffer(void)
+@@ -89,6 +92,7 @@
+ static char render_order[1024];
+ int OFQ2_Supports(uint32_t cap)
+ {
++    if (cap == OFQ2_CAP_PARTICLES) return gpu_particles;
+     if (cap == OFQ2_CAP_GEOMETRY_WORKER) return gpu_worker;
+ 	if (cap == OFQ2_CAP_GEOMETRY) return gpu_geometry;
+ 	return cap == OFQ2_CAP_VERT_TRI_RGB ? gpu_rgb : 1;
+@@ -135,6 +139,18 @@
+ 	geometry_draws++;
+     if (record_order) { assert(render_order_count < 1024); render_order[render_order_count++] = 'G'; }
+ 	return 1;
++}
++int OFQ2_DrawParticles(const uint32_t context[16], const uint32_t *records, unsigned count)
++{
++    if (particle_fail) return 0;
++    assert(gpu_particles && count && count <= OFQ2_PARTICLE_BATCH_MAX);
++    assert(particle_calls < 128 && particle_total + count <= 4096);
++    particle_counts[particle_calls++] = count;
++    memcpy(particle_context_seen, context, sizeof(particle_context_seen));
++    memcpy(particle_records_seen + particle_total, records, count * 5 * sizeof(uint32_t));
++    particle_total += count;
++    if (record_order) { assert(render_order_count < 1024); render_order[render_order_count++] = 'P'; }
++    return 1;
+ }
+ int OFQ2_DrawGeometryPackets(const ofq2_geometry_packet_t *packets, unsigned count)
+ {

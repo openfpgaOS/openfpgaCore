@@ -1,0 +1,17 @@
+{
+  "gpu_sha256": "5359411b9af35fd4619da978c3f508997ae1c0a2ba3281512c50c5a1d1e4e217",
+  "dsp_parent_sha256": "57258b3a4a76c75f3619661dd052fdc5c3ae5716f455c8830eafe00234a1f72e",
+  "palette_source_sha256": "3b4ddc4d614a569dc9e031856b020f1633bb276c2f4a185df5bbd0bb3c2f6895",
+  "palette_changes_only": true,
+  "palette_enabled_reduces_to_dsp_parent": true,
+  "parent_validation_sha256": {
+    "docs/measurements/quake2-tiny-audio-20261013/timing-next/gpu-dsp-routing/FINAL-VALIDATION.json": "a4ac4fbff67777ee5936c54b0878370ebd185bb74c337392ac8b92a7015a2d98",
+    "docs/measurements/quake2-tiny-audio-20261013/timing-next/feature-cuts/palette-disabled-shadow/FINAL-VALIDATION.json": "bef66f8c28cb6a68b3cdc6e2487176a420f6c3306eff4aeeac3fff82714565b4"
+  },
+  "pending": [
+    "fullGPU replay with combined worker",
+    "physical qualification"
+  ],
+  "quartus_launched": false,
+  "deployed": false
+}

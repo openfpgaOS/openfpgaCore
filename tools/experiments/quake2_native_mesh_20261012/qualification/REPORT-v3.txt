@@ -1,0 +1,17 @@
+Native MD2 final app native-v3 validation: PASS
+
+App SHA256: 44f668ef55af64b579f3800d57567b7da7a2b3f9e16c325976d021d9237595b4
+
+Geometry alone reduces modeled CPU work by 24.00% main, 30.41% sound, 19.18% live.
+Removing sound separately reduces app CPU work by 0%, 1.40%, 0.43% respectively; OS ISR/DMA savings are not modeled.
+Final native-v3 on silent core: zero audio/mixer initialization or voice services; actual sound_started=SS_NOT.
+Same ELF with hardware mixer keeps previous sound behavior and commands/framebuffers exactly.
+Same ELF without native capability exactly preserves deployed world-v1 commands/framebuffers/sound behavior.
+Final main frames 20/80/180/300: actual GPU+worker+shared physical-PSRAM model exactly matches integer reference color/depth.
+Final sound-enabled/no-mixer frames 20/80: actual GPU output exactly matches sound-enabled integer reference despite a valid 16-byte Z-buffer relocation.
+Main GPU cycles: 3,076,766 / 3,812,485 / 3,446,182 / 2,492,418.
+Sound-enabled/no-mixer GPU cycles: 3,110,573 / 3,837,988.
+Map transitions and native arena recycling: see lifecycle/result.json and REPORT-v2.txt.
+
+These are CPU estimates and uncoupled GPU replay measurements, not Pocket FPS. Sound is intentionally disabled only for the native core without a hardware mixer.
+Physical fit/timing and deployment qualification remain separate.

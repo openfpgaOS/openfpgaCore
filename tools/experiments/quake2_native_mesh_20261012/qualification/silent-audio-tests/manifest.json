@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "status": "PASS focused silent-audio tests; no hardware playback or timing claim",
+  "files": {
+    "README.txt": "ae81e73b09cf2f7edc8fe705384e7e912432619766cfdc42c6f5ca0eb2ad7712",
+    "audio_main.cpp": "42d558c153ca1884339d73e3481f850dc9948b9cddcb081d5b8197f76faf4d16",
+    "logs/pump-build.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "logs/pump-run.log": "360ffcd846231bcb9095ed2e02c31398b5056c9557c39465442ab15ecc325b26",
+    "logs/rtl-0-build.log": "b01bbc9e2aec84ca4e2441bdf7fce28a58cd24df042f5bec0093ad2747bb0cde",
+    "logs/rtl-0-run.log": "392134831191dbebc9e504a0cc8932e8f960fbc8ab03dab1d1b43055204b6afc",
+    "logs/rtl-1-build.log": "fbd317a34146e699028d288d5ba73e66f7f6b9be47dd23614507524829544633",
+    "logs/rtl-1-run.log": "c8088caf80e763e26e68a16c5628b505c6b78f09308a3b39650db8becf389df4",
+    "logs/rtl-2-build.log": "199d69f6f500ef6f3a4c031dd8c6aceff09e876542d36ffcf98433365d968b89",
+    "logs/rtl-2-run.log": "45b176486735879236b142704b1758fc5a126bee7450a8e7c8368495ea7a0288",
+    "pump_main.c": "92d6291d3c7b455b3b501ae70709ccfcee3a248e1ea9aec65e197d5bc4e7dd11",
+    "result.json": "0eb90cef31c634160f1aab71a0d22875670c3f3d3719ef6c90c492133f41f105",
+    "run.py": "1f71961e38f8dcdd6c98df903caa7582c7540521b2afb02d30e1a2bc0a3b6799",
+    "source-pins.json": "07478cd5e3a0a20d442779b54ae71ec728cf5eea20cfe72f7b865439ab8e909f",
+    "sources/audio_output.v": "833ce95e4adce5b647130cffd0de3cbd84b7a9fc6ff05a8668dee584cee8fef9",
+    "sources/axi_periph_slave.v": "1777c679b86d380c10d4e8f29ec7fe54ede9298a99bfcee33b1856a850015acc",
+    "sources/baseline_core_top.v": "5d22451e4f5209750c6df561835b710db78b7fc34474952d89e22e8a8e4b9113",
+    "sources/build_core.py": "619be99542c0bc47cc5f1203228460dc60adce3e47a08b1dd124108befaa5eb7",
+    "sources/core_top.v": "4d29bfc0b98fdd9c36e13a5048fe7a80f6082372124d32c04d6acca2a0d5a3f8",
+    "sources/regs.h": "8e1ca096c12b6005efa574a23a0378597536047c867ac683b5a17f261a88ecfc",
+    "sources/silent_ap_core.qsf": "03f90b1f8761b6c93e7591ad249fa74e01267fb8949de84a6a6171a698dac22d",
+    "sources/sw_mixer.c": "00ebe68263c9bd0e7eee36ab79a8227ca69ac172c37ccf98d383cb7bd60f6a96",
+    "sources/sw_mixer.h": "5db30675b0c5ab10871101a430bf25fc631333dc6037ef21dd764dec156e45d7"
+  }
+}

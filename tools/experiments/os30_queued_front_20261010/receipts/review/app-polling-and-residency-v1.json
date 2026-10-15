@@ -1,0 +1,115 @@
+{
+  "purpose": "Read-only profile attribution and bounded software-v2 rationale; persistent raw-slot design is not implemented.",
+  "evidence_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/app-build/app.dis": "c3f3829a0b25cb99908d8d3597678393cb3cc6e1d271f891825fd29565ec5303",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/app-build/build-result.json": "b069d4d9f6d6f5dc924b745fde5ba939bb3a2bfb5a47ae8388e4d9ccfc39eb5d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/app-build/symbols.txt": "cc34196f63f15f56d6af4278bdb9f34295a9ff6750f8ce5dfc80bfc29f9e8f9e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/baseline-v2/run/pc-phase-2.csv": "25c38b72dff7ba58fd000eb08497f631d15ffb8dd4f95fd6ba626352a004a432",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/model/frozen/src/fpga/common/geometry_import_view.v": "937f80db1ec005f22d91b7df384ebd5258c97d494e9009cbc13ae1ac53eaa128",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/model/frozen/src/fpga/common/geometry_raw_load.v": "a49563b15545d9d89e0b33d09428897baa0256af6d8e582dfdd51755ad0da860",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/model/frozen/src/fpga/common/geometry_transform_light.v": "6987e27771c84173b31eb53e9f3bce4e7337437414548ef089f3adfe430c810f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/model/frozen/src/fpga/common/phase10_bram_alias.v": "b265bab9aeb93c5ae2444f652579b0fdc13cdab90e06b63d2c3fbcaf49b802d9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/model/frozen/src/fpga/common/phase10_load_alias.v": "424c41d245bac415e4f453ab4dd6b650a73cee57ee392239f89cf7b8bcc49646",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/performance-v1.json": "a49e825e5135e36b3a9e65dae4adede0d9f92fe6389294f11c9f12f1987d140e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/pc-phase-2.csv": "5ad8a92f11644da9fcc85047b5db81892860c255f613e8923ce2cdab01ec4fca",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/review/queued-v2.json": "c3d9be7b68ec1d3d1b3318f13d0afc15c46a5628fcbe1627f73b5a4ab6cbec6a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "d3d0a0e3163be954f6086cf509620d18e750e152481df10a6e9e921cc1352cde",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/app-build-v2/app.dis": "0a4422d14756a91da43304ab9327ef80c3bfe0f89a5c7fa5b8096e4d3b8e88fd",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/app-build-v3/app.dis": "772d35ef2133edb7cbabadb59fb004677bc6e8646a394e255e47d40b2ff909f0",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/front-v2/run/pc-phase-2.csv": "d232e723ddc3aeb631dbf92a5dedf754dfd67a3d2d4b31bc0e25f6ea9bd3dc26",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/front-v3/run/pc-phase-2.csv": "7b31a563e922a49429afd17c0080eb18deb5a5c862b6f8554851820e568d1f9a"
+  },
+  "polling": {
+    "warm_service_calls": 6832,
+    "raw_load_loop_calls": 3609,
+    "dl_command_boundary_calls": 3222,
+    "frame_end_calls": 1,
+    "dl_function_entries": 850,
+    "baseline_service_retirement_gap_cycles": 59886,
+    "queued_service_retirement_gap_cycles": 177617,
+    "delta_service_retirement_gap_cycles": 117731,
+    "frame_cycle_regression": 73874,
+    "raw_active_cycles": 203263,
+    "repair_count": 0,
+    "load_status_service_pc": "0x104dabd2",
+    "status_pc_retired": 6832,
+    "status_pc_retirement_gap_cycles": 75152,
+    "interpretation": "Repeated repair-status MMIO is measurable CPU overhead. RAW-loop service runs during fixed hardware LOAD work, so its removed cycles are not independent frame savings. DL-boundary polling is ordinary CPU work; the paired replay must decide wall-clock gain.",
+    "v2_change": "Service once at gfx_run_dl entry, then existing acquire/wait/fence/frame-end points; rawLOAD polls service every16 busy iterations using existing remaining countdown. Timeout drain/startup busy loops and all SDK wait hooks unchanged. Repair body, queue admission, commands, ownership, and RTL unchanged.",
+    "liveness": "Worker relinquishes shared FMA before CPU repair wait. Raw LOAD can progress even if repair is deferred. Full-ring/fence wait hooks still service repair, as do CLAIM, DL entry, raw polls, and frame end. Reviewer independently agreed."
+  },
+  "survivor_profile": [
+    {
+      "run": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/front-v2/run",
+      "warm": true,
+      "helper_calls": 354,
+      "nonempty_calls": 16,
+      "contiguous_runs": 16,
+      "extra_vertices": 55,
+      "survivor_vertices": 71,
+      "all_materialized_vertices": 3471,
+      "helper_retirement_gap_cycles": 12908,
+      "method": "Survivor vertices = retired helper run-head0x104ce6d0 plus count-increment0x104ce6f4. All copies = retired copy-loop0x104ce608. See bound disassembly; helper only called at pre-G_VTX survivor barrier."
+    },
+    {
+      "run": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/front-v3/run",
+      "warm": true,
+      "helper_calls": 354,
+      "nonempty_calls": 35,
+      "contiguous_runs": 35,
+      "extra_vertices": 153,
+      "survivor_vertices": 188,
+      "all_materialized_vertices": 2961,
+      "helper_retirement_gap_cycles": 13787,
+      "method": "Survivor vertices = retired helper run-head0x104ce6d0 plus count-increment0x104ce6f4. All copies = retired copy-loop0x104ce608. See bound disassembly; helper only called at pre-G_VTX survivor barrier."
+    },
+    {
+      "run": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run",
+      "warm": true,
+      "helper_calls": 354,
+      "nonempty_calls": 15,
+      "contiguous_runs": 15,
+      "extra_vertices": 56,
+      "survivor_vertices": 71,
+      "all_materialized_vertices": 3388,
+      "helper_retirement_gap_cycles": 20220,
+      "method": "Survivor vertices = retired helper run-head0x104ce6d0 plus count-increment0x104ce6f4. All copies = retired copy-loop0x104ce608. See bound disassembly; helper only called at pre-G_VTX survivor barrier."
+    }
+  ],
+  "persistent_slot_rtl_proof": [
+    {
+      "source": "geometry_transform_light.v:71,72,233",
+      "claim": "XYZW writes use row and dest+local returned vertex. Existing acc output RAM preserves all other slots."
+    },
+    {
+      "source": "geometry_transform_light.v:207",
+      "claim": "Inverse writes use context[32+recip_tag]; recip_tag is dest+local. Matrix writes use context[0..15], disjoint from all32 inverses."
+    },
+    {
+      "source": "geometry_transform_light.v:94,229",
+      "claim": "DMA, lighting, and queued-cull scratch reuse positions RAM, distinct from final acc, inverses and attributes."
+    },
+    {
+      "source": "geometry_raw_load.v:162,165,168,171",
+      "claim": "UV, source/final RGB/A, and clip rows write only dest+local. Successful partial LOAD does not clear survivor output words."
+    },
+    {
+      "source": "geometry_raw_load.v:224,231,267",
+      "claim": "The existing valid_slots mechanism invalidates incoming slots at START, commits them only on successful scan, and can invalidate software-overwritten slots. Wrapper currently disables/discards this mechanism."
+    }
+  ],
+  "persistent_slot_required_changes": [
+    "Expose LOAD dest0..31 and raw valid_slots; invalidate software-fallback destination slots even when no hardware LOAD starts.",
+    "Preserve importable and W-hash metadata outside overwritten mask. They currently clear globally at every START; valid_slots must gate all metadata.",
+    "Change CPU alias from latest-job count bounds to an immutable valid-slot mask captured at AR; after a failed partial LOAD untouched survivors remain readable although latest-job success is false.",
+    "Change snapshot source validation from src<lastLOADcount to a captured valid-slot mask. The current copier already copies all256 words, so persistent32slot contents need no extra snapshot data BRAM. Use global indices with first0 for mixed-generation runs.",
+    "Use a raw-state epoch or explicitly serialize release/reclaim at every mutation, including failed START and software invalidation. Current generation advances only on success; failed partial overwrite must never let an old owned token describe the changed raw bank.",
+    "Accumulate logical pending/raw-owned masks instead of resetting them to latest LOAD. Global slot mapping removes raw_first subtraction. Do not permit slots>=32 into this path.",
+    "Replace ctz-to-clz bulk canonical copy with exact pending runs once per CPU fallback entry: persistent masks can be sparse, and copying gaps would overwrite newer software/fog canonical values.",
+    "Invalidate aligned alias cachelines covering dest..dest+count after writes, including any needed failure path. Existing discard starts at slot0 and is unsuitable for globaldest.",
+    "Preserve fog flush before coefficient changes and copy-before-alpha. Persistent BRAM cannot remove canonical fog work required by existing single pending fog-context semantics.",
+    "Hold existing short raw-copy reservation before the next mutation; snapshot ownership remains independent of later LOAD, and old queued jobs read immutable banks."
+  ],
+  "persistent_slot_limit": "Completed Q warm run copies only71 survivor vertices out of3388 total canonical materializations (~2.10%). Persistent slots may improve mixed-generation queue admission, but current counters do not isolate that reject reason. Removing survivor copies alone is not supported as a substantial speedup; no new implementation or FPS prediction.",
+  "scope": "Two prepared native intervals; retirement-gap attribution includes memory stalls and overlaps hardware activity. Q queued-v1 aborted old-driver run excluded; completed queued-v2 used."
+}

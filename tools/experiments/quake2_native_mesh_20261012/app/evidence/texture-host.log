@@ -1,0 +1,3 @@
+PASS: 65 exact source lengths, padded tails, alignment, one clean per create
+PASS: bounded capacity fallback and caps v2/v3/v4 SDRAM-only lifecycle
+PASS: startup stale route, reset/reinit drain-before-reuse, shutdown route, stable binds

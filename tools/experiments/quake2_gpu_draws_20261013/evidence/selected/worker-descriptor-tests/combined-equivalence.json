@@ -1,0 +1,15 @@
+{
+  "passed": true,
+  "compact_worker_sha256": "a646460450f97918b33394ad2027165df78c33c9c8436df6aaa0cc2c5bcce161",
+  "combined_worker_sha256": "164d5ce2eeeb478eb7504660b8a4afef4d8f6a16cf75372ba5eff26917305892",
+  "exact_output_and_cycle_transcripts": {
+    "enabled": true,
+    "legacy-disabled": true
+  },
+  "native_descriptor_narrowing": "counts13bits, flags2bits, aligned bases24bits, stream/end25bits; input-validation sticky flag preserves rejection of discarded high bits",
+  "map_only_output": "/tmp/quake2-gpu-draws-20261013-map-compact-descriptor-v1",
+  "new_source_tree": "docs/measurements/quake2-gpu-draws-20261013/rtl-compact-descriptor-candidate",
+  "changed_files_vs_compact": [
+    "src/fpga/common/gpu_geometry_worker.v"
+  ]
+}

@@ -1,0 +1,93 @@
+{
+  "status": "READ_ONLY_CALLER_LIVENESS_REVIEW_COMPLETE_NO_MEASURED_SCOPE_GAIN",
+  "scope": "Caller-control-only liveness expansion across immutable G_DL/G_ENDDL; every original non-VTX/TRI state barrier retained. No application or RTL edit.",
+  "measurement": {
+    "status": "PASS_COLD_SOURCE_BOUND_TRAVERSAL_AND_IMMUTABLE_CALLER_PROOF",
+    "command_events": 4121,
+    "exact_cold_CPU_LOAD_calls": 354,
+    "candidate_spans": 320,
+    "old_proved": 146,
+    "caller_proved": 146,
+    "new_spans": 0,
+    "new_triangles": 0,
+    "new_hardware_LOADs": 0,
+    "new_by_prior_reason": {},
+    "remaining_failures": {
+      "state_0xe8": 13,
+      "state_0xd7": 53,
+      "state_0xfd": 49,
+      "state_0xdc": 8,
+      "mutable_or_unknown_command": 44,
+      "state_0xe7": 5,
+      "state_0xd9": 1,
+      "state_0xfb": 1
+    },
+    "new_return_depth": {},
+    "warm_VTX_shape_address_sequence_matches": false,
+    "warm_immutable_VTX_full_identity_sequence_matches": false,
+    "limits": [
+      "Only the initial cold full SDRAM snapshot supplies a complete dynamic caller graph. Warm caller stacks are not directly observed; matching VTX sequences do not prove identical dynamic caller edges.",
+      "Every proof command/target is immutable ELF; END returns to mutable caller storage are rejected, even when initial snapshot shows an overwrite.",
+      "Every non-VTX/TRI/DL/END opcode remains a state barrier. No renderer/material or predicted timing gain is claimed."
+    ],
+    "inputs_sha256": {
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/caller-liveness-v1/native-traversal/analyze.py": "38a1c1ee15c1e561457ef239010705095e5a132d89cafb53a1959ebef1f37dfc",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app-v2/.obj/sm64-priority-mesh-v2-perfdiag/app.elf": "0c2a1a8d2b1359c0b3b51ab78f81117be9b53173e5dd674d8f3978d0da35db28",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app-v2/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "20d5461d5d587fff296433f755c169c8cf039fbcbba85a0119f2df5ce4ebb8d9",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/fixture-v2/capture/run-reference/snapshot/sdram.bin": "f65ff8f40c8482ca9b6beb6552dd00173c63bd622c1ed5b41b8bc5909be54580",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/fixture-v2/capture/run-reference/snapshot/state.json": "6dd5d47aa391eba90e8a410601d27cb0fb89012345d3b80046ce1867bb2ef001",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/control-v2/run/vtx-calls.tsv": "3bc4f149417d469b65acf0f0fee678a5d6b271a966e13019577dd9a371eae256",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/span-coverage-v1/ledger.json": "5c6e7738604939eca3b644d3e8fbcd45f5f32231ac3bb4039ce81aff5bb61d0f"
+    }
+  },
+  "blocked_return_histogram": {
+    "1": 140,
+    "0": 10,
+    "2": 19,
+    "3": 5
+  },
+  "structural_ENDDL_stopped": 164,
+  "ENDDL_followup_failures": {
+    "state_0xe8": 13,
+    "state_0xd7": 47,
+    "state_0xfd": 47,
+    "mutable_or_unknown_command": 44,
+    "state_0xdc": 6,
+    "state_0xe7": 5,
+    "state_0xd9": 1,
+    "state_0xfb": 1
+  },
+  "max_observed_runtime_continuation_depth": 3,
+  "source_findings": [
+    "G_DL push recursively enters the callee and resumes at current command+8; branch replaces current command and preserves the existing continuation. G_ENDDL returns without canonical/fog/material handling. F24 and F27 dispatch blocks are byte-identical.",
+    "Returning from the top-level list is a hard barrier: gfx_run later flushes deferred fog and materializes remaining canonical rows before raw release; rsp.loaded_vertices survives frame reset.",
+    "Each proof must still reject a TRI reading any unoverwritten pending slot, malformed or nonimmutable commands/targets, all original state opcodes, exhaustion/cycles and caller-stack overflow. A malformed VTX cannot be treated as an overwrite.",
+    "The existing MeshTask.dead_after is keyed only by immutable task source and must retain caller-independent meaning; positive contextual proofs cannot be written to it."
+  ],
+  "possible_safe_design_if_future_coverage_changes": [
+    "Pass an explicit immutable continuation frame {resume=cmd+8,parent} into recursive gfx_run_dl. A tail branch keeps it; top-level starts NULL. For a narrower first scope, accept only one external return, rejecting a second.",
+    "A bounded proof starts after the task TRI span with pending mask; walks VTX/TRI and immutable DL/END only; pushes local return PCs for nested static calls and consumes actual caller continuations at outer ENDs. Success requires every pending slot overwritten. It performs no renderer calls or mutations.",
+    "Cache by exact task source plus the exact continuation PCs used by the proof, with exact comparison after any hash lookup. A C-stack-frame pointer or unverified hash alone is insufficient: automatic stack slots are reused, and the same callee can have different callers.",
+    "Keep GROUP construction physically contiguous and stop at G_DL/G_ENDDL. Only liveness proof crosses those controls, so the CPU still executes calls/returns and all state changes. Each skipped member needs the same valid contextual proof; bind any group cache to that proof context as well as source generation, cull and repair hints.",
+    "On context-cache eviction/replacement, do not reuse a group whose proof identifier was recycled. Either compare the full saved key or use a nonreused generation plus exact key. Preserve the current first-call survivor/fog work and union cleanup."
+  ],
+  "required_directed_tests_if_implemented": [
+    "Same callee+different caller: overwrite caller passes, live-TRI/state caller rejects; warm cache cannot transfer the positive answer.",
+    "Nested static calls, tail branches, multiple ENDs, top-level return, repeated call-frame stack address, exact-key hash collision and proof-entry replacement.",
+    "Partial slot overwrites followed by survivor TRI, malformed VTX, recursive/cyclic DL, 256-command bound and continuation-depth cap.",
+    "Dynamic/mutable caller pointer rejection even when a stale snapshot would show a favorable overwrite; no cross-frame assumption.",
+    "GROUP end stays inside current physical list; exact logical-call expansion, canonical/fog state, fallback/repair output and framebuffer oracle remain mandatory."
+  ],
+  "recommendation": "Do not implement caller-control-only expansion on these counts: zero additional candidates were proven in the exact cold scene. Warm continuation state was not captured and its command identities differ, so do not claim zero or positive warm coverage from cold stacks. Any state-barrier relaxation or mutable-caller snapshot policy is a separate correctness audit and measurement.",
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v3/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "3e5df211b1571fab257d1ad4286096c4badd64e4c515428af3f9f6a41041a7df",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app-v2/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "20d5461d5d587fff296433f755c169c8cf039fbcbba85a0119f2df5ce4ebb8d9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/caller-liveness-v1/native-traversal/analyze.py": "38a1c1ee15c1e561457ef239010705095e5a132d89cafb53a1959ebef1f37dfc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/caller-liveness-v1/native-traversal/result.json": "4d9edfae875c24589f89d8662610607ebd63d24b30081981e428e0bde43b6b8c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/caller-liveness-v1/native-traversal/ledger.json": "491319cbcd2b19782fe0c5f924eb5e94cd53615ccd97970e18a7c4291ef160f8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/caller-liveness-v1/native-traversal/events.json": "41fc8adfd27407d9455b9e9a138bdda15cf084069f6927a97c4cb2ffac0144bc"
+  },
+  "control_dispatch_sha256": "3b6501acba0acc9e9de910d8d783e6e62f94c405eb9fb06ad18c03f467446c73",
+  "physical_fit": false,
+  "deployed": false
+}

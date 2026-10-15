@@ -1,0 +1,1 @@
+PASS: 6270 bounded capacity/partial/empty scopes; 20484660 word checks; 65 triangles use 9 reserve/commit pairs; refusal and mixed-scope ordering

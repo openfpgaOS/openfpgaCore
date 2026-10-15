@@ -1,0 +1,1012 @@
+%Warning-PINMISSING: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/tb_gpu_wrpath.v:249:3: Instance has missing pin: 'gpu_tex_mem_arvalid'
+  249 | ) gpu (
+      |   ^~~
+                     /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:272:24: ... Location of port declaration
+  272 |     output wire        gpu_tex_mem_arvalid,
+      |                        ^~~~~~~~~~~~~~~~~~~
+                     ... For warning description see https://verilator.org/warn/PINMISSING?v=5.052
+                     ... Use "/* verilator lint_off PINMISSING */" and lint_on around source to disable this message.
+%Warning-PINMISSING: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/tb_gpu_wrpath.v:249:3: Instance has missing pin: 'gpu_tex_mem_araddr'
+  249 | ) gpu (
+      |   ^~~
+                     /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:274:24: ... Location of port declaration
+  274 |     output wire [31:0] gpu_tex_mem_araddr,
+      |                        ^~~~~~~~~~~~~~~~~~
+%Warning-PINMISSING: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/tb_gpu_wrpath.v:249:3: Instance has missing pin: 'gpu_tex_mem_arlen'
+  249 | ) gpu (
+      |   ^~~
+                     /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:275:24: ... Location of port declaration
+  275 |     output wire [7:0]  gpu_tex_mem_arlen,
+      |                        ^~~~~~~~~~~~~~~~~
+%Warning-PINMISSING: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/tb_gpu_wrpath.v:249:3: Instance has missing pin: 'mesh_arvalid'
+  249 | ) gpu (
+      |   ^~~
+                     /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:286:24: ... Location of port declaration
+  286 |     output wire        mesh_arvalid,
+      |                        ^~~~~~~~~~~~
+%Warning-PINMISSING: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/tb_gpu_wrpath.v:249:3: Instance has missing pin: 'mesh_araddr'
+  249 | ) gpu (
+      |   ^~~
+                     /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:288:24: ... Location of port declaration
+  288 |     output wire [31:0] mesh_araddr,
+      |                        ^~~~~~~~~~~
+%Warning-PINMISSING: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/tb_gpu_wrpath.v:249:3: Instance has missing pin: 'mesh_arlen'
+  249 | ) gpu (
+      |   ^~~
+                     /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:289:24: ... Location of port declaration
+  289 |     output wire [7:0]  mesh_arlen,
+      |                        ^~~~~~~~~~
+%Warning-PINMISSING: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/tb_gpu_wrpath.v:249:3: Instance has missing pin: 'gpu_tex_mem_up_wr'
+  249 | ) gpu (
+      |   ^~~
+                     /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:301:24: ... Location of port declaration
+  301 |     output reg         gpu_tex_mem_up_wr,
+      |                        ^~~~~~~~~~~~~~~~~
+%Warning-PINMISSING: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/tb_gpu_wrpath.v:249:3: Instance has missing pin: 'gpu_tex_mem_up_addr'
+  249 | ) gpu (
+      |   ^~~
+                     /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:302:24: ... Location of port declaration
+  302 |     output reg  [21:0] gpu_tex_mem_up_addr,
+      |                        ^~~~~~~~~~~~~~~~~~~
+%Warning-PINMISSING: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/tb_gpu_wrpath.v:249:3: Instance has missing pin: 'gpu_tex_mem_up_wdata'
+  249 | ) gpu (
+      |   ^~~
+                     /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:303:24: ... Location of port declaration
+  303 |     output reg  [31:0] gpu_tex_mem_up_wdata,
+      |                        ^~~~~~~~~~~~~~~~~~~~
+%Warning-PINMISSING: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/tb_gpu_wrpath.v:498:3: Instance has missing pin: 'word_queue_pending'
+  498 | ) sdram_ctrl (
+      |   ^~~~~~~~~~
+                     /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/io_sdram_test.v:79:25: ... Location of port declaration
+   79 | output  wire            word_queue_pending,  
+      |                         ^~~~~~~~~~~~~~~~~~
+%Warning-PINMISSING: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/tb_gpu_wrpath.v:527:18: Instance has missing pin: 'wr_evt'
+  527 | sdram_model_full sdram_chip (
+      |                  ^~~~~~~~~~
+                     /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/sdram_model_full.v:62:24: ... Location of port declaration
+   62 |     output reg         wr_evt,
+      |                        ^~~~~~
+%Warning-PINMISSING: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/tb_gpu_wrpath.v:527:18: Instance has missing pin: 'wr_evt_hw_addr'
+  527 | sdram_model_full sdram_chip (
+      |                  ^~~~~~~~~~
+                     /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/sdram_model_full.v:63:24: ... Location of port declaration
+   63 |     output reg  [24:0] wr_evt_hw_addr,
+      |                        ^~~~~~~~~~~~~~
+%Warning-PINMISSING: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/tb_gpu_wrpath.v:527:18: Instance has missing pin: 'wr_evt_dqm'
+  527 | sdram_model_full sdram_chip (
+      |                  ^~~~~~~~~~
+                     /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/sdram_model_full.v:64:24: ... Location of port declaration
+   64 |     output reg  [1:0]  wr_evt_dqm,
+      |                        ^~~~~~~~~~
+%Warning-PINMISSING: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/tb_gpu_wrpath.v:527:18: Instance has missing pin: 'wr_evt_data'
+  527 | sdram_model_full sdram_chip (
+      |                  ^~~~~~~~~~
+                     /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/sdram_model_full.v:65:24: ... Location of port declaration
+   65 |     output reg  [15:0] wr_evt_data
+      |                        ^~~~~~~~~~~
+%Warning-PINMISSING: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/io_sdram_test.v:206:9: Instance has missing pin: 'rise'
+  206 | synch_3 s1(reset_n, reset_n_s, controller_clk);
+      |         ^~
+                     /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/synch_3.v:15:28: ... Location of port declaration
+   15 |    output wire             rise,   
+      |                            ^~~~
+%Warning-PINMISSING: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/io_sdram_test.v:206:9: Instance has missing pin: 'fall'
+  206 | synch_3 s1(reset_n, reset_n_s, controller_clk);
+      |         ^~
+                     /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/synch_3.v:16:28: ... Location of port declaration
+   16 |    output wire             fall    
+      |                            ^~~~
+%Warning-TIMESCALEMOD: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/tb_gpu_wrpath.v:34:8: Timescale missing on this module as other modules have it (IEEE 1800-2023 3.14.2.3)
+   34 | module tb_gpu_wrpath #(
+      |        ^~~~~~~~~~~~~
+                       /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/sdram_model_full.v:33:8: ... Location of module with timescale
+   33 | module sdram_model_full (
+      |        ^~~~~~~~~~~~~~~~
+                       ... For warning description see https://verilator.org/warn/TIMESCALEMOD?v=5.052
+                       ... Use "/* verilator lint_off TIMESCALEMOD */" and lint_on around source to disable this message.
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:4588:18: Operator VAR 'CBW_ARLEN' expects 2 bits on the Initial value, but Initial value's SUB generates 32 or 3 bits.
+                                                                                                                                                : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 4588 | localparam [1:0] CBW_ARLEN = CBW_WORDS - 1;      
+      |                  ^~~~~~~~~
+                     ... For warning description see https://verilator.org/warn/WIDTHTRUNC?v=5.052
+                     ... Use "/* verilator lint_off WIDTHTRUNC */" and lint_on around source to disable this message.
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_edge_walker.v:289:39: Operator COND expects 17 bits on the Conditional False, but Conditional False's VARREF 'y0' generates 16 bits.
+                                                                                                                                                       : ... note: In instance 'tb_gpu_wrpath.gpu.g_tri_walker.tri_walker'
+  289 | wire signed [15:0] y0_scan = subpix_y ? (($signed({y0[15],y0}) + 17'sd7) >>> 4) : y0;
+      |                                       ^
+                      ... For warning description see https://verilator.org/warn/WIDTHEXPAND?v=5.052
+                      ... Use "/* verilator lint_off WIDTHEXPAND */" and lint_on around source to disable this message.
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_edge_walker.v:289:28: Operator ASSIGNW expects 16 bits on the Assign RHS, but Assign RHS's COND generates 17 bits.
+                                                                                                                                                      : ... note: In instance 'tb_gpu_wrpath.gpu.g_tri_walker.tri_walker'
+  289 | wire signed [15:0] y0_scan = subpix_y ? (($signed({y0[15],y0}) + 17'sd7) >>> 4) : y0;
+      |                            ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_edge_walker.v:290:39: Operator COND expects 17 bits on the Conditional False, but Conditional False's VARREF 'y1' generates 16 bits.
+                                                                                                                                                       : ... note: In instance 'tb_gpu_wrpath.gpu.g_tri_walker.tri_walker'
+  290 | wire signed [15:0] y1_scan = subpix_y ? (($signed({y1[15],y1}) + 17'sd7) >>> 4) : y1;
+      |                                       ^
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_edge_walker.v:290:28: Operator ASSIGNW expects 16 bits on the Assign RHS, but Assign RHS's COND generates 17 bits.
+                                                                                                                                                      : ... note: In instance 'tb_gpu_wrpath.gpu.g_tri_walker.tri_walker'
+  290 | wire signed [15:0] y1_scan = subpix_y ? (($signed({y1[15],y1}) + 17'sd7) >>> 4) : y1;
+      |                            ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_edge_walker.v:291:39: Operator COND expects 17 bits on the Conditional False, but Conditional False's VARREF 'y2' generates 16 bits.
+                                                                                                                                                       : ... note: In instance 'tb_gpu_wrpath.gpu.g_tri_walker.tri_walker'
+  291 | wire signed [15:0] y2_scan = subpix_y ? (($signed({y2[15],y2}) + 17'sd7) >>> 4) : y2;
+      |                                       ^
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_edge_walker.v:291:28: Operator ASSIGNW expects 16 bits on the Assign RHS, but Assign RHS's COND generates 17 bits.
+                                                                                                                                                      : ... note: In instance 'tb_gpu_wrpath.gpu.g_tri_walker.tri_walker'
+  291 | wire signed [15:0] y2_scan = subpix_y ? (($signed({y2[15],y2}) + 17'sd7) >>> 4) : y2;
+      |                            ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_edge_walker.v:418:23: Operator ASSIGNDLY expects 33 bits on the Assign RHS, but Assign RHS's VARREF 'eop_dx' generates 17 bits.
+                                                                                                                                                       : ... note: In instance 'tb_gpu_wrpath.gpu.g_tri_walker.tri_walker'
+  418 |                 mul_a <= eop_dx;
+      |                       ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_edge_walker.v:425:23: Operator ASSIGNDLY expects 33 bits on the Assign RHS, but Assign RHS's VARREF 'eop_dx' generates 17 bits.
+                                                                                                                                                       : ... note: In instance 'tb_gpu_wrpath.gpu.g_tri_walker.tri_walker'
+  425 |                 mul_a <= eop_dx;
+      |                       ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_edge_walker.v:508:29: Operator EQ expects 6 bits on the RHS, but RHS's CONST '5'h1' generates 5 bits.
+                                                                                                                                                       : ... note: In instance 'tb_gpu_wrpath.gpu.g_tri_walker.tri_walker'
+  508 |                 if (div_cnt == 5'd1)
+      |                             ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_edge_walker.v:525:33: Operator EQ expects 6 bits on the RHS, but RHS's CONST '5'h1' generates 5 bits.
+                                                                                                                                                       : ... note: In instance 'tb_gpu_wrpath.gpu.g_tri_walker.tri_walker'
+  525 |                     if (div_cnt == 5'd1)
+      |                                 ^~
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_edge_walker.v:617:29: Operator ASSIGNDLY expects 32 bits on the Assign RHS, but Assign RHS's SHIFTRS generates 50 bits.
+                                                                                                                                                      : ... note: In instance 'tb_gpu_wrpath.gpu.g_tri_walker.tri_walker'
+  617 |                 bot_mid_off <= mul_p_pipe >>> 4;    
+      |                             ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:571:68: Operator ADD expects 64 bits on the LHS, but LHS's VARREF 'accumulator' generates 48 bits.
+                                                                                                                                                           : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  571 |                 accumulator <= column == 0 ? product : accumulator + product;
+      |                                                                    ^
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:571:29: Operator ASSIGNDLY expects 48 bits on the Assign RHS, but Assign RHS's COND generates 64 bits.
+                                                                                                                                                          : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  571 |                 accumulator <= column == 0 ? product : accumulator + product;
+      |                             ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:576:51: Operator ADD expects 48 bits on the RHS, but RHS's VARREF 'matrix_q' generates 32 bits.
+                                                                                                                                                           : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  576 |                     0: cx <= (accumulator >>> 16) + matrix_q;
+      |                                                   ^
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:576:27: Operator ASSIGNDLY expects 32 bits on the Assign RHS, but Assign RHS's ADD generates 48 bits.
+                                                                                                                                                          : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  576 |                     0: cx <= (accumulator >>> 16) + matrix_q;
+      |                           ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:577:51: Operator ADD expects 48 bits on the RHS, but RHS's VARREF 'matrix_q' generates 32 bits.
+                                                                                                                                                           : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  577 |                     1: cy <= (accumulator >>> 16) + matrix_q;
+      |                                                   ^
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:577:27: Operator ASSIGNDLY expects 32 bits on the Assign RHS, but Assign RHS's ADD generates 48 bits.
+                                                                                                                                                          : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  577 |                     1: cy <= (accumulator >>> 16) + matrix_q;
+      |                           ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:578:57: Operator ADD expects 48 bits on the RHS, but RHS's VARREF 'matrix_q' generates 32 bits.
+                                                                                                                                                           : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  578 |                     2: begin cw <= (accumulator >>> 16) + matrix_q; divisor <= nearclip; end
+      |                                                         ^
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:578:33: Operator ASSIGNDLY expects 32 bits on the Assign RHS, but Assign RHS's ADD generates 48 bits.
+                                                                                                                                                          : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  578 |                     2: begin cw <= (accumulator >>> 16) + matrix_q; divisor <= nearclip; end
+      |                                 ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:658:33: Operator ASSIGNDLY expects 32 bits on the Assign RHS, but Assign RHS's VARREF 'dx1' generates 17 bits.
+                                                                                                                                                           : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  658 |             CULL_F: begin mul_a <= dx1; mul_b <= dy2; vx <= dx2; state <= CULL_G; end
+      |                                 ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:658:47: Operator ASSIGNDLY expects 32 bits on the Assign RHS, but Assign RHS's VARREF 'dy2' generates 17 bits.
+                                                                                                                                                           : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  658 |             CULL_F: begin mul_a <= dx1; mul_b <= dy2; vx <= dx2; state <= CULL_G; end
+      |                                               ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:658:58: Operator ASSIGNDLY expects 32 bits on the Assign RHS, but Assign RHS's VARREF 'dx2' generates 17 bits.
+                                                                                                                                                           : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  658 |             CULL_F: begin mul_a <= dx1; mul_b <= dy2; vx <= dx2; state <= CULL_G; end
+      |                                                          ^~
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:660:39: Operator ASSIGNDLY expects 48 bits on the Assign RHS, but Assign RHS's VARREF 'product' generates 64 bits.
+                                                                                                                                                          : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  660 |             CULL_H: begin accumulator <= product; mul_a <= vx; mul_b <= dy1; state <= CULL_I; end
+      |                                       ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:660:70: Operator ASSIGNDLY expects 32 bits on the Assign RHS, but Assign RHS's VARREF 'dy1' generates 17 bits.
+                                                                                                                                                           : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  660 |             CULL_H: begin accumulator <= product; mul_a <= vx; mul_b <= dy1; state <= CULL_I; end
+      |                                                                      ^~
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:688:38: Operator ASSIGNDLY expects 2 bits on the Assign RHS, but Assign RHS's VARREF 'native_q' generates 32 bits.
+                                                                                                                                                          : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  688 |                     15: native_flags <= native_q;
+      |                                      ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:740:38: Operator ASSIGNDLY expects 32 bits on the Assign RHS, but Assign RHS's VARREF 'native_stream' generates 25 bits.
+                                                                                                                                                           : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  740 |                     native_read_addr <= native_stream; native_read_bank <= 0;
+      |                                      ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:773:59: Operator ADD expects 32 bits on the LHS, but LHS's VARREF 'native_stream' generates 25 bits.
+                                                                                                                                                           : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  773 |                         native_read_addr <= native_stream + 4;
+      |                                                           ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:779:55: Operator ADD expects 32 bits on the LHS, but LHS's VARREF 'native_stream' generates 25 bits.
+                                                                                                                                                           : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  779 |                     native_read_addr <= native_stream + 4;
+      |                                                       ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:784:57: Operator ADD expects 32 bits on the LHS, but LHS's VARREF 'native_old_base' generates 24 bits.
+                                                                                                                                                           : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  784 |                     native_read_addr <= native_old_base + (native_current_word << 2);
+      |                                                         ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:789:61: Operator ADD expects 32 bits on the LHS, but LHS's VARREF 'native_current_base' generates 24 bits.
+                                                                                                                                                           : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  789 |                     native_read_addr <= native_current_base + (native_current_word << 2);
+      |                                                             ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:801:62: Operator SHIFTL expects 32 bits on the LHS, but LHS's VARREF 'native_flags' generates 2 bits.
+                                                                                                                                                           : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  801 |                         triangle <= native_q | (native_flags << 15);
+      |                                                              ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:820:55: Operator ADD expects 32 bits on the LHS, but LHS's VARREF 'native_stream' generates 25 bits.
+                                                                                                                                                           : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  820 |                     native_read_addr <= native_stream + 4;
+      |                                                       ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:850:47: Operator ADD expects 48 bits on the RHS, but RHS's SIGNED generates 32 bits.
+                                                                                                                                                           : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  850 |                 0: cx <= (accumulator >>> 16) + $signed(native_q);
+      |                                               ^
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:850:23: Operator ASSIGNDLY expects 32 bits on the Assign RHS, but Assign RHS's ADD generates 48 bits.
+                                                                                                                                                          : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  850 |                 0: cx <= (accumulator >>> 16) + $signed(native_q);
+      |                       ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:851:47: Operator ADD expects 48 bits on the RHS, but RHS's SIGNED generates 32 bits.
+                                                                                                                                                           : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  851 |                 1: cy <= (accumulator >>> 16) + $signed(native_q);
+      |                                               ^
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:851:23: Operator ASSIGNDLY expects 32 bits on the Assign RHS, but Assign RHS's ADD generates 48 bits.
+                                                                                                                                                          : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  851 |                 1: cy <= (accumulator >>> 16) + $signed(native_q);
+      |                       ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:852:47: Operator ADD expects 48 bits on the RHS, but RHS's SIGNED generates 32 bits.
+                                                                                                                                                           : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  852 |                 2: cw <= (accumulator >>> 16) + $signed(native_q);
+      |                                               ^
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:852:23: Operator ASSIGNDLY expects 32 bits on the Assign RHS, but Assign RHS's ADD generates 48 bits.
+                                                                                                                                                          : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  852 |                 2: cw <= (accumulator >>> 16) + $signed(native_q);
+      |                       ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:872:34: Operator ASSIGNDLY expects 32 bits on the Assign RHS, but Assign RHS's VARREF 'native_stream' generates 25 bits.
+                                                                                                                                                           : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  872 |                 native_read_addr <= native_stream; native_read_bank <= 0;
+      |                                  ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:883:38: Operator ASSIGNDLY expects 32 bits on the Assign RHS, but Assign RHS's VARREF 'native_stream' generates 25 bits.
+                                                                                                                                                           : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  883 |                     native_read_addr <= native_stream; native_read_bank <= 0;
+      |                                      ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_geometry_worker.v:893:38: Operator ASSIGNDLY expects 32 bits on the Assign RHS, but Assign RHS's VARREF 'native_stream' generates 25 bits.
+                                                                                                                                                           : ... note: In instance 'tb_gpu_wrpath.gpu.g_geometry_worker.worker'
+  893 |                     native_read_addr <= native_stream; native_read_bank <= 0;
+      |                                      ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_color_depth_cache.sv:350:39: Operator ASSIGN expects 32 bits on the Assign RHS, but Assign RHS's REPLICATE generates 22 bits.
+                                                                                                                                                              : ... note: In instance 'tb_gpu_wrpath.gpu_render_cache'
+  350 |         ALLOC: begin meta_we=1; meta_w={tag,{(2*WORD_BITS){1'b0}},2'b01}; end
+      |                                       ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_color_depth_cache.sv:359:55: Operator ASSIGN expects 32 bits on the Assign RHS, but Assign RHS's REPLICATE generates 22 bits.
+                                                                                                                                                              : ... note: In instance 'tb_gpu_wrpath.gpu_render_cache'
+  359 |                 if(s_wstrb!=0) begin meta_we=1; meta_w={tag,new_last,new_first,2'b11}; end
+      |                                                       ^
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_color_depth_cache.sv:472:35: Operator ASSIGNDLY expects 12 bits on the Assign RHS, but Assign RHS's SEL generates 22 bits.
+                                                                                                                                                             : ... note: In instance 'tb_gpu_wrpath.gpu_render_cache'
+  472 |                         victim_tag<=selected_meta[META_BITS-1:META_TAG];
+      |                                   ^~
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_color_depth_cache.sv:580:43: Operator ASSIGNDLY expects 12 bits on the Assign RHS, but Assign RHS's SEL generates 22 bits.
+                                                                                                                                                             : ... note: In instance 'tb_gpu_wrpath.gpu_render_cache'
+  580 |                     slot<=walk; victim_tag<=walk_meta[META_BITS-1:META_TAG];
+      |                                           ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/axi_sdram_arbiter.v:283:40: Operator GTE expects 5 bits on the RHS, but RHS's CONST '4'h2' generates 4 bits.
+                                                                                                                                                         : ... note: In instance 'tb_gpu_wrpath.sdram_arb'
+  283 | wire gwq_c1 = gwq_fs0 && (gpu_wq_count >= 4'd2) && !gpu_wq_last[gwq_p0] && gpu_wq_full_strobe[gwq_p1];
+      |                                        ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/axi_sdram_arbiter.v:284:40: Operator GTE expects 5 bits on the RHS, but RHS's CONST '4'h3' generates 4 bits.
+                                                                                                                                                         : ... note: In instance 'tb_gpu_wrpath.sdram_arb'
+  284 | wire gwq_c2 = gwq_c1  && (gpu_wq_count >= 4'd3) && !gpu_wq_last[gwq_p1] && gpu_wq_full_strobe[gwq_p2];
+      |                                        ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/axi_sdram_arbiter.v:285:40: Operator GTE expects 5 bits on the RHS, but RHS's CONST '4'h4' generates 4 bits.
+                                                                                                                                                         : ... note: In instance 'tb_gpu_wrpath.sdram_arb'
+  285 | wire gwq_c3 = gwq_c2  && (gpu_wq_count >= 4'd4) && !gpu_wq_last[gwq_p2] && gpu_wq_full_strobe[gwq_p3];
+      |                                        ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/axi_sdram_arbiter.v:286:40: Operator GTE expects 5 bits on the RHS, but RHS's CONST '4'h5' generates 4 bits.
+                                                                                                                                                         : ... note: In instance 'tb_gpu_wrpath.sdram_arb'
+  286 | wire gwq_c4 = gwq_c3  && (gpu_wq_count >= 4'd5) && !gpu_wq_last[gwq_p3] && gpu_wq_full_strobe[gwq_p4];
+      |                                        ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/axi_sdram_arbiter.v:287:40: Operator GTE expects 5 bits on the RHS, but RHS's CONST '4'h6' generates 4 bits.
+                                                                                                                                                         : ... note: In instance 'tb_gpu_wrpath.sdram_arb'
+  287 | wire gwq_c5 = gwq_c4  && (gpu_wq_count >= 4'd6) && !gpu_wq_last[gwq_p4] && gpu_wq_full_strobe[gwq_p5];
+      |                                        ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/axi_sdram_arbiter.v:288:40: Operator GTE expects 5 bits on the RHS, but RHS's CONST '4'h7' generates 4 bits.
+                                                                                                                                                         : ... note: In instance 'tb_gpu_wrpath.sdram_arb'
+  288 | wire gwq_c6 = gwq_c5  && (gpu_wq_count >= 4'd7) && !gpu_wq_last[gwq_p5] && gpu_wq_full_strobe[gwq_p6];
+      |                                        ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/axi_sdram_arbiter.v:289:40: Operator GTE expects 5 bits on the RHS, but RHS's CONST '4'h8' generates 4 bits.
+                                                                                                                                                         : ... note: In instance 'tb_gpu_wrpath.sdram_arb'
+  289 | wire gwq_c7 = gwq_c6  && (gpu_wq_count >= 4'd8) && !gpu_wq_last[gwq_p6] && gpu_wq_full_strobe[gwq_p7];
+      |                                        ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/axi_sdram_arbiter.v:307:47: Operator GTE expects 5 bits on the RHS, but RHS's CONST '4'h2' generates 4 bits.
+                                                                                                                                                         : ... note: In instance 'tb_gpu_wrpath.sdram_arb'
+  307 |                                 (gpu_wq_count >= 4'd2));
+      |                                               ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/axi_sdram_arbiter.v:410:41: Operator COND expects 5 bits on the Conditional True, but Conditional True's CONST '4'h1' generates 4 bits.
+                                                                                                                                                         : ... note: In instance 'tb_gpu_wrpath.sdram_arb'
+  410 |                       + (m0_w_post_fire ? 4'd1 : 4'd0)
+      |                                         ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/axi_sdram_arbiter.v:410:41: Operator COND expects 5 bits on the Conditional False, but Conditional False's CONST '4'h0' generates 4 bits.
+                                                                                                                                                         : ... note: In instance 'tb_gpu_wrpath.sdram_arb'
+  410 |                       + (m0_w_post_fire ? 4'd1 : 4'd0)
+      |                                         ^
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:1046:23: Operator ASSIGN expects 16 bits on the Assign RHS, but Assign RHS's DIVS generates 32 bits.
+                                                                                                                                                : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 1046 |         recip_lut[ri] = (16777216) / (1024 + ri);
+      |                       ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:2764:13: Operator CASE expects 4 bits on the Case Item, but Case Item's CONST '3'h0' generates 3 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 2764 |             case (spanprod_calc_step)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:2764:13: Operator CASE expects 4 bits on the Case Item, but Case Item's CONST '3'h5' generates 3 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 2764 |             case (spanprod_calc_step)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:2764:13: Operator CASE expects 4 bits on the Case Item, but Case Item's CONST '3'h1' generates 3 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 2764 |             case (spanprod_calc_step)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:2764:13: Operator CASE expects 4 bits on the Case Item, but Case Item's CONST '3'h2' generates 3 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 2764 |             case (spanprod_calc_step)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:2764:13: Operator CASE expects 4 bits on the Case Item, but Case Item's CONST '3'h3' generates 3 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 2764 |             case (spanprod_calc_step)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:3258:18: Operator SHIFTRS expects 16 bits on the LHS, but LHS's VARREF 'pr' generates 14 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 3258 |         ar = (pr >>> 5) + $signed({2'b0, dr});
+      |                  ^~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:3258:25: Operator ADD expects 16 bits on the RHS, but RHS's SIGNED generates 7 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 3258 |         ar = (pr >>> 5) + $signed({2'b0, dr});
+      |                         ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:3259:18: Operator SHIFTRS expects 16 bits on the LHS, but LHS's VARREF 'pg' generates 14 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 3259 |         ag = (pg >>> 6) + $signed({2'b0, dg});
+      |                  ^~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:3259:25: Operator ADD expects 16 bits on the RHS, but RHS's SIGNED generates 8 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 3259 |         ag = (pg >>> 6) + $signed({2'b0, dg});
+      |                         ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:3260:18: Operator SHIFTRS expects 16 bits on the LHS, but LHS's VARREF 'pb' generates 14 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 3260 |         ab = (pb >>> 5) + $signed({2'b0, db});
+      |                  ^~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:3260:25: Operator ADD expects 16 bits on the RHS, but RHS's SIGNED generates 7 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 3260 |         ab = (pb >>> 5) + $signed({2'b0, db});
+      |                         ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:3283:47: Operator ADD expects 13 bits on the RHS, but RHS's REPLICATE generates 6 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 3283 |         pr = src[15:11] * a + dst[15:11] * na + {d, 3'b100};    
+      |                                               ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:3284:47: Operator ADD expects 13 bits on the RHS, but RHS's REPLICATE generates 6 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 3284 |         pg = src[10:5]  * a + dst[10:5]  * na + {d, 3'b100};    
+      |                                               ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:3285:47: Operator ADD expects 13 bits on the RHS, but RHS's REPLICATE generates 6 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 3285 |         pb = src[4:0]   * a + dst[4:0]   * na + {d, 3'b100};
+      |                                               ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:4264:28: Operator ASSIGNDLY expects 4 bits on the Assign RHS, but Assign RHS's CONST '3'h0' generates 3 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 4264 |         spanprod_calc_step <= 3'd0;
+      |                            ^~
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:4618:37: Operator ASSIGNW expects 8 bits on the Assign RHS, but Assign RHS's SHIFTR generates 32 bits.
+                                                                                                                                                : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 4618 | wire [7:0]  blend_sram_lut_byte_w   = sram_rdata >> {transluc_rd_addr[1:0], 3'b0};
+      |                                     ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:5275:32: Operator ADD expects 13 bits on the RHS, but RHS's REPLICATE generates 6 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 5275 | wire [12:0] cb_dsum_r  = cb_sr + {cb_dith_w, 3'b100};    
+      |                                ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:5276:32: Operator ADD expects 13 bits on the RHS, but RHS's REPLICATE generates 6 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 5276 | wire [12:0] cb_dsum_g  = cb_sg + {cb_dith_w, 3'b100};    
+      |                                ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:5277:32: Operator ADD expects 13 bits on the RHS, but RHS's REPLICATE generates 6 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 5277 | wire [12:0] cb_dsum_b  = cb_sb + {cb_dith_w, 3'b100};
+      |                                ^
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:6261:31: Logical operator COND expects 1 bit on the Conditional Test, but Conditional Test's MODDIVS generates 32 bits.
+                                                                                                                                                : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 6261 |              (zw_half_idx % 2 ? zw_word[zw_half_idx/2][31:16]
+      |                               ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:6553:26: Operator ASSIGNDLY expects 4 bits on the Assign RHS, but Assign RHS's CONST '2'h0' generates 2 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 6553 |         blend_arlen_r    <= 2'd0;
+      |                          ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:6554:26: Operator ASSIGNDLY expects 8 bits on the Assign RHS, but Assign RHS's CONST '4'h0' generates 4 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 6554 |         zw_valid         <= 4'b0;
+      |                          ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:6556:26: Operator ASSIGNDLY expects 3 bits on the Assign RHS, but Assign RHS's CONST '2'h0' generates 2 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 6556 |         zw_fill_beat     <= 2'd0;
+      |                          ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:6588:30: Operator ASSIGNDLY expects 4 bits on the Assign RHS, but Assign RHS's CONST '3'h7' generates 3 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 6588 |         spanprod_launch_step <= 3'd7;
+      |                              ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:6735:27: Operator ASSIGNDLY expects 4 bits on the Assign RHS, but Assign RHS's CONST '2'h0' generates 2 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 6735 |             blend_arlen_r <= 2'd0;
+      |                           ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:6736:27: Operator ASSIGNDLY expects 8 bits on the Assign RHS, but Assign RHS's CONST '4'h0' generates 4 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 6736 |             zw_valid      <= 4'b0;
+      |                           ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:6737:27: Operator ASSIGNDLY expects 3 bits on the Assign RHS, but Assign RHS's CONST '2'h0' generates 2 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 6737 |             zw_fill_beat  <= 2'd0;
+      |                           ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:6962:23: Operator ASSIGNDLY expects 8 bits on the Assign RHS, but Assign RHS's CONST '4'h0' generates 4 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 6962 |             zw_valid  <= 4'b0;
+      |                       ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:7901:36: Operator ASSIGNDLY expects 4 bits on the Assign RHS, but Assign RHS's CONST '3'h0' generates 3 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 7901 |                 spanprod_calc_step <= 3'd0;
+      |                                    ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:7919:36: Operator ASSIGNDLY expects 4 bits on the Assign RHS, but Assign RHS's CONST '3'h0' generates 3 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 7919 |                 spanprod_calc_step <= 3'd0;
+      |                                    ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:7952:40: Operator ASSIGNDLY expects 4 bits on the Assign RHS, but Assign RHS's CONST '3'h0' generates 3 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 7952 |                     spanprod_calc_step <= 3'd0;
+      |                                        ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8003:40: Operator ASSIGNDLY expects 4 bits on the Assign RHS, but Assign RHS's CONST '3'h0' generates 3 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8003 |                     spanprod_calc_step <= 3'd0;
+      |                                        ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8022:34: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_SORT_A' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8022 |                     dstate       <= DRV_SORT_A;
+      |                                  ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8037:33: Operator ASSIGNDLY expects 3 bits on the Assign RHS, but Assign RHS's CONST '2'h0' generates 2 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8037 |                     xf_row      <= 2'd0;
+      |                                 ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8065:33: Operator ASSIGNDLY expects 3 bits on the Assign RHS, but Assign RHS's CONST '2'h0' generates 2 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8065 |                     xf_row      <= 2'd0;
+      |                                 ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8090:33: Operator ASSIGNDLY expects 3 bits on the Assign RHS, but Assign RHS's CONST '2'h0' generates 2 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8090 |                     xf_row      <= 2'd0;
+      |                                 ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8108:33: Operator ASSIGNDLY expects 3 bits on the Assign RHS, but Assign RHS's CONST '2'h0' generates 2 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8108 |                     xf_row      <= 2'd0;
+      |                                 ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8198:28: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_SORT_B' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8198 |                     dstate <= DRV_SORT_B;
+      |                            ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8207:28: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_SORT_C' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8207 |                     dstate <= DRV_SORT_C;
+      |                            ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8221:28: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_PROD_L0' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8221 |                     dstate <= DRV_PROD_L0;
+      |                            ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8253:28: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_PROD_L1' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8253 |                     dstate <= DRV_PROD_L1;
+      |                            ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8261:28: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_PROD_L2C0' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8261 |                     dstate <= DRV_PROD_L2C0;
+      |                            ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8272:28: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_PROD_C1' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8272 |                     dstate <= DRV_PROD_C1;
+      |                            ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8278:28: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_PROD_C2' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8278 |                     dstate <= DRV_PROD_C2;
+      |                            ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8290:37: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_DELTA' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8290 |                     end else dstate <= DRV_DELTA;
+      |                                     ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8296:64: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_DELTA' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8296 |                     if (norm_ready || norm_shift == 16) dstate <= DRV_DELTA;
+      |                                                                ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8318:28: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_DET_W' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8318 |                     dstate <= DRV_DET_W;
+      |                            ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8320:35: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_DET_CAP' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8320 |                 DRV_DET_W: dstate <= DRV_DET_CAP;
+      |                                   ^~
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8325:33: Operator ASSIGNDLY expects 56 bits on the Assign RHS, but Assign RHS's VARREF 'dsp_p' generates 64 bits.
+                                                                                                                                                : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8325 |                     drv_prod_r  <= dsp_p;
+      |                                 ^~
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8326:33: Operator ASSIGNDLY expects 56 bits on the Assign RHS, but Assign RHS's VARREF 'dsp2_p' generates 64 bits.
+                                                                                                                                                : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8326 |                     drv2_prod_r <= dsp2_p;
+      |                                 ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8327:28: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_DET_FORM' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8327 |                     dstate <= DRV_DET_FORM;
+      |                            ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8349:28: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_RDET' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8349 |                     dstate <= DRV_RDET;
+      |                            ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8390:37: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_DA_SEL' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8390 |                             dstate  <= DRV_DA_SEL;   
+      |                                     ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8416:32: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_DA_PREP' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8416 |                     dstate     <= DRV_DA_PREP;
+      |                                ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8429:32: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_PLANE_ORG' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8429 |                         dstate <= DRV_PLANE_ORG;
+      |                                ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8431:32: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_PLANE_NUM' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8431 |                         dstate <= DRV_PLANE_NUM;
+      |                                ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8450:28: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_PLANE_NW' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8450 |                     dstate <= DRV_PLANE_NW;
+      |                            ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8452:38: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_PLANE_NC' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8452 |                 DRV_PLANE_NW: dstate <= DRV_PLANE_NC;
+      |                                      ^~
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8460:33: Operator ASSIGNDLY expects 56 bits on the Assign RHS, but Assign RHS's VARREF 'dsp_p' generates 64 bits.
+                                                                                                                                                : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8460 |                     drv_prod_r  <= dsp_p;
+      |                                 ^~
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8461:33: Operator ASSIGNDLY expects 56 bits on the Assign RHS, but Assign RHS's VARREF 'dsp2_p' generates 64 bits.
+                                                                                                                                                : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8461 |                     drv2_prod_r <= dsp2_p;
+      |                                 ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8462:28: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_PLANE_NF' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8462 |                     dstate <= DRV_PLANE_NF;
+      |                            ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8474:63: Operator SUB expects 56 bits on the LHS, but LHS's SIGNED generates 49 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8474 |                     product_delta = $signed(drv_prod_r[48:0]) - drv2_prod_r;
+      |                                                               ^
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8474:35: Operator ASSIGN expects 50 bits on the Assign RHS, but Assign RHS's SUB generates 56 bits.
+                                                                                                                                                : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8474 |                     product_delta = $signed(drv_prod_r[48:0]) - drv2_prod_r;
+      |                                   ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8481:33: Operator COND expects 54 bits on the Conditional False, but Conditional False's VARREF 'product_delta' generates 50 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8481 |                                 ? $signed({product_delta, 4'b0})
+      |                                 ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8486:51: Operator SHIFTRS expects 64 bits on the LHS, but LHS's VARREF 'num_now' generates 54 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8486 |                     dsp_a  <= deriv_sat32(num_now >>> DERIV_SPLIT);
+      |                                                   ^~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8495:28: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_SCALE_HW' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8495 |                     dstate <= DRV_SCALE_HW;
+      |                            ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8497:38: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_SCALE_HC' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8497 |                 DRV_SCALE_HW: dstate <= DRV_SCALE_HC;    
+      |                                      ^~
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8504:33: Operator ASSIGNDLY expects 56 bits on the Assign RHS, but Assign RHS's VARREF 'dsp2_p' generates 64 bits.
+                                                                                                                                                : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8504 |                     drv2_prod_r <= dsp2_p;
+      |                                 ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8505:28: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_SCALE_LS' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8505 |                     dstate <= DRV_SCALE_LS;
+      |                            ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8537:33: Operator ADD expects 64 bits on the RHS, but RHS's SIGNED generates 32 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8537 |                                 + $signed({1'b0, drv2_prod_r[54:DERIV_SPLIT]});
+      |                                 ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8547:59: Operator NEQ expects 4 bits on the RHS, but RHS's CONST '3'h3' generates 3 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8547 |                     q29_shamt_r <= (vt_q29_en && (dv_attr != 3'd3))
+      |                                                           ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8548:34: Operator COND expects 6 bits on the Conditional True, but Conditional True's VARREF 'vt_q29_shift' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8548 |                                  ? vt_q29_shift
+      |                                  ^
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8547:33: Operator ASSIGNDLY expects 5 bits on the Assign RHS, but Assign RHS's COND generates 6 bits.
+                                                                                                                                                : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8547 |                     q29_shamt_r <= (vt_q29_en && (dv_attr != 3'd3))
+      |                                 ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8551:28: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_SCALE_LF' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8551 |                     dstate <= DRV_SCALE_LF;
+      |                            ^~
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8563:38: Operator ASSIGNDLY expects 57 bits on the Assign RHS, but Assign RHS's SHIFTRS generates 64 bits.
+                                                                                                                                                : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8563 |                         drv_q_coarse <= (drv_qsum_r >>> 7) >>> {q29_shamt_r[4:3], 3'b000};
+      |                                      ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8564:32: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_SCALE_LF2' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8564 |                         dstate <= DRV_SCALE_LF2;
+      |                                ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8575:32: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_SCALE_LF3' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8575 |                         dstate <= DRV_SCALE_LF3;
+      |                                ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8580:69: Operator SHIFTRS expects 64 bits on the LHS, but LHS's VARREF 'drv_q_coarse' generates 57 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8580 |                     drv_q_fine <= deriv_clamp_for_sign(drv_q_coarse >>> q29_shamt_r[2:0]);
+      |                                                                     ^~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8584:28: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_SCALE_LF3' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8584 |                     dstate <= DRV_SCALE_LF3;
+      |                            ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8595:34: Operator FUNCREF 'deriv_sat32' expects 64 bits on the Function Argument, but Function Argument's VARREF 'qsigned' generates 33 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8595 |                         dv_du <= deriv_sat32(qsigned);
+      |                                  ^~~~~~~~~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8597:32: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_PLANE_NUM' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8597 |                         dstate <= DRV_PLANE_NUM;    
+      |                                ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8599:34: Operator FUNCREF 'deriv_sat32' expects 64 bits on the Function Argument, but Function Argument's VARREF 'qsigned' generates 33 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8599 |                         dv_dv <= deriv_sat32(qsigned);
+      |                                  ^~~~~~~~~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8602:32: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_PLANE_ORG' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8602 |                         dstate <= DRV_PLANE_ORG;
+      |                                ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8611:28: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_ORG_W' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8611 |                     dstate <= DRV_ORG_W;
+      |                            ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8613:35: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_ORG_CAP' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8613 |                 DRV_ORG_W: dstate <= DRV_ORG_CAP;
+      |                                   ^~
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8623:33: Operator ASSIGNDLY expects 56 bits on the Assign RHS, but Assign RHS's SHIFTRS generates 64 bits.
+                                                                                                                                                : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8623 |                     drv_prod_r  <= dsp_p >>> 4;
+      |                                 ^~
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8624:33: Operator ASSIGNDLY expects 56 bits on the Assign RHS, but Assign RHS's COND generates 64 bits.
+                                                                                                                                                : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8624 |                     drv2_prod_r <= spanprod_subpix_y ? (dsp2_p >>> 4) : dsp2_p;
+      |                                 ^~
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8633:34: Operator ASSIGNDLY expects 32 bits on the Assign RHS, but Assign RHS's SHIFTRS generates 64 bits.
+                                                                                                                                                : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8633 |                         a0_eff_r <= $signed({{19{deriv_a0_q[31]}}, deriv_a0_q, 13'b0})
+      |                                  ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8632:47: Operator NEQ expects 4 bits on the RHS, but RHS's CONST '3'h3' generates 3 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8632 |                     if (vt_q29_en && (dv_attr != 3'd3))
+      |                                               ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8637:28: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_ORG_FORM' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8637 |                     dstate <= DRV_ORG_FORM;
+      |                            ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8664:21: Operator CASE expects 4 bits on the Case Item, but Case Item's CONST '3'h0' generates 3 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8664 |                     case (dv_attr)
+      |                     ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8664:21: Operator CASE expects 4 bits on the Case Item, but Case Item's CONST '3'h1' generates 3 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8664 |                     case (dv_attr)
+      |                     ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8664:21: Operator CASE expects 4 bits on the Case Item, but Case Item's CONST '3'h2' generates 3 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8664 |                     case (dv_attr)
+      |                     ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8664:21: Operator CASE expects 4 bits on the Case Item, but Case Item's CONST '3'h4' generates 3 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8664 |                     case (dv_attr)
+      |                     ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8664:21: Operator CASE expects 4 bits on the Case Item, but Case Item's CONST '3'h5' generates 3 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8664 |                     case (dv_attr)
+      |                     ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8664:21: Operator CASE expects 4 bits on the Case Item, but Case Item's CONST '3'h6' generates 3 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8664 |                     case (dv_attr)
+      |                     ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8737:32: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_DONE' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8737 |                         dstate <= DRV_DONE;
+      |                                ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8741:33: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_DA_SEL' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8741 |                         dstate  <= DRV_DA_SEL;    
+      |                                 ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8177:13: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'DRV_SORT_A' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8177 |             case (dstate)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8177:13: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'DRV_SORT_B' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8177 |             case (dstate)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8177:13: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'DRV_SORT_C' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8177 |             case (dstate)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8177:13: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'DRV_PROD_L0' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8177 |             case (dstate)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8177:13: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'DRV_PROD_L1' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8177 |             case (dstate)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8177:13: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'DRV_PROD_L2C0' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8177 |             case (dstate)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8177:13: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'DRV_PROD_C1' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8177 |             case (dstate)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8177:13: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'DRV_PROD_C2' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8177 |             case (dstate)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8177:13: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'DRV_DELTA' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8177 |             case (dstate)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8177:13: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'DRV_DET_W' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8177 |             case (dstate)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8177:13: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'DRV_DET_CAP' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8177 |             case (dstate)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8177:13: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'DRV_DET_FORM' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8177 |             case (dstate)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8177:13: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'DRV_RDET' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8177 |             case (dstate)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8177:13: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'DRV_DA_SEL' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8177 |             case (dstate)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8177:13: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'DRV_DA_PREP' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8177 |             case (dstate)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8177:13: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'DRV_PLANE_NUM' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8177 |             case (dstate)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8177:13: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'DRV_PLANE_NW' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8177 |             case (dstate)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8177:13: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'DRV_PLANE_NC' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8177 |             case (dstate)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8177:13: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'DRV_PLANE_NF' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8177 |             case (dstate)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8177:13: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'DRV_SCALE_HW' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8177 |             case (dstate)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8177:13: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'DRV_SCALE_HC' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8177 |             case (dstate)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8177:13: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'DRV_SCALE_LS' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8177 |             case (dstate)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8177:13: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'DRV_SCALE_LF' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8177 |             case (dstate)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8177:13: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'DRV_SCALE_LF2' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8177 |             case (dstate)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8177:13: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'DRV_SCALE_LF3' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8177 |             case (dstate)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8177:13: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'DRV_PLANE_ORG' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8177 |             case (dstate)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8177:13: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'DRV_ORG_W' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8177 |             case (dstate)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8177:13: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'DRV_ORG_CAP' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8177 |             case (dstate)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8177:13: Operator CASE expects 6 bits on the Case Item, but Case Item's VARREF 'DRV_ORG_FORM' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8177 |             case (dstate)
+      |             ^~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8792:44: Operator ADD expects 64 bits on the RHS, but RHS's VARREF 'xf_transl' generates 32 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8792 |                     camv = (xf_acc >>> 16) + xf_transl;    
+      |                                            ^
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8792:26: Operator ASSIGN expects 32 bits on the Assign RHS, but Assign RHS's ADD generates 64 bits.
+                                                                                                                                                : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8792 |                     camv = (xf_acc >>> 16) + xf_transl;    
+      |                          ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8944:34: Operator ASSIGNDLY expects 3 bits on the Assign RHS, but Assign RHS's CONST '2'h0' generates 2 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8944 |                         xf_row   <= 2'd0;
+      |                                  ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8976:40: Operator ASSIGNDLY expects 4 bits on the Assign RHS, but Assign RHS's CONST '3'h0' generates 3 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8976 |                     spanprod_calc_step <= 3'd0;
+      |                                        ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:8997:28: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_SORT_A' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 8997 |                     dstate <= DRV_SORT_A;
+      |                            ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:9171:40: Operator ASSIGNDLY expects 4 bits on the Assign RHS, but Assign RHS's CONST '3'h0' generates 3 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 9171 |                     spanprod_calc_step <= 3'd0;
+      |                                        ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:9190:28: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'DRV_SORT_A' generates 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 9190 |                     dstate <= DRV_SORT_A;
+      |                            ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:9216:40: Operator ASSIGNDLY expects 4 bits on the Assign RHS, but Assign RHS's CONST '3'h0' generates 3 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 9216 |                     spanprod_calc_step <= 3'd0;
+      |                                        ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:9228:40: Operator ASSIGNDLY expects 4 bits on the Assign RHS, but Assign RHS's CONST '3'h0' generates 3 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 9228 |                     spanprod_calc_step <= 3'd0;
+      |                                        ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:9310:36: Operator ASSIGNDLY expects 4 bits on the Assign RHS, but Assign RHS's CONST '3'h0' generates 3 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 9310 |                 spanprod_calc_step <= 3'd0;
+      |                                    ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:9317:45: Operator FUNCREF 'spanprod_next_calc' expects 4 bits on the Function Argument, but Function Argument's CONST '3'h0' generates 3 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 9317 |                     spanprod_launch_step <= spanprod_next_calc(3'd0);
+      |                                             ^~~~~~~~~~~~~~~~~~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:9716:100: Operator SUB expects 14 bits on the LHS, but LHS's SIGNED generates 6 bits.
+                                                                                                                                                  : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 9716 |                     p2_pr   <= $signed({1'b0, p1_pixel_color[15:11]}) * ($signed({1'b0, p1_R})     - 6'sd16);
+      |                                                                                                    ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:9716:100: Operator SUB expects 14 bits on the RHS, but RHS's CONST '6'sh10' generates 6 bits.
+                                                                                                                                                  : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 9716 |                     p2_pr   <= $signed({1'b0, p1_pixel_color[15:11]}) * ($signed({1'b0, p1_R})     - 6'sd16);
+      |                                                                                                    ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:9717:100: Operator SUB expects 14 bits on the LHS, but LHS's SIGNED generates 7 bits.
+                                                                                                                                                  : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 9717 |                     p2_pg   <= $signed({1'b0, p1_pixel_color[10:5]})  * ($signed({1'b0, p1_light}) - 7'sd32);
+      |                                                                                                    ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:9717:100: Operator SUB expects 14 bits on the RHS, but RHS's CONST '7'sh20' generates 7 bits.
+                                                                                                                                                  : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 9717 |                     p2_pg   <= $signed({1'b0, p1_pixel_color[10:5]})  * ($signed({1'b0, p1_light}) - 7'sd32);
+      |                                                                                                    ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:9718:100: Operator SUB expects 14 bits on the LHS, but LHS's SIGNED generates 6 bits.
+                                                                                                                                                  : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 9718 |                     p2_pb   <= $signed({1'b0, p1_pixel_color[4:0]})   * ($signed({1'b0, p1_B})     - 6'sd16);
+      |                                                                                                    ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:9718:100: Operator SUB expects 14 bits on the RHS, but RHS's CONST '6'sh10' generates 6 bits.
+                                                                                                                                                  : ... note: In instance 'tb_gpu_wrpath.gpu'
+ 9718 |                     p2_pb   <= $signed({1'b0, p1_pixel_color[4:0]})   * ($signed({1'b0, p1_B})     - 6'sd16);
+      |                                                                                                    ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:10008:34: Operator EQ expects 32 or 5 bits on the LHS, but LHS's VARREF 'zw_fill_beat' generates 3 bits.
+                                                                                                                                                  : ... note: In instance 'tb_gpu_wrpath.gpu'
+10008 |                 if (zw_fill_beat == ZW_WORDS-1)
+      |                                  ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:10113:70: Operator COND expects 32 or 5 bits on the Conditional False, but Conditional False's CONST '2'h0' generates 2 bits.
+                                                                                                                                                  : ... note: In instance 'tb_gpu_wrpath.gpu'
+10113 |                             blend_arlen_r <= (GPU_Z_READ_WINDOW > 1) ? (ZW_WORDS-1)
+      |                                                                      ^
+%Warning-WIDTHTRUNC: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:10113:43: Operator ASSIGNDLY expects 4 bits on the Assign RHS, but Assign RHS's COND generates 32 or 5 bits.
+                                                                                                                                                 : ... note: In instance 'tb_gpu_wrpath.gpu'
+10113 |                             blend_arlen_r <= (GPU_Z_READ_WINDOW > 1) ? (ZW_WORDS-1)
+      |                                           ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:10116:43: Operator ASSIGNDLY expects 8 bits on the Assign RHS, but Assign RHS's CONST '4'h0' generates 4 bits.
+                                                                                                                                                  : ... note: In instance 'tb_gpu_wrpath.gpu'
+10116 |                             zw_valid      <= 4'b0;
+      |                                           ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:10117:43: Operator ASSIGNDLY expects 3 bits on the Assign RHS, but Assign RHS's CONST '2'h0' generates 2 bits.
+                                                                                                                                                  : ... note: In instance 'tb_gpu_wrpath.gpu'
+10117 |                             zw_fill_beat  <= 2'd0;
+      |                                           ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:10220:65: Operator COND expects 8 bits on the Conditional False, but Conditional False's CONST '4'h0' generates 4 bits.
+                                                                                                                                                  : ... note: In instance 'tb_gpu_wrpath.gpu'
+10220 |                             zw_valid <= (GPU_Z_READ_WINDOW > 1) ? {ZW_WORDS{1'b1}}
+      |                                                                 ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:10219:46: Operator EQ expects 32 or 5 bits on the LHS, but LHS's VARREF 'zw_fill_beat' generates 3 bits.
+                                                                                                                                                  : ... note: In instance 'tb_gpu_wrpath.gpu'
+10219 |                             || (zw_fill_beat == (ZW_WORDS-1)))) begin
+      |                                              ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:10302:39: Operator ASSIGNDLY expects 4 bits on the Assign RHS, but Assign RHS's VARREF 'CBW_ARLEN' generates 2 bits.
+                                                                                                                                                  : ... note: In instance 'tb_gpu_wrpath.gpu'
+10302 |                         blend_arlen_r <= CBW_ARLEN;
+      |                                       ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/gpu_core.v:10376:39: Operator ASSIGNDLY expects 4 bits on the Assign RHS, but Assign RHS's CONST '2'h0' generates 2 bits.
+                                                                                                                                                  : ... note: In instance 'tb_gpu_wrpath.gpu'
+10376 |                         blend_arlen_r <= 2'd0;
+      |                                       ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/io_sdram_test.v:772:15: Operator ASSIGNDLY expects 13 bits on the Assign RHS, but Assign RHS's SEL generates 10 bits.
+                                                                                                                                                     : ... note: In instance 'tb_gpu_wrpath.sdram_ctrl'
+  772 |         phy_a <= addr[9:0];
+      |               ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/io_sdram_test.v:802:26: Operator ADD expects 25 bits on the RHS, but RHS's CONST '2'h2' generates 2 bits.
+                                                                                                                                                     : ... note: In instance 'tb_gpu_wrpath.sdram_ctrl'
+  802 |             addr <= addr + 2'd2;
+      |                          ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/io_sdram_test.v:916:15: Operator ASSIGNDLY expects 13 bits on the Assign RHS, but Assign RHS's SEL generates 10 bits.
+                                                                                                                                                     : ... note: In instance 'tb_gpu_wrpath.sdram_ctrl'
+  916 |         phy_a <= addr[9:0];  
+      |               ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/io_sdram_test.v:922:22: Operator ADD expects 25 bits on the RHS, but RHS's CONST '2'h2' generates 2 bits.
+                                                                                                                                                     : ... note: In instance 'tb_gpu_wrpath.sdram_ctrl'
+  922 |         addr <= addr + 2'd2;   
+      |                      ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/io_sdram_test.v:1003:19: Operator ASSIGNDLY expects 13 bits on the Assign RHS, but Assign RHS's SEL generates 10 bits.
+                                                                                                                                                      : ... note: In instance 'tb_gpu_wrpath.sdram_ctrl'
+ 1003 |             phy_a <= addr[9:0];  
+      |                   ^~
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/sdram_model_full.v:467:38: Bit extraction of array[33554431:0] requires 25 bit index, not 24 bits.
+                                                                                                                                                        : ... note: In instance 'tb_gpu_wrpath.sdram_chip'
+  467 |         read_word = {mem[ha + 1], mem[ha]};
+      |                                      ^
+%Warning-WIDTHEXPAND: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/sdram_model_full.v:499:12: Bit extraction of array[33554431:0] requires 25 bit index, not 24 bits.
+                                                                                                                                                        : ... note: In instance 'tb_gpu_wrpath.sdram_chip'
+  499 |         mem[ha]     = data[15:0];
+      |            ^
+%Warning-CASEINCOMPLETE: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/sdram_model_full.v:369:9: Case values incompletely covered (example pattern 0x6)
+  369 |         case (cmd)
+      |         ^~~~
+                         ... For warning description see https://verilator.org/warn/CASEINCOMPLETE?v=5.052
+                         ... Use "/* verilator lint_off CASEINCOMPLETE */" and lint_on around source to disable this message.
+%Warning-COMBDLY: /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/io_sdram_test.v:364:21: Non-blocking assignment '<=' in combinational logic process
+                                                                                                                                                 : ... This will be executed as a blocking assignment '='!
+  364 |     burst_data_done <= enable_data_done_4;
+      |                     ^~
+                  ... For warning description see https://verilator.org/warn/COMBDLY?v=5.052
+                  ... Use "/* verilator lint_off COMBDLY */" and lint_on around source to disable this message.
+                  *** See https://verilator.org/warn/COMBDLY?v=5.052 before disabling this,
+                  else you may end up with different sim results.
+make: Entering directory '/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/obj'
+g++  -I.  -MMD -I/usr/share/verilator/include -I/usr/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=0 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=0 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable    -std=c++17 -O2   -Os  -c -o tb_gpu_wrpath_main.o /home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/inputs/tb_gpu_wrpath_main.cpp
+g++ -Os  -I.  -MMD -I/usr/share/verilator/include -I/usr/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=0 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=0 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable    -std=c++17 -O2   -c -o verilated.o /usr/share/verilator/include/verilated.cpp
+g++ -Os  -I.  -MMD -I/usr/share/verilator/include -I/usr/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=0 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=0 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable    -std=c++17 -O2   -c -o verilated_dpi.o /usr/share/verilator/include/verilated_dpi.cpp
+g++ -Os  -I.  -MMD -I/usr/share/verilator/include -I/usr/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=0 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=0 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable    -std=c++17 -O2   -c -o verilated_threads.o /usr/share/verilator/include/verilated_threads.cpp
+g++ -Os  -I.  -MMD -I/usr/share/verilator/include -I/usr/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=0 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=0 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable    -std=c++17 -O2   -c -x c++-header Vtb_gpu_wrpath__pch.h -o Vtb_gpu_wrpath__pch.h.fast.gch
+g++   -I.  -MMD -I/usr/share/verilator/include -I/usr/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=0 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=0 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable    -std=c++17 -O2   -c -x c++-header Vtb_gpu_wrpath__pch.h -o Vtb_gpu_wrpath__pch.h.slow.gch
+g++ -Os  -I.  -MMD -I/usr/share/verilator/include -I/usr/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=0 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=0 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable    -std=c++17 -O2   -include Vtb_gpu_wrpath__pch.h.fast -c Vtb_gpu_wrpath.cpp
+g++ -Os  -I.  -MMD -I/usr/share/verilator/include -I/usr/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=0 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=0 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable    -std=c++17 -O2   -include Vtb_gpu_wrpath__pch.h.fast -c Vtb_gpu_wrpath___024root__0.cpp
+g++ -Os  -I.  -MMD -I/usr/share/verilator/include -I/usr/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=0 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=0 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable    -std=c++17 -O2   -include Vtb_gpu_wrpath__pch.h.fast -c Vtb_gpu_wrpath___024root__1.cpp
+g++ -Os  -I.  -MMD -I/usr/share/verilator/include -I/usr/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=0 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=0 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable    -std=c++17 -O2   -include Vtb_gpu_wrpath__pch.h.fast -c Vtb_gpu_wrpath__Dpi.cpp
+g++   -I.  -MMD -I/usr/share/verilator/include -I/usr/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=0 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=0 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable    -std=c++17 -O2   -include Vtb_gpu_wrpath__pch.h.slow -c Vtb_gpu_wrpath__ConstPool__0__Slow.cpp
+g++   -I.  -MMD -I/usr/share/verilator/include -I/usr/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=0 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=0 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable    -std=c++17 -O2   -include Vtb_gpu_wrpath__pch.h.slow -c Vtb_gpu_wrpath___024root__Slow.cpp
+g++   -I.  -MMD -I/usr/share/verilator/include -I/usr/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=0 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=0 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable    -std=c++17 -O2   -include Vtb_gpu_wrpath__pch.h.slow -c Vtb_gpu_wrpath___024root__0__Slow.cpp
+g++   -I.  -MMD -I/usr/share/verilator/include -I/usr/share/verilator/include/vltstd -DVERILATOR=1 -DVM_COVERAGE=0 -DVM_SC=0 -DVM_TIMING=0 -DVM_TRACE=0 -DVM_TRACE_FST=0 -DVM_TRACE_VCD=0 -DVM_TRACE_SAIF=0 -DVM_VPI=0 -faligned-new -fcf-protection=none -Wno-bool-operation -Wno-int-in-bool-context -Wno-shadow -Wno-sign-compare -Wno-subobject-linkage -Wno-tautological-compare -Wno-uninitialized -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable    -std=c++17 -O2   -include Vtb_gpu_wrpath__pch.h.slow -c Vtb_gpu_wrpath__Syms__Slow.cpp
+g++    tb_gpu_wrpath_main.o verilated.o verilated_dpi.o verilated_threads.o Vtb_gpu_wrpath__ALL.a    -pthread -lpthread -latomic   -o Vtb_gpu_wrpath
+rm Vtb_gpu_wrpath__ALL.verilator_deplist.tmp
+make: Leaving directory '/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/final-source-wrpath/obj'
+- V e r i l a t i o n   R e p o r t: Verilator 5.052 2026-09-05 rev v5.052
+- Verilator: Built from 5.736 MB sources in 14 modules, into 2.771 MB in 8 C++ files needing 0.002 MB
+- Verilator: Walltime 10.589 s (elab=0.190, cvt=0.990, bld=9.327); cpu 1.282 s on 2 threads; allocated 68.949 MB

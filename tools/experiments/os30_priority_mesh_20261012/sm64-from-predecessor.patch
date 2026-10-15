@@ -1,0 +1,240 @@
+--- a/src/sm64/pocket/perf_pocket.c
++++ b/src/sm64/pocket/perf_pocket.c
+@@ -381,7 +381,7 @@
+ #if SM64_PERF_DETAILS
+     print_text(12,210,"PERF P3 VERT");
+ #else
+-    print_text(12,210,"PERF F23 PRI1");
++    print_text(12,210,"PERF F24 PRI2");
+ #endif
+     if(!s->valid) {
+         print_text(12,178,"WAIT 5 SECONDS IN LEVEL");
+--- a/src/sm64/sm64/src/pc/gfx/gfx_gpu.c
++++ b/src/sm64/sm64/src/pc/gfx/gfx_gpu.c
+@@ -322,7 +322,7 @@
+ static uint32_t async_sequence,async_ticket,async_epoch,async_epoch_valid;
+ static uint32_t async_servicing,async_yielding;
+ static uint32_t async_finished_repair_token;
+-static unsigned async_finished_repair_valid,async_legacy_held;
++static unsigned async_finished_repair_valid,async_legacy_held,async_legacy_quiescent;
+ 
+ int gfx_gpu_async_supported(void) {
+ #ifndef OF_PC
+@@ -362,9 +362,14 @@
+  * is no blocked async dependency and permits retaining consecutive LOADs. */
+ static int gpu_async_raw_blocks_jobs(void) {
+ #ifndef OF_PC
+-    if(sm64_async_front_capability!=1u||!async_legacy_held)return 0;
++    if(sm64_async_front_capability!=1u||!async_legacy_held||async_legacy_quiescent)return 0;
+     gpu_async_epoch_check();
+-    return BRAM_GEO_REGS[0x23]!=async_sequence;
++    if(BRAM_GEO_REGS[0x23]!=async_sequence)return 1;
++    /* No new async job can be submitted while this same lease is held:
++     * enqueue explicitly releases first. Consumer reset preserves the lease
++     * and cancels async work, so it cannot invalidate this no-blocker fact. */
++    async_legacy_quiescent=1;
++    return 0;
+ #else
+     return 0;
+ #endif
+@@ -481,6 +486,7 @@
+ int gfx_gpu_async_raw_acquire(void) {
+ #ifndef OF_PC
+     if(sm64_async_front_capability!=1u)return 0;
++    if(async_legacy_held&&async_legacy_quiescent)return 0;
+     gpu_async_epoch_check();
+     if(async_legacy_held)return 0;
+     if(BRAM_GEO_REGS[0x23]!=async_sequence)of_gpu_kick_now();
+@@ -498,7 +504,7 @@
+         if(status&2u)gfx_gpu_async_service();
+         ++gfx_async_stats[11];
+     }
+-    async_legacy_held=1;
++    async_legacy_held=1;async_legacy_quiescent=0;
+     ++gfx_async_stats[10];return 1;
+ #else
+     return 0;
+@@ -510,7 +516,7 @@
+     gpu_async_epoch_check();
+     __asm__ volatile("fence rw,rw" ::: "memory");
+     BRAM_GEO_REGS[0x2d]=2;
+-    async_legacy_held=0;
++    async_legacy_held=0;async_legacy_quiescent=0;
+ #endif
+ }
+ int gfx_gpu_mesh_supported(void) {
+@@ -812,6 +818,7 @@
+ static struct CramVertexSource g_cram_vertex_source[CRAM_VERTEX_ENTRIES];
+ static uint32_t g_cram_vertex_top=CRAM_VERTEX_BEGIN;
+ static uint32_t g_cram_source_generation=1;
++uint32_t gfx_gpu_cram_source_generation(void) { return g_cram_source_generation; }
+ /* Entries bind immutable TRI command bytes to one physical arena generation.
+  * Cold uploads only; steady task hits never rescan or repack triangle words. */
+ struct CramMeshSource { uintptr_t source; uint32_t offset_count; };
+@@ -835,6 +842,9 @@
+     memset(g_cram_vertex_source,0,sizeof(g_cram_vertex_source));
+     memset(g_cram_mesh_source,0,sizeof(g_cram_mesh_source));
+     ++g_cram_source_generation;
++    /* Invalidate parallel task-offset hints on every real recycle, including
++     * generation wrap. This does not discard immutable topology/repair hints. */
++    gfx_async_forget_sources();
+     g_cram_vertex_top=CRAM_VERTEX_BEGIN;
+     g_cram_vertex_last_recycle=g_cram_vertex_frame;
+     g_cram_vertex_recycled=1;cram_vertex_recycle_stats[0]++;
+@@ -2328,16 +2338,19 @@
+ #ifndef OF_PC
+     gpu_async_epoch_check();
+     _Static_assert(sizeof(struct am_transform)==24u*4u,"AJ01 transform context");
+-    uint32_t words[28];memcpy(words,transform,sizeof(*transform));
+-    words[24]=(uint32_t)g_clip_cx;words[25]=(uint32_t)g_clip_cy;
+-    words[26]=(uint32_t)g_clip_hw;words[27]=(uint32_t)g_clip_hh;
+     /* Priority legacy LOAD may overwrite every shared context field while
+      * older jobs remain queued. Each job therefore restores one complete
+      * immutable context; hardware locks this bundle through JOB acceptance. */
+     _gpu_stream_reserve_words(42u);
+     uint32_t *packet=_gpu_ring_claim();
+     *packet++=0x6300001du;*packet++=0;
+-    for(unsigned i=0;i<28;++i)*packet++=words[i];
++    for(unsigned i=0;i<16;++i)*packet++=transform->matrix[i];
++    *packet++=transform->aspect;
++    for(unsigned i=0;i<3;++i)*packet++=transform->coefficient[i];
++    *packet++=transform->ambient;*packet++=transform->diffuse;
++    *packet++=transform->scales;*packet++=transform->lighting;
++    *packet++=(uint32_t)g_clip_cx;*packet++=(uint32_t)g_clip_cy;
++    *packet++=(uint32_t)g_clip_hw;*packet++=(uint32_t)g_clip_hh;
+     if(!++async_sequence)++async_sequence;
+     *packet++=0x6400000bu;*packet++=async_sequence;*packet++=vertex_offset;
+     *packet++=vtx_word;*packet++=command_offset;
+--- a/src/sm64/sm64/src/pc/gfx/gfx_gpu.h
++++ b/src/sm64/sm64/src/pc/gfx/gfx_gpu.h
+@@ -122,6 +122,9 @@
+ /* Private immutable cached ELF Vtx source to LOD5 CRAM byte offset.
+  * Caller must drain LOAD before a miss can upload; zero returns CPU fallback. */
+ int gfx_gpu_cram_vertex_source(const void *source,unsigned count,uint32_t *offset);
++uint32_t gfx_gpu_cram_source_generation(void);
++void gfx_async_forget_sources(void);
++extern uint32_t gfx_async_source_stats[4];
+ /* MTF1 uses immutable original TRI words beside the existing Vtx source
+  * arena. Both returned offsets belong to the same retained pool generation. */
+ int gfx_gpu_mesh_sources(const void *vertices,unsigned count,const void *commands,
+--- a/src/sm64/sm64/src/pc/gfx/gfx_pc.c
++++ b/src/sm64/sm64/src/pc/gfx/gfx_pc.c
+@@ -1118,6 +1118,39 @@
+     uint16_t dead_after, prefer_legacy;
+ };
+ static struct MeshTask mesh_tasks[512];
++/* Keep the hot topology layout unchanged. These optional physical offsets
++ * belong to one exact immutable task, source shape and live pool generation. */
++struct AsyncTaskSources {
++    const void *vertices;
++    uint32_t generation,vertex_offset,command_offset,counts;
++};
++static struct AsyncTaskSources async_task_sources[512];
++/* cached hits, successful rebinds, source failures, actual pool recycles. */
++uint32_t gfx_async_source_stats[4];
++void gfx_async_forget_sources(void) {
++    memset(async_task_sources,0,sizeof(async_task_sources));
++    ++gfx_async_source_stats[3];
++}
++static int gfx_async_sources(const struct MeshTask *task,const void *vertices,
++        unsigned count,uint32_t *vertex_offset,uint32_t *command_offset) {
++    struct AsyncTaskSources *entry=&async_task_sources[task-mesh_tasks];
++    const uint32_t generation=gfx_gpu_cram_source_generation();
++    const uint32_t counts=count|((uint32_t)task->commands<<16);
++    if(entry->vertices==vertices&&entry->counts==counts&&entry->generation==generation) {
++        *vertex_offset=entry->vertex_offset;*command_offset=entry->command_offset;
++        ++gfx_async_source_stats[0];return 1;
++    }
++    if(!gfx_gpu_mesh_sources(vertices,count,task->source+1,task->commands,
++                             vertex_offset,command_offset)) {
++        ++gfx_async_source_stats[2];return 0;
++    }
++    /* Allocation can recycle between resolving vertices and commands. The
++     * existing source API retries both, and this generation is read afterward. */
++    entry->vertices=vertices;entry->counts=counts;
++    entry->generation=gfx_gpu_cram_source_generation();
++    entry->vertex_offset=*vertex_offset;entry->command_offset=*command_offset;
++    ++gfx_async_source_stats[1];return 1;
++}
+ /* callbacks, exact cache-key matches, first marks, future route rejections.
+  * This is only a performance hint: later geometry is never inferred from it. */
+ uint32_t gfx_async_hint_stats[4];
+@@ -1190,8 +1223,21 @@
+     }
+     return 0;
+ }
++static const struct MeshTask *gfx_async_route_task(const struct MeshTask *entry,int asynchronous) {
++    if(!entry->next)return NULL;
++    /* Static routing proof/hint needs no dynamic material/context setup. Keep
++     * the original diagnostic accounting while skipping the larger helper. */
++    if(asynchronous&&(entry->prefer_legacy||!entry->dead_after)) {
++        ++gfx_async_stats[0];
++        if(entry->prefer_legacy)++gfx_async_hint_stats[3];
++        else ++gfx_async_stats[1];
++        return NULL;
++    }
++    return entry;
++}
+ static const struct MeshTask *gfx_mesh_lookup(Gfx *cmd) {
+-    if(!gfx_gpu_async_supported()&&!gfx_gpu_mesh_supported())return NULL;
++    const int asynchronous=gfx_gpu_async_supported();
++    if(!asynchronous&&!gfx_gpu_mesh_supported())return NULL;
+     gfx_mesh_stats[0]++;
+     const uintptr_t p=(uintptr_t)cmd,end=(uintptr_t)__EH_FRAME_BEGIN__;
+     if((p&7)||p<(uintptr_t)&_start||p>=end||end-p<16)return NULL;
+@@ -1201,12 +1247,13 @@
+         struct MeshTask *e=&mesh_tasks[(h+probe)&511u];
+         if(e->source==cmd) {
+             gfx_mesh_stats[1]++;
+-            return e->next?e:NULL;
++            return gfx_async_route_task(e,asynchronous);
+         }
+         if(!e->source){entry=e;break;}
+     }
+     if(!entry)return NULL;
+     entry->source=cmd;
++    async_task_sources[entry-mesh_tasks].vertices=NULL;
+     entry->prefer_legacy=0;
+     const unsigned count=(cmd->words.w0>>12)&255u;
+     const unsigned limit=(cmd->words.w0>>1)&127u;
+@@ -1229,7 +1276,7 @@
+     entry->commands=commands;entry->triangles=triangles;entry->next=scan;
+     entry->dead_after=gfx_async_dead_suffix(scan,count);
+     gfx_mesh_stats[2]++;
+-    return entry;
++    return gfx_async_route_task(entry,asynchronous);
+ }
+ /* Only current-generation rows may enter TFP1/BIM2. Lazy canonical slots
+  * refer to that same raw bank; every surviving slot is copied before reuse. */
+@@ -1507,6 +1554,7 @@
+ #else
+ #define LOAD_ALIAS_ENABLED 0
+ void gfx_async_materialize_raw(void) {}
++void gfx_async_forget_sources(void) {}
+ #endif
+ 
+ static __attribute__((noinline)) void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *vertices) {
+@@ -3393,11 +3441,10 @@
+         }
+     }
+     uint32_t vertex_offset,command_offset;
+-    if(!gfx_gpu_mesh_sources(vertices,count,async_armed->source+1,
+-          async_armed->commands,&vertex_offset,&command_offset)) {
++    if(!gfx_async_sources(async_armed,vertices,count,&vertex_offset,&command_offset)) {
+         ++gfx_async_stats[3];return 0;
+     }
+-    struct am_transform transform={0};
++    struct am_transform transform;
+     for(unsigned i=0;i<16;++i)transform.matrix[i]=load_alias_bits(rsp.MP_matrix[i/4][i%4]);
+     transform.aspect=load_alias_bits(aspect);
+     transform.scales=rsp.texture_scaling_factor.s|((uint32_t)rsp.texture_scaling_factor.t<<16);
+@@ -3407,6 +3454,9 @@
+         const uint8_t *a=rsp.current_lights[1].col,*d=rsp.current_lights[0].col;
+         transform.ambient=a[0]|((uint32_t)a[1]<<8)|((uint32_t)a[2]<<16);
+         transform.diffuse=d[0]|((uint32_t)d[1]<<8)|((uint32_t)d[2]<<16);
++    } else {
++        transform.coefficient[0]=transform.coefficient[1]=transform.coefficient[2]=0;
++        transform.ambient=transform.diffuse=0;
+     }
+     /* gfx_sp_vertex has already copied survivors and dropped overwritten
+      * lazy rows. No CPU alias dependency remains when the worker takes raw. */

@@ -1,0 +1,15 @@
+{
+  "passed": true,
+  "output": "PASS: complete source-only package inventory; exact zero-fuzz forward/reverse patch round trips; app/native/physical/test evidence hashes\n",
+  "stderr": "",
+  "manifest_sha256": "8e426a1a3a61e6d0f7c6165a23ef949de852beb5863842ebe466146cacb2f181",
+  "sources": 361,
+  "core_patch_files": 9,
+  "app_patch_files": {
+    "v1": 5,
+    "v2": 5
+  },
+  "no_assets_or_binaries_packaged": true,
+  "quartus_launched": false,
+  "deployed": false
+}

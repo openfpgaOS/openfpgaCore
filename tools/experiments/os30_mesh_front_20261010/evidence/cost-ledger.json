@@ -1,0 +1,681 @@
+{
+  "status": "PASS_BOUND_TASK_COST_LEDGER_NOT_A_SPEEDUP_ESTIMATE",
+  "summaries": {
+    "1": {
+      "warm_material_nonzero_memo": {
+        "tasks": 142,
+        "input_triangles": 1102,
+        "prefix_call_charged_cycles": 829762,
+        "prefix_call_retired": 502195,
+        "raw_start_to_done_cycles": 95036,
+        "raw_driver_charged_cycles": 89684,
+        "raw_driver_retired": 35122,
+        "focused_cpu_charged_cycles_excluding_raw_driver": 578004,
+        "focused_cpu_retired_excluding_raw_driver": 387622,
+        "focused_by_function": {
+          "gfx_cpu_indexed_run": {
+            "charged_cycles": 285562,
+            "retired": 207619
+          },
+          "gfx_gpu_cram_vertex_source": {
+            "charged_cycles": 26416,
+            "retired": 9373
+          },
+          "gfx_gpu_vtx_cache_batch_impl": {
+            "charged_cycles": 147494,
+            "retired": 102912
+          },
+          "gfx_sp_vertex": {
+            "charged_cycles": 27576,
+            "retired": 17542
+          },
+          "load_alias_copy": {
+            "charged_cycles": 90956,
+            "retired": 50176
+          }
+        },
+        "all_functions": {
+          "_gpu_flush_cmd_stream": {
+            "charged_cycles": 65041,
+            "retired": 23406
+          },
+          "emit_tri_state": {
+            "charged_cycles": 18669,
+            "retired": 9142
+          },
+          "gfx_cpu_indexed_run": {
+            "charged_cycles": 285562,
+            "retired": 207619
+          },
+          "gfx_cpu_materialize_fog": {
+            "charged_cycles": 11356,
+            "retired": 5562
+          },
+          "gfx_cpu_submit_pending": {
+            "charged_cycles": 2435,
+            "retired": 2166
+          },
+          "gfx_gpu_bram_import_supported": {
+            "charged_cycles": 4112,
+            "retired": 2414
+          },
+          "gfx_gpu_bram_import_wait": {
+            "charged_cycles": 1050,
+            "retired": 710
+          },
+          "gfx_gpu_cram_vertex_source": {
+            "charged_cycles": 26416,
+            "retired": 9373
+          },
+          "gfx_gpu_draw_direct_records": {
+            "charged_cycles": 27502,
+            "retired": 15638
+          },
+          "gfx_gpu_queued_front_release": {
+            "charged_cycles": 1564,
+            "retired": 1278
+          },
+          "gfx_gpu_queued_front_service": {
+            "charged_cycles": 2019,
+            "retired": 535
+          },
+          "gfx_gpu_queued_front_supported": {
+            "charged_cycles": 2272,
+            "retired": 1420
+          },
+          "gfx_gpu_queued_front_wait_source": {
+            "charged_cycles": 1846,
+            "retired": 1562
+          },
+          "gfx_gpu_vtx_cache_batch": {
+            "charged_cycles": 410,
+            "retired": 296
+          },
+          "gfx_gpu_vtx_cache_batch_impl": {
+            "charged_cycles": 147494,
+            "retired": 102912
+          },
+          "gfx_sp_vertex": {
+            "charged_cycles": 27576,
+            "retired": 17542
+          },
+          "gpu_draw_triangles": {
+            "charged_cycles": 525,
+            "retired": 110
+          },
+          "gpu_project_clip": {
+            "charged_cycles": 17849,
+            "retired": 11613
+          },
+          "load_alias_copy": {
+            "charged_cycles": 90956,
+            "retired": 50176
+          },
+          "load_alias_materialize": {
+            "charged_cycles": 2552,
+            "retired": 1988
+          },
+          "load_alias_materialize_all": {
+            "charged_cycles": 1116,
+            "retired": 352
+          },
+          "load_alias_vertex": {
+            "charged_cycles": 89684,
+            "retired": 35122
+          },
+          "memcmp": {
+            "charged_cycles": 1756,
+            "retired": 1259
+          }
+        }
+      },
+      "cold_or_ineligible_material": {
+        "tasks": 87,
+        "input_triangles": 781,
+        "prefix_call_charged_cycles": 425783,
+        "prefix_call_retired": 250390,
+        "raw_start_to_done_cycles": 55060,
+        "raw_driver_charged_cycles": 93917,
+        "raw_driver_retired": 35663,
+        "focused_cpu_charged_cycles_excluding_raw_driver": 243030,
+        "focused_cpu_retired_excluding_raw_driver": 162748,
+        "focused_by_function": {
+          "gfx_cpu_indexed_run": {
+            "charged_cycles": 149061,
+            "retired": 107132
+          },
+          "gfx_gpu_cram_vertex_source": {
+            "charged_cycles": 13249,
+            "retired": 5847
+          },
+          "gfx_gpu_vtx_cache_batch_impl": {
+            "charged_cycles": 3814,
+            "retired": 2930
+          },
+          "gfx_sp_vertex": {
+            "charged_cycles": 27744,
+            "retired": 17761
+          },
+          "load_alias_copy": {
+            "charged_cycles": 49162,
+            "retired": 29078
+          }
+        },
+        "all_functions": {
+          "_gpu_flush_cmd_stream": {
+            "charged_cycles": 8632,
+            "retired": 3513
+          },
+          "emit_tri_state": {
+            "charged_cycles": 15151,
+            "retired": 9396
+          },
+          "gfx_clip_triangle.constprop.0": {
+            "charged_cycles": 161,
+            "retired": 98
+          },
+          "gfx_cpu_indexed_run": {
+            "charged_cycles": 149061,
+            "retired": 107132
+          },
+          "gfx_cpu_materialize_fog": {
+            "charged_cycles": 1375,
+            "retired": 775
+          },
+          "gfx_gpu_bram_import_supported": {
+            "charged_cycles": 2500,
+            "retired": 1479
+          },
+          "gfx_gpu_bram_import_wait": {
+            "charged_cycles": 801,
+            "retired": 435
+          },
+          "gfx_gpu_cram_vertex_source": {
+            "charged_cycles": 13249,
+            "retired": 5847
+          },
+          "gfx_gpu_draw_direct_records": {
+            "charged_cycles": 10685,
+            "retired": 7158
+          },
+          "gfx_gpu_queued_front_release": {
+            "charged_cycles": 960,
+            "retired": 783
+          },
+          "gfx_gpu_queued_front_service": {
+            "charged_cycles": 3249,
+            "retired": 1020
+          },
+          "gfx_gpu_queued_front_supported": {
+            "charged_cycles": 1392,
+            "retired": 870
+          },
+          "gfx_gpu_queued_front_wait_source": {
+            "charged_cycles": 1239,
+            "retired": 957
+          },
+          "gfx_gpu_vtx_cache_batch": {
+            "charged_cycles": 12,
+            "retired": 12
+          },
+          "gfx_gpu_vtx_cache_batch_impl": {
+            "charged_cycles": 3814,
+            "retired": 2930
+          },
+          "gfx_gpu_vtx_cache_begin": {
+            "charged_cycles": 3547,
+            "retired": 1506
+          },
+          "gfx_gpu_vtx_cache_tri": {
+            "charged_cycles": 1462,
+            "retired": 1106
+          },
+          "gfx_pick_combiner": {
+            "charged_cycles": 5441,
+            "retired": 3283
+          },
+          "gfx_push_triangle.constprop.0.isra.0": {
+            "charged_cycles": 3985,
+            "retired": 2590
+          },
+          "gfx_sp_vertex": {
+            "charged_cycles": 27744,
+            "retired": 17761
+          },
+          "gpu_draw_triangles": {
+            "charged_cycles": 8347,
+            "retired": 4935
+          },
+          "gpu_load_shader": {
+            "charged_cycles": 25,
+            "retired": 25
+          },
+          "gpu_project_clip": {
+            "charged_cycles": 10397,
+            "retired": 6636
+          },
+          "gpu_select_texture": {
+            "charged_cycles": 369,
+            "retired": 272
+          },
+          "gpu_set_use_alpha": {
+            "charged_cycles": 78,
+            "retired": 4
+          },
+          "gpu_unload_shader": {
+            "charged_cycles": 25,
+            "retired": 25
+          },
+          "import_texture": {
+            "charged_cycles": 3998,
+            "retired": 1360
+          },
+          "load_alias_copy": {
+            "charged_cycles": 49162,
+            "retired": 29078
+          },
+          "load_alias_materialize": {
+            "charged_cycles": 1866,
+            "retired": 1218
+          },
+          "load_alias_materialize_all": {
+            "charged_cycles": 68,
+            "retired": 55
+          },
+          "load_alias_vertex": {
+            "charged_cycles": 93917,
+            "retired": 35663
+          },
+          "memcmp": {
+            "charged_cycles": 3071,
+            "retired": 2468
+          }
+        }
+      }
+    },
+    "2": {
+      "warm_material_nonzero_memo": {
+        "tasks": 141,
+        "input_triangles": 1098,
+        "prefix_call_charged_cycles": 819934,
+        "prefix_call_retired": 495407,
+        "raw_start_to_done_cycles": 94319,
+        "raw_driver_charged_cycles": 89851,
+        "raw_driver_retired": 34811,
+        "focused_cpu_charged_cycles_excluding_raw_driver": 578111,
+        "focused_cpu_retired_excluding_raw_driver": 386772,
+        "focused_by_function": {
+          "gfx_cpu_indexed_run": {
+            "charged_cycles": 283183,
+            "retired": 207275
+          },
+          "gfx_gpu_cram_vertex_source": {
+            "charged_cycles": 28258,
+            "retired": 9312
+          },
+          "gfx_gpu_vtx_cache_batch_impl": {
+            "charged_cycles": 149427,
+            "retired": 102786
+          },
+          "gfx_sp_vertex": {
+            "charged_cycles": 26828,
+            "retired": 17435
+          },
+          "load_alias_copy": {
+            "charged_cycles": 90415,
+            "retired": 49964
+          }
+        },
+        "all_functions": {
+          "_gpu_flush_cmd_stream": {
+            "charged_cycles": 70825,
+            "retired": 25015
+          },
+          "emit_tri_state": {
+            "charged_cycles": 17519,
+            "retired": 9082
+          },
+          "gfx_cpu_indexed_run": {
+            "charged_cycles": 283183,
+            "retired": 207275
+          },
+          "gfx_cpu_materialize_fog": {
+            "charged_cycles": 10677,
+            "retired": 5562
+          },
+          "gfx_cpu_submit_pending": {
+            "charged_cycles": 2418,
+            "retired": 2166
+          },
+          "gfx_gpu_bram_import_supported": {
+            "charged_cycles": 4092,
+            "retired": 2397
+          },
+          "gfx_gpu_bram_import_wait": {
+            "charged_cycles": 995,
+            "retired": 705
+          },
+          "gfx_gpu_cram_vertex_source": {
+            "charged_cycles": 28258,
+            "retired": 9312
+          },
+          "gfx_gpu_draw_direct_records": {
+            "charged_cycles": 18737,
+            "retired": 11879
+          },
+          "gfx_gpu_queued_front_release": {
+            "charged_cycles": 1554,
+            "retired": 1269
+          },
+          "gfx_gpu_queued_front_service": {
+            "charged_cycles": 1914,
+            "retired": 515
+          },
+          "gfx_gpu_queued_front_supported": {
+            "charged_cycles": 2256,
+            "retired": 1410
+          },
+          "gfx_gpu_queued_front_wait_source": {
+            "charged_cycles": 1745,
+            "retired": 1551
+          },
+          "gfx_gpu_vtx_cache_batch": {
+            "charged_cycles": 417,
+            "retired": 294
+          },
+          "gfx_gpu_vtx_cache_batch_impl": {
+            "charged_cycles": 149427,
+            "retired": 102786
+          },
+          "gfx_sp_vertex": {
+            "charged_cycles": 26828,
+            "retired": 17435
+          },
+          "gpu_draw_triangles": {
+            "charged_cycles": 664,
+            "retired": 99
+          },
+          "gpu_project_clip": {
+            "charged_cycles": 12723,
+            "retired": 8295
+          },
+          "load_alias_copy": {
+            "charged_cycles": 90415,
+            "retired": 49964
+          },
+          "load_alias_materialize": {
+            "charged_cycles": 2574,
+            "retired": 1974
+          },
+          "load_alias_materialize_all": {
+            "charged_cycles": 1146,
+            "retired": 352
+          },
+          "load_alias_vertex": {
+            "charged_cycles": 89851,
+            "retired": 34811
+          },
+          "memcmp": {
+            "charged_cycles": 1716,
+            "retired": 1259
+          }
+        }
+      },
+      "cold_or_ineligible_material": {
+        "tasks": 87,
+        "input_triangles": 781,
+        "prefix_call_charged_cycles": 717162,
+        "prefix_call_retired": 354201,
+        "raw_start_to_done_cycles": 54888,
+        "raw_driver_charged_cycles": 94073,
+        "raw_driver_retired": 35562,
+        "focused_cpu_charged_cycles_excluding_raw_driver": 244415,
+        "focused_cpu_retired_excluding_raw_driver": 162788,
+        "focused_by_function": {
+          "gfx_cpu_indexed_run": {
+            "charged_cycles": 148622,
+            "retired": 107172
+          },
+          "gfx_gpu_cram_vertex_source": {
+            "charged_cycles": 12873,
+            "retired": 5847
+          },
+          "gfx_gpu_vtx_cache_batch_impl": {
+            "charged_cycles": 3729,
+            "retired": 2930
+          },
+          "gfx_sp_vertex": {
+            "charged_cycles": 27595,
+            "retired": 17761
+          },
+          "load_alias_copy": {
+            "charged_cycles": 51596,
+            "retired": 29078
+          }
+        },
+        "all_functions": {
+          "UNMAPPED": {
+            "charged_cycles": 106943,
+            "retired": 49816
+          },
+          "__libc_free": {
+            "charged_cycles": 134,
+            "retired": 4
+          },
+          "__libc_malloc_impl": {
+            "charged_cycles": 3473,
+            "retired": 312
+          },
+          "__malloc_alloc_meta": {
+            "charged_cycles": 280,
+            "retired": 31
+          },
+          "__mmap": {
+            "charged_cycles": 140,
+            "retired": 29
+          },
+          "__syscall_ret": {
+            "charged_cycles": 348,
+            "retired": 10
+          },
+          "__unlock": {
+            "charged_cycles": 528,
+            "retired": 8
+          },
+          "_gpu_flush_cmd_stream": {
+            "charged_cycles": 10714,
+            "retired": 4515
+          },
+          "aligned_alloc": {
+            "charged_cycles": 4034,
+            "retired": 247
+          },
+          "alloc_slot": {
+            "charged_cycles": 4662,
+            "retired": 348
+          },
+          "emit_tri_state": {
+            "charged_cycles": 17011,
+            "retired": 10543
+          },
+          "free": {
+            "charged_cycles": 56,
+            "retired": 2
+          },
+          "gfx_clip_triangle.constprop.0": {
+            "charged_cycles": 342,
+            "retired": 112
+          },
+          "gfx_cpu_indexed_run": {
+            "charged_cycles": 148622,
+            "retired": 107172
+          },
+          "gfx_cpu_materialize_fog": {
+            "charged_cycles": 1368,
+            "retired": 775
+          },
+          "gfx_gpu_bram_import_supported": {
+            "charged_cycles": 2500,
+            "retired": 1479
+          },
+          "gfx_gpu_bram_import_wait": {
+            "charged_cycles": 721,
+            "retired": 435
+          },
+          "gfx_gpu_cram_vertex_source": {
+            "charged_cycles": 12873,
+            "retired": 5847
+          },
+          "gfx_gpu_draw_direct_records": {
+            "charged_cycles": 14239,
+            "retired": 10113
+          },
+          "gfx_gpu_queued_front_release": {
+            "charged_cycles": 978,
+            "retired": 783
+          },
+          "gfx_gpu_queued_front_service": {
+            "charged_cycles": 3243,
+            "retired": 1030
+          },
+          "gfx_gpu_queued_front_supported": {
+            "charged_cycles": 1392,
+            "retired": 870
+          },
+          "gfx_gpu_queued_front_wait_source": {
+            "charged_cycles": 1157,
+            "retired": 957
+          },
+          "gfx_gpu_vtx_cache_batch": {
+            "charged_cycles": 12,
+            "retired": 12
+          },
+          "gfx_gpu_vtx_cache_batch_impl": {
+            "charged_cycles": 3729,
+            "retired": 2930
+          },
+          "gfx_gpu_vtx_cache_begin": {
+            "charged_cycles": 3912,
+            "retired": 1558
+          },
+          "gfx_gpu_vtx_cache_tri": {
+            "charged_cycles": 2285,
+            "retired": 1106
+          },
+          "gfx_pick_combiner": {
+            "charged_cycles": 5687,
+            "retired": 3370
+          },
+          "gfx_push_triangle.constprop.0.isra.0": {
+            "charged_cycles": 4343,
+            "retired": 3040
+          },
+          "gfx_sp_vertex": {
+            "charged_cycles": 27595,
+            "retired": 17761
+          },
+          "gpu_draw_triangles": {
+            "charged_cycles": 77632,
+            "retired": 17382
+          },
+          "gpu_fast_tex_upload": {
+            "charged_cycles": 38684,
+            "retired": 5268
+          },
+          "gpu_load_shader": {
+            "charged_cycles": 25,
+            "retired": 25
+          },
+          "gpu_new_texture": {
+            "charged_cycles": 51,
+            "retired": 6
+          },
+          "gpu_project_clip": {
+            "charged_cycles": 14764,
+            "retired": 9480
+          },
+          "gpu_select_texture": {
+            "charged_cycles": 398,
+            "retired": 289
+          },
+          "gpu_set_sampler_parameters": {
+            "charged_cycles": 141,
+            "retired": 30
+          },
+          "gpu_set_use_alpha": {
+            "charged_cycles": 47,
+            "retired": 4
+          },
+          "gpu_tex_slot_begin": {
+            "charged_cycles": 4391,
+            "retired": 186
+          },
+          "gpu_tex_slot_finish": {
+            "charged_cycles": 165,
+            "retired": 41
+          },
+          "gpu_unload_shader": {
+            "charged_cycles": 25,
+            "retired": 25
+          },
+          "gpu_upload_texture_rgba16": {
+            "charged_cycles": 41021,
+            "retired": 26021
+          },
+          "import_texture": {
+            "charged_cycles": 5145,
+            "retired": 1480
+          },
+          "import_texture_rgba16": {
+            "charged_cycles": 227,
+            "retired": 37
+          },
+          "load_alias_copy": {
+            "charged_cycles": 51596,
+            "retired": 29078
+          },
+          "load_alias_materialize": {
+            "charged_cycles": 1811,
+            "retired": 1218
+          },
+          "load_alias_materialize_all": {
+            "charged_cycles": 68,
+            "retired": 55
+          },
+          "load_alias_vertex": {
+            "charged_cycles": 94073,
+            "retired": 35562
+          },
+          "memcmp": {
+            "charged_cycles": 3395,
+            "retired": 2765
+          },
+          "posix_memalign": {
+            "charged_cycles": 182,
+            "retired": 34
+          }
+        }
+      }
+    }
+  },
+  "interpretation": [
+    "The selected functions are distinct PC ranges and the selected gfx_sp_vertex/indexed-call intervals do not nest. Canonical copy, decoding/admission/preparation and packet construction are real CPU work covered by a broader task boundary.",
+    "The complete load_alias_vertex function is excluded from the focused CPU ledger so raw completion polling is not presented as arithmetic work that disappears.",
+    "Raw start-to-done service remains necessary in the proposed worker. It is reported separately, never subtracted from CPU totals: raw service overlaps submission of an older prepared batch.",
+    "Task-local function costs are charged retirement gaps and include memory and FIFO waits. The CPU need not execute those instructions after offload, but the resulting frame-time improvement depends on hardware service, contention and downstream raster progress.",
+    "Pending GPU submission can execute inside the next gfx_sp_vertex. Those packet charges are classified by execution interval; they are not proof that the packet data belongs to the selected task.",
+    "Material readiness plus nonzero eligibility is only a necessary proxy. Alpha/LOD restrictions and exact culling can still change actual accepted task coverage.",
+    "The cold-or-ineligible group includes texture/material work that a geometry worker cannot simply delete. Full function charge minus raw driver is not an acceleration estimate.",
+    "The data supports evaluating a broader functional task interface; it does not justify physical promotion or a promised FPS gain."
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/summarize_task_costs_v2.py": "807190c0069ae4ab415e6b6e441439eec376ae565d926c2c89f9438aa568185e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native-task-v3/passivity.json": "9eb7f01aae829ab5e77ac30f51b6cbe7d43a0711cd3b7659254a6c9fc6bb2f1c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native-task-v3/classification.json": "3f840addcf5644d8ad6199c56f60a7be9b1124c71a1a3868e69a0a20927afe81",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native-task-v3/tasks-classified.json": "50201e4045f73a5f10dfbe77e1d08df501c6191ec540cf949c25ea4abca3fc0b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native-task-v3/run/task-raw.tsv": "3144d7f25f69d09f6f057f68ad2f694cbb94c883c67db1caf5acc84922e67be6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native-task-v3/run/task-raw-contexts.tsv": "cdad97c862f096d741111aa3ddb4e1e644fc41a992f662b3a41705827738952c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native-task-v3/run/task-call-costs.tsv": "ee85f617685f5509429b5f5f613f4da940a3e2f7c35388c43ad3c0ecf373d4cb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native-task-v3/run/task-calls.tsv": "08de403c45c40b57d0b2d1dabcba9ce43f08b875605d25565366cb8c1b4d3534"
+  }
+}

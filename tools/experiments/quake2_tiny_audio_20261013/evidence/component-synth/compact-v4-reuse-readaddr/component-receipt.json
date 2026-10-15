@@ -1,0 +1,40 @@
+{
+  "kind": "v4-mixer-speculative-read-component-qualification",
+  "source_sha256": "c6d2517af662f356b44617230c27aa880c449928282e738c374a2db86663f73a",
+  "baseline_source_sha256": "bac9c69baa77ad109176a28769b03a7256783c4929f050f08478e82f3a45750f",
+  "functional_pass": true,
+  "exact_transcripts": {
+    "inherited.log": {
+      "identical_to_v4": true,
+      "sha256": "4e11e680bd41d9478cffcbae8c260c3e157dd083c5dd5835b7261cc780a52a2f"
+    },
+    "reference.log": {
+      "identical_to_v4": true,
+      "sha256": "2a9f5705f84012a2ab6807ca76b2d6840011bd92919103e0a0d5e9d45cf15e39"
+    },
+    "capacity.csv": {
+      "identical_to_v4": true,
+      "sha256": "6ee2140d4fc299e7d8396f8a8fefe6a5003087d47f8f8cbd3f96696b074f0e8f"
+    }
+  },
+  "component_map": {
+    "estimated_alms": 991,
+    "aluts": 1114,
+    "registers": 726,
+    "dsp_blocks": 10,
+    "m10k_blocks": 4,
+    "report_sha256": "1fd0e64746ca3f8e6b1216ffd70c14fe8a8f63098570e3d7fde9fd8160866a47"
+  },
+  "tests_receipt_sha256": "e838da8802bf8db8c9c1525741f01da36ecdfe834b2c43ce5645c12ca2c2d8df",
+  "schedule_changed": false,
+  "abi_changed": false,
+  "physical_timing_tested": false,
+  "sdcs_changed": false,
+  "candidate_selected": false,
+  "notes": [
+    "S_FETCH_TAP0_CALC schedules BASE table read even on voice-end; that path never consumes it.",
+    "Potential RAM\u2192position compare\u2192inferred read-enable/bypass timing improvement remains physically unproven.",
+    "Combined lifetime changes preserve architecture and save146 registers; component ALM estimate is nonlinear and shows only1ALM versus V4.",
+    "No other ALU-controlled table-read enables were found. Active-voice initial read, registered stream flag, fetched beat/seam flag, and ramp-changed predicate remain; none introduce the same CPU-table-data\u2192position-adder chain."
+  ]
+}

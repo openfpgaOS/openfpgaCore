@@ -1,0 +1,123 @@
+{
+  "status": "PASS_READ_ONLY_REVIEW",
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "91b3255e2c578a8bd3aeea4936db3357af0e17525578e140bd28ab39152761d8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app/src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "bbcd3047a14e544aec16cb855fd58ba2ad751db76a4253fe8f22c5f2f84d1da6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app/src/sm64/sm64/src/pc/gfx/async_mesh_repair.c": "bac8a9d82b9b491b10008312349b1fe078ecae722fc0ce260317c0a778bb3f24",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app/src/sm64/sm64/src/pc/gfx/async_mesh_repair.h": "0aeb6d69e84a5f5345d62f14227fea76bd2169932ec0a5960a5c3d9b63b530ef",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app/evidence/app-build-v1/app.dis": "0c4511f34f4342bebffa28ff2ec7f259cd369f70e8e7a35fd2dad32384e8d7c8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app/evidence/app-build-v1/build-result.json": "8a3788fc0611ea052b22d9940b627b4f52ef64a84f452103299e1b51c316eb77",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app/.obj/sm64-async-mesh-v1-perfdiag/app.elf": "7c9ca623044f4f78b5efeaa4e3485e96567dcfc3fd1c36f51b6e3c0f3836c0db",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app/evidence/app-tests-v1/result.json": "6baef49ac69c5f461758cd469fbdda51a32422e09ede880e91b75d07cb08fb50",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/async_mesh_repair.c": "bac8a9d82b9b491b10008312349b1fe078ecae722fc0ce260317c0a778bb3f24",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/async_mesh_repair.h": "0aeb6d69e84a5f5345d62f14227fea76bd2169932ec0a5960a5c3d9b63b530ef",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/design/abi.json": "d8c933c03130aa64fa21d1867795cb5902bb673780363811948c341fb95856fe",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/repair/review_app.py": "1fe84bbc2819d45c94d3a14babd3ab22bca56d0cd7d5fb57f5d0030a55e393da"
+  },
+  "compiled_transform": {
+    "function": "104d4c80",
+    "operations": [
+      [
+        "104d50ce",
+        "fmul.s",
+        "fa4,ft10,fa0"
+      ],
+      [
+        "104d50d2",
+        "fmul.s",
+        "fa2,ft9,fa0"
+      ],
+      [
+        "104d50d6",
+        "fmul.s",
+        "fa3,ft8,fa0"
+      ],
+      [
+        "104d50da",
+        "fmul.s",
+        "fa0,fa7,fa0"
+      ],
+      [
+        "104d50e2",
+        "fmadd.s",
+        "fa4,fs8,fa1,fa4"
+      ],
+      [
+        "104d50e6",
+        "fmadd.s",
+        "fa2,fs2,fa1,fa2"
+      ],
+      [
+        "104d50ea",
+        "fmadd.s",
+        "fa3,fs1,fa1,fa3"
+      ],
+      [
+        "104d50ee",
+        "fmadd.s",
+        "fa1,ft11,fa1,fa0"
+      ],
+      [
+        "104d50f6",
+        "fadd.s",
+        "fa4,fa4,ft4"
+      ],
+      [
+        "104d50fa",
+        "fadd.s",
+        "fa2,fa2,ft3"
+      ],
+      [
+        "104d50fe",
+        "fadd.s",
+        "fa3,fa3,ft2"
+      ],
+      [
+        "104d5102",
+        "fadd.s",
+        "fa1,fa1,fs10"
+      ],
+      [
+        "104d510a",
+        "fmadd.s",
+        "fa4,fa6,fa5,fa4"
+      ],
+      [
+        "104d510e",
+        "fmadd.s",
+        "fa2,ft7,fa5,fa2"
+      ],
+      [
+        "104d5112",
+        "fmadd.s",
+        "fa3,ft6,fa5,fa3"
+      ],
+      [
+        "104d5116",
+        "fmadd.s",
+        "fa5,ft5,fa5,fa1"
+      ],
+      [
+        "104d511a",
+        "fmul.s",
+        "fa4,fa4,fs11"
+      ]
+    ],
+    "interpretation": "The final F20 scalar fallback retains four Y products, four X FMAs, translation adds, Z FMAs, then X-aspect multiplication. Register/dataflow checked against the original F19 disassembly used by the independent target oracle."
+  },
+  "reviewed_invariants": [
+    "Only immutable ELF topology and vertex source bytes are admitted; task owns the current dest0 slots and original bounded TRI words.",
+    "Dead-canonical suffix allows only bounded VTX overwrites and TRI reads disjoint from still-pending slots; all state/list/end/unknown operations reject. Deferred fog bits for proven dead slots are removed.",
+    "Existing survivor-materialize/drop runs before async admission. Accepted jobs release the legacy lease only after all previous alias dependencies have been consumed/dropped; ordinary forwarding remains allowed while a legacy lease is held.",
+    "Cached MTF2 material eligibility excludes LOD and vertex alpha except the existing ignored-fog shade-alpha=255 case. Captured UV/RGB/alpha/projection do not consult later renderer state.",
+    "Source-pool recycling drains async completed sequence before reusing source bytes; legacy idle lease does not itself count as an unfinished async job.",
+    "Repair reads frozen context/raw under the worker head, checks epoch/token before ACK and every output word, uses only the dedicated MMIO sink, and sends END only after every word and matching token/epoch.",
+    "Consumer reset preserves already granted legacy raw context/ticket and active LOAD, while async repair epoch advances. Pending acquires retry on epoch change; an unexpectedly lost held lease faults.",
+    "Final frame materializes remaining legacy lazy rows before releasing the lease. Full app/raster equality remains a separate native replay gate."
+  ],
+  "remaining_gates": [
+    "Full 638-scene + random actual CPU helper qualification in native-v7.",
+    "Same-ELF capability-off versus candidate full-frame command/raster/raw-context/lease/repair lifetime comparison.",
+    "No physical-fit, hardware-FPS, or portable IEEE-FMA equivalence claim."
+  ]
+}

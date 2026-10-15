@@ -1,0 +1,512 @@
+{
+  "schema": "os30-mesh-front-source-v1",
+  "status": "EXPERIMENTAL_COMPONENT_PROTOTYPE",
+  "scope": "Source-only, no assets, bitstream, full-app integration, full-frame gain or physical fit claim.",
+  "files": [
+    {
+      "path": "README.txt",
+      "sha256": "fefce8e2b00ec20ade3454c4d634805b2fb2de9231912cc2380d51d880cb0e98",
+      "bytes": 2294
+    },
+    {
+      "path": "REPORT.txt",
+      "sha256": "a63d9b1842b6dde05e860c3c96055066d29270a3875769fcea791dfdb536ed15",
+      "bytes": 6959
+    },
+    {
+      "path": "analysis/analyze_scene.py",
+      "sha256": "3daf220423ca3af49a7eee0431ddd73eff947c7c133b50538c467bff8d9d6fc1",
+      "bytes": 2099
+    },
+    {
+      "path": "analysis/check_source_traversal.py",
+      "sha256": "cdc5147be23efa402ee5a8ae43450c7cdb755932dc1c37bdbdfa8081039025c2",
+      "bytes": 3649
+    },
+    {
+      "path": "analysis/classify_tasks_v1.py",
+      "sha256": "550dcbb88834f25b89961ee75b7019f7a9a4f716b573351b5496cbc8cde82309",
+      "bytes": 8328
+    },
+    {
+      "path": "analysis/compile_tasks.py",
+      "sha256": "737e9c8fea7ed4ab8823d37de35a8fd3ae6567613459182c122bf47016c3b0e5",
+      "bytes": 8470
+    },
+    {
+      "path": "analysis/exact_geometry_ledger.py",
+      "sha256": "a3e0d4c2c13344c84aaef4bcbd61d2f8e531990c0bcbe02c10e930caed08039a",
+      "bytes": 7629
+    },
+    {
+      "path": "analysis/join_native_vectors.py",
+      "sha256": "7ce2cb0ad626bfc77e4a6ef0b9e115a5f0c50be7aff4cc557833852515e04990",
+      "bytes": 6336
+    },
+    {
+      "path": "analysis/measure_snapshot.py",
+      "sha256": "14350b7f2987c592c9afd80cc0244b6c4bc9a1d667a28bff181c554cf5a476cd",
+      "bytes": 10416
+    },
+    {
+      "path": "analysis/native_tasks_v3.py",
+      "sha256": "fec7e5e4b213aa0a37621b5c1e9e29fcb135bdd868bd30c54fb84c6e0de2a575",
+      "bytes": 5882
+    },
+    {
+      "path": "analysis/run_scene_chain.py",
+      "sha256": "32290433604aff7c92d5be2a6277d63d6efde6d8828cb17e04016d89e48fbd66",
+      "bytes": 4235
+    },
+    {
+      "path": "analysis/run_scene_cull_oracle.py",
+      "sha256": "30ddf8f2bb81d07c5d560d634541125587a484de67e5fe5eade56c83e348a501",
+      "bytes": 3181
+    },
+    {
+      "path": "analysis/run_scene_stream.py",
+      "sha256": "2d5f9cdc4e2466346506690808ebccbef5150e27b812a2fb6eef06b5e8221adc",
+      "bytes": 4379
+    },
+    {
+      "path": "analysis/summarize_task_costs_v2.py",
+      "sha256": "807190c0069ae4ab415e6b6e441439eec376ae565d926c2c89f9438aa568185e",
+      "bytes": 4735
+    },
+    {
+      "path": "analysis/task_observer_v3.hpp",
+      "sha256": "32b4fc2d0d59295022a171f7662791d85f93ae46f488460d492201465650fd8a",
+      "bytes": 11298
+    },
+    {
+      "path": "analysis/task_outcomes.py",
+      "sha256": "268c9d27416b9de0681e5f435a95834f29731a6b39019bd24f537733964d5e9f",
+      "bytes": 1836
+    },
+    {
+      "path": "analysis/test_scene_chain.cpp",
+      "sha256": "1844255138d6c3c6a07b7fe560a6e426ba2a2e046e0a1bd5f1c0138217b76d91",
+      "bytes": 9922
+    },
+    {
+      "path": "analysis/test_scene_stream.cpp",
+      "sha256": "dc0d60077553acb965cb78e4eeb35f3dc091c095bc5e117c7e2d6adcf1a3d458",
+      "bytes": 9477
+    },
+    {
+      "path": "analysis/verify_layout.py",
+      "sha256": "7e2fbd727b1d1e70075cb8190078628313bb43920450904ff765b74ec8b5cf2f",
+      "bytes": 2398
+    },
+    {
+      "path": "analysis/verify_layout_v2.py",
+      "sha256": "5293d7c28f420577562bb458797842e6ecf418f91c39ca2b447b6d04fb4ea3d3",
+      "bytes": 3121
+    },
+    {
+      "path": "analysis/verify_producer_scene_v1.py",
+      "sha256": "b5405e7bb77a0b4970051c02acb423519ed06f843f0e6b005994dc87cecde34d",
+      "bytes": 7224
+    },
+    {
+      "path": "evidence/app-source-manifest.json",
+      "sha256": "9abf1247004b9869712692dc53b3bae514d4ef7badb72eb2c188ec78bcaab9a2",
+      "bytes": 3997
+    },
+    {
+      "path": "evidence/architecture.json",
+      "sha256": "cbbdc2d376d92e1821fd8654620c505476c41c2daf89eca824f4c0023c001d54",
+      "bytes": 11862
+    },
+    {
+      "path": "evidence/chain.json",
+      "sha256": "94ce9356d2ae33e6333c005d8682d3720f13896747c9a9d239266c4921c85028",
+      "bytes": 6773
+    },
+    {
+      "path": "evidence/classification.json",
+      "sha256": "3f840addcf5644d8ad6199c56f60a7be9b1124c71a1a3868e69a0a20927afe81",
+      "bytes": 21855
+    },
+    {
+      "path": "evidence/controller.json",
+      "sha256": "a708d6b386316d2ae6952732bb7a9e25ff708b5277d5ea1136660485829d643d",
+      "bytes": 2094
+    },
+    {
+      "path": "evidence/core-report.txt",
+      "sha256": "dcbf7bc85d95936e2d80dca666f6f4e51292750f1906db67e4a3bf05d9d26a6d",
+      "bytes": 4935
+    },
+    {
+      "path": "evidence/core-source-manifest.json",
+      "sha256": "850b97a041c2b94693f0e017596f3bb5ba1cc1b415056962b846434ac6fb10df",
+      "bytes": 5572
+    },
+    {
+      "path": "evidence/cost-ledger.json",
+      "sha256": "890396c3de00a69f0698855b44e451455c168800b4ca05e81bac6ffd0a877506",
+      "bytes": 22268
+    },
+    {
+      "path": "evidence/cpu-cull-oracle.json",
+      "sha256": "b40fcea95b94252aa0187ba8ded612a31933969e67a094fe249d066ffb3311f0",
+      "bytes": 4031
+    },
+    {
+      "path": "evidence/engine.json",
+      "sha256": "d16dd0a269fb7f52020981f10e717d814cbb071423bf99884a69fadbb2c2b995",
+      "bytes": 5577
+    },
+    {
+      "path": "evidence/exact-geometry-ledger.json",
+      "sha256": "dddced4bbe92f1779582b3bc8245b9d710dd8c3561045da238b259669ac171e0",
+      "bytes": 467797
+    },
+    {
+      "path": "evidence/fetch.json",
+      "sha256": "7f7426bb59485918e60e16efd428123d688a3db0e4bcd7a7ad5ca9829850def2",
+      "bytes": 1919
+    },
+    {
+      "path": "evidence/independent-accounting-audit.json",
+      "sha256": "548d90318bc9715d2f6ce75ddd2a1aa3a1ffd44347e11dce5984901807a4951c",
+      "bytes": 5984
+    },
+    {
+      "path": "evidence/native-vectors.json",
+      "sha256": "934b27dd8a16c0e0ebaac3989f347576a8e85e6ee2deaaefbac555ba6a400cc0",
+      "bytes": 3592
+    },
+    {
+      "path": "evidence/packet.json",
+      "sha256": "1c6bca7704cc78342181dd5f6b5cf5e544cad6fed3033c21d92e12e2ab414dc1",
+      "bytes": 2316
+    },
+    {
+      "path": "evidence/passive-build.json",
+      "sha256": "b73d2a97ad2e50785d18b5ea0ece508ddecc8629d57cd8667429df4206c20f55",
+      "bytes": 12965
+    },
+    {
+      "path": "evidence/passivity.json",
+      "sha256": "9eb7f01aae829ab5e77ac30f51b6cbe7d43a0711cd3b7659254a6c9fc6bb2f1c",
+      "bytes": 4493
+    },
+    {
+      "path": "evidence/producer.json",
+      "sha256": "c365dfb86d96c8f7fe802ed4d7402a85ea4459b41b0a98bcaafc8c813dcbf02f",
+      "bytes": 3549
+    },
+    {
+      "path": "evidence/raw-source-layout.json",
+      "sha256": "bd63241edc6cb075728124128ea7bdca52110c64648be73ff4ec59f9c59eabb7",
+      "bytes": 361
+    },
+    {
+      "path": "evidence/review.json",
+      "sha256": "41d8cf09d7dd8469096fe3847522c381008a93469a3d1e66c2c474be8b710bdc",
+      "bytes": 8749
+    },
+    {
+      "path": "evidence/scene-chain.json",
+      "sha256": "d582790692c975938d523b1d1bb607e08532972a5088be46c834b3e36d120031",
+      "bytes": 10749
+    },
+    {
+      "path": "evidence/scene-outcomes.json",
+      "sha256": "687ebd8382252fbcc68c43f7cf06ebf0a29efb2e52039279b25139a1060227de",
+      "bytes": 2361
+    },
+    {
+      "path": "evidence/scene-stream.json",
+      "sha256": "6cd54b0bef07f7af91bb557840a947fd3f99cc2cae1200153a044a2b9d18a8c1",
+      "bytes": 11176
+    },
+    {
+      "path": "evidence/source-traversal.json",
+      "sha256": "3110ef7fe3437b661e9e10e1c46bf36ac43232141b0bc36946bba490922d5fea",
+      "bytes": 2916
+    },
+    {
+      "path": "evidence/static-coverage.json",
+      "sha256": "bc3a0a459ded372738b1bfff544cd2dccf992d919b2246d486948323be4cff0e",
+      "bytes": 5825
+    },
+    {
+      "path": "evidence/static-packets.json",
+      "sha256": "a1661ced9efe9b44a52572076c4656edddad1590f340f14ddbb88e4a2855a876",
+      "bytes": 3465
+    },
+    {
+      "path": "evidence/stream-control.json",
+      "sha256": "a3f3e19b2fdfecf6d2d0f3ef75bb43180091b5710177f8689f95e0d9f9b25224",
+      "bytes": 7126
+    },
+    {
+      "path": "package-spec.json",
+      "sha256": "137cb81a8f7726f9a66bbe738c64b03fa9d5aa9a19aaa351ebeba08cc165d540",
+      "bytes": 11968
+    },
+    {
+      "path": "producer/run.py",
+      "sha256": "2639d217a8dce82a87d02338ffd903ac9579376acc2e5d5e0f662a9c30c3c1be",
+      "bytes": 3299
+    },
+    {
+      "path": "producer/task_producer.hpp",
+      "sha256": "0c56f89b71a53b8e055ad1ce51215a037afc884d08f1d2226a19539488ddb698",
+      "bytes": 7190
+    },
+    {
+      "path": "producer/test_producer.cpp",
+      "sha256": "afbcbfe51b4538bd84b23eafb6dd2db9ae28be6814c4f12eb7a6e033547230da",
+      "bytes": 7095
+    },
+    {
+      "path": "recipes/build_source_package.py",
+      "sha256": "51c89a0e684b0381ecbaea2e61d04af2dd10c398a773da91e37b95926a9be0e9",
+      "bytes": 3044
+    },
+    {
+      "path": "recipes.json",
+      "sha256": "a19571764aeff45766327ad76614b5ac0368c1eda98b3ab1fc54bbe0eff5afa0",
+      "bytes": 3364
+    },
+    {
+      "path": "results.json",
+      "sha256": "60eb2fbab2e4121d0e66f5e1b8c86a184e8cab92fddc82043f806ec80659226e",
+      "bytes": 1656
+    },
+    {
+      "path": "rtl/GeometryFmaProbe.v",
+      "sha256": "348d11609de14326dc9408c11e39a385a85a4e0678eaaf5d69f39d6cfba38088",
+      "bytes": 78177
+    },
+    {
+      "path": "rtl/geometry_color_rtz.v",
+      "sha256": "27025e32c4c8f42168db8e49149d9ee7cd2255d606ddb7ed0f5c932bedd1a335",
+      "bytes": 1192
+    },
+    {
+      "path": "rtl/geometry_float_batch_recip.v",
+      "sha256": "c3cc22d4aa4559d0cfe087c6556361eec22e363fbff79072bb65a1028c3dfd9b",
+      "bytes": 7706
+    },
+    {
+      "path": "rtl/geometry_float_cull_mem.v",
+      "sha256": "53163df4519861d2ffa3d115b45656a90f03e6ef869a02188d1344710931f2ac",
+      "bytes": 5215
+    },
+    {
+      "path": "rtl/geometry_import_convert.v",
+      "sha256": "3beac876e469ec45ff3d3e81c9645671dcb92737d1f84dd188ca454fbbcf7526",
+      "bytes": 2078
+    },
+    {
+      "path": "rtl/geometry_mesh_command_fetch.v",
+      "sha256": "a740d2c2d961bcbe3421e7de594ca842b3c3caf2a38dff7de89ff067c9b93cf8",
+      "bytes": 2763
+    },
+    {
+      "path": "rtl/geometry_mesh_packet.v",
+      "sha256": "7514026cf2b23e8f219aa193e24c922bacac05e04079bd6f3edd772cbb97e493",
+      "bytes": 4973
+    },
+    {
+      "path": "rtl/geometry_mesh_raw_frontend.v",
+      "sha256": "61854f2d9949339c9b4c123d1b174da3828601cbf1edcbc0c410fbf854fac764",
+      "bytes": 9183
+    },
+    {
+      "path": "rtl/geometry_mesh_stream.v",
+      "sha256": "3305e56087a718d675c0141f8c723ab61e7ad3df81d246ec5db6913ab8ef17c3",
+      "bytes": 7076
+    },
+    {
+      "path": "rtl/geometry_mesh_task_ctrl.v",
+      "sha256": "b2efc5506e55bec2bc3fd2c99532e33b88f6e1270cc55ffc3d28370d21da980d",
+      "bytes": 6968
+    },
+    {
+      "path": "rtl/geometry_mesh_task_engine.v",
+      "sha256": "89ffb46cdcc2366fefc9b4334d5f0d3f1a66667f072078c69281226f8f4f81e5",
+      "bytes": 6251
+    },
+    {
+      "path": "rtl/geometry_raw_load.v",
+      "sha256": "ade3041bfd27ab6200c5d6356775adac778a34eb0d81c1f253ff83367627c144",
+      "bytes": 14125
+    },
+    {
+      "path": "rtl/geometry_transform_light.v",
+      "sha256": "6987e27771c84173b31eb53e9f3bce4e7337437414548ef089f3adfe430c810f",
+      "bytes": 15509
+    },
+    {
+      "path": "rtl/phase10_float_recip2.v",
+      "sha256": "d68bc3fcdcb750f88cebf9aa8ed890a499d12210cbd50fe9d3a049c168bea5cc",
+      "bytes": 2337
+    },
+    {
+      "path": "rtl/phase10_raw_vtx_dma.v",
+      "sha256": "ce51296a880ef212cacffbe4bb4c1728fc1bc9976d3504dd91883882d4316f81",
+      "bytes": 4529
+    },
+    {
+      "path": "run_tests.py",
+      "sha256": "ef1070773acb72ea080e9e8933cbdf47d710852fda9f6ff017fda54b84518ac9",
+      "bytes": 2224
+    },
+    {
+      "path": "source-bindings.json",
+      "sha256": "67c2dd782358fb9362fe5f68dfa0691a87c3d63b8ebe4f9e4cf5038d98374e22",
+      "bytes": 29154
+    },
+    {
+      "path": "tests/geometry_mesh_chain.v",
+      "sha256": "d5b5b6097143bcd0910c77825562e06c18b3f65bdcba76fee2b1bdc1274d32f8",
+      "bytes": 3804
+    },
+    {
+      "path": "tests/test_chain.cpp",
+      "sha256": "4bce3ea275d5bfd5377d208949d5e2aadac759f39e6785956adf360c79692808",
+      "bytes": 8628
+    },
+    {
+      "path": "tests/test_engine.cpp",
+      "sha256": "7c7123375ecb3f66a8a5435e1451556d9307568fd9e4bcbd82797aa4aa99a3cb",
+      "bytes": 6601
+    },
+    {
+      "path": "tests/test_fetch.cpp",
+      "sha256": "92140b00a9c8b5e829d6a0d3506bb909b31307bacf0913f99452222bd8d951bd",
+      "bytes": 4231
+    },
+    {
+      "path": "tests/test_packet.cpp",
+      "sha256": "d59ea78d3cda5f3f21b328ef6406836721dc8d25683169a8bf1c38fb42c5bd2a",
+      "bytes": 5294
+    },
+    {
+      "path": "tests/test_stream_control.cpp",
+      "sha256": "c4841821323d0a5d9f0bd0bb05b6a1af5a6bae29e587caf29bf59986c741155f",
+      "bytes": 9522
+    },
+    {
+      "path": "verify.py",
+      "sha256": "0f2891bee8d9975b348a54c9bde7cbb6c6ad68a3be5e591a79ad82e0f9bfbb15",
+      "bytes": 1251
+    }
+  ],
+  "external_evidence": [
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/fetch-v2/report.json",
+      "sha256": "7f7426bb59485918e60e16efd428123d688a3db0e4bcd7a7ad5ca9829850def2"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/test-v2/report.json",
+      "sha256": "1c6bca7704cc78342181dd5f6b5cf5e544cad6fed3033c21d92e12e2ab414dc1"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/final-review-v2.json",
+      "sha256": "41d8cf09d7dd8469096fe3847522c381008a93469a3d1e66c2c474be8b710bdc"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native-task-v3/build.json",
+      "sha256": "b73d2a97ad2e50785d18b5ea0ece508ddecc8629d57cd8667429df4206c20f55"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native-task-v3/classification.json",
+      "sha256": "3f840addcf5644d8ad6199c56f60a7be9b1124c71a1a3868e69a0a20927afe81"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native-task-v3/cost-ledger.json",
+      "sha256": "890396c3de00a69f0698855b44e451455c168800b4ca05e81bac6ffd0a877506"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native-task-v3/passivity.json",
+      "sha256": "9eb7f01aae829ab5e77ac30f51b6cbe7d43a0711cd3b7659254a6c9fc6bb2f1c"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native-task-v3/source-layout-proof.json",
+      "sha256": "bd63241edc6cb075728124128ea7bdca52110c64648be73ff4ec59f9c59eabb7"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/producer-scene-audit-v1.json",
+      "sha256": "548d90318bc9715d2f6ce75ddd2a1aa3a1ffd44347e11dce5984901807a4951c"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/coverage-frame360.json",
+      "sha256": "bc3a0a459ded372738b1bfff544cd2dccf992d919b2246d486948323be4cff0e"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/exact-geometry-ledger.json",
+      "sha256": "dddced4bbe92f1779582b3bc8245b9d710dd8c3561045da238b259669ac171e0"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/native-vectors-v3/manifest.json",
+      "sha256": "934b27dd8a16c0e0ebaac3989f347576a8e85e6ee2deaaefbac555ba6a400cc0"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/producer-v1/result.json",
+      "sha256": "c365dfb86d96c8f7fe802ed4d7402a85ea4459b41b0a98bcaafc8c813dcbf02f"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/source-manifest.json",
+      "sha256": "9abf1247004b9869712692dc53b3bae514d4ef7badb72eb2c188ec78bcaab9a2"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/source-traversal-proof.json",
+      "sha256": "3110ef7fe3437b661e9e10e1c46bf36ac43232141b0bc36946bba490922d5fea"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/task-packet-proof.json",
+      "sha256": "a1661ced9efe9b44a52572076c4656edddad1590f340f14ddbb88e4a2855a876"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/REPORT.txt",
+      "sha256": "dcbf7bc85d95936e2d80dca666f6f4e51292750f1906db67e4a3bf05d9d26a6d"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/architecture-v2.json",
+      "sha256": "cbbdc2d376d92e1821fd8654620c505476c41c2daf89eca824f4c0023c001d54"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/scene-outcomes-v1.json",
+      "sha256": "687ebd8382252fbcc68c43f7cf06ebf0a29efb2e52039279b25139a1060227de"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/source-manifest.json",
+      "sha256": "850b97a041c2b94693f0e017596f3bb5ba1cc1b415056962b846434ac6fb10df"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/chain-v1/manifest.json",
+      "sha256": "94ce9356d2ae33e6333c005d8682d3720f13896747c9a9d239266c4921c85028"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/controller-v3/manifest.json",
+      "sha256": "a708d6b386316d2ae6952732bb7a9e25ff708b5277d5ea1136660485829d643d"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/engine-v4/manifest.json",
+      "sha256": "d16dd0a269fb7f52020981f10e717d814cbb071423bf99884a69fadbb2c2b995"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/scene-chain-v1/manifest.json",
+      "sha256": "d582790692c975938d523b1d1bb607e08532972a5088be46c834b3e36d120031"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/scene-cull-oracle-v1/manifest.json",
+      "sha256": "b40fcea95b94252aa0187ba8ded612a31933969e67a094fe249d066ffb3311f0"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/scene-stream-v2/manifest.json",
+      "sha256": "6cd54b0bef07f7af91bb557840a947fd3f99cc2cae1200153a044a2b9d18a8c1"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/stream-control-v3/manifest.json",
+      "sha256": "a3f3e19b2fdfecf6d2d0f3ef75bb43180091b5710177f8689f95e0d9f9b25224"
+    }
+  ]
+}

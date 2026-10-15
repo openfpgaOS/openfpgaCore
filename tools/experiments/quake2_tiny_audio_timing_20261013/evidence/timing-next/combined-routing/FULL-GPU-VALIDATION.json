@@ -1,0 +1,34 @@
+{
+  "passed": true,
+  "scope": "Merged GPU and staged-worker actual fullGPU regression gate; not physical or complete release qualification.",
+  "gpu_sha256": "5359411b9af35fd4619da978c3f508997ae1c0a2ba3281512c50c5a1d1e4e217",
+  "worker_sha256": "dc82691f019420352905292bb60d71943d989a42e4b2608feeefa218fe8f50f9",
+  "full_gpu_receipt": {
+    "path": "docs/measurements/quake2-tiny-audio-20261013/timing-next/combined-routing/full-gpu-v1/receipt.json",
+    "sha256": "bb58f21ddd2a58bba3e3dd6b04d996f825615f7ad9ce5f93773b7c749a19ed55",
+    "frames": 8,
+    "modes": [
+      "paced",
+      "unpaced"
+    ],
+    "exact": [
+      "full color/depth memory",
+      "all counters",
+      "cycles",
+      "fence records"
+    ]
+  },
+  "parent_receipt_sha256": {
+    "docs/measurements/quake2-tiny-audio-20261013/timing-next/gpu-dsp-routing/FINAL-VALIDATION.json": "a4ac4fbff67777ee5936c54b0878370ebd185bb74c337392ac8b92a7015a2d98",
+    "docs/measurements/quake2-tiny-audio-20261013/timing-next/feature-cuts/palette-disabled-shadow/FINAL-VALIDATION.json": "bef66f8c28cb6a68b3cdc6e2487176a420f6c3306eff4aeeac3fff82714565b4",
+    "docs/measurements/quake2-tiny-audio-20261013/timing-next/combined-routing/merge-receipt.json": "f8b89bbf11376f277d82b1c1740bbcc550ba66990fc092d29283c068226f29c2"
+  },
+  "source_unchanged": true,
+  "limitations": [
+    "Separate worker-agent lockstep and directed-pause qualification remain its own gate; this receipt does not claim uncompleted coverage.",
+    "Only the GPU raster core and geometry worker differ in the pinned native6 replay fixture. Audio/Dock/CPU/QSF/SDC/clock sources are outside this patch.",
+    "Physical fit/timing and actual-device FPS are not inferred from replay."
+  ],
+  "quartus_launched": false,
+  "deployed": false
+}

@@ -1,0 +1,6 @@
+PASS descriptor width: rejected108 high/alignment bits, immediate valid recovery, accepted10 count/address/end boundaries (814225 cycles)
+PASS malformed19, reset12 (request-held/before-data/mid/last; soft/ring/media), postreset reuse
+PASS: 1920 mixed vertex batches, 7680 winding tests, 202484 exact output words, wrap/backpressure/enable/reset (4033870 cycles)
+Native jobs120, meshlets240, burst reads19283, returnedbeats154264, beatswhilepaused17389
+PASS signed near-plane boundaries: 11 planes, 641 explicit legacy vertices, 122832 cycles
+PASS cycle lockstep 5064373 cycles, busy-publication 75978; divides raw=20674 clip=872 native=8071 particle=0

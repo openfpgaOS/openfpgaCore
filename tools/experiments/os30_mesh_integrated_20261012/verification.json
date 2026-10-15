@@ -1,0 +1,73 @@
+{
+  "status": "PASS",
+  "package_manifest_sha256": "8d0aa6a17dd8b0dc90ebd170e03d24e49fef82bbad6ffd0b302af3612fc054fa",
+  "source_only_inventory": true,
+  "patches_forward_reverse_zero_fuzz_zero_offset": 5,
+  "external_frozen_evidence_hashes": true,
+  "focused_tests": {
+    "status": "PASS",
+    "commands": [
+      [
+        "gcc",
+        "-std=c11",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        "/home/alberto/Repos/openfpgaCore/tools/experiments/os30_mesh_integrated_20261012/tests/actual_wait_test.c",
+        "-o",
+        "/tmp/os30-mesh-integrated-source-tests-20261012/app-wait"
+      ],
+      [
+        "verilator",
+        "--cc",
+        "--exe",
+        "--build",
+        "-j",
+        "4",
+        "-Wno-fatal",
+        "--top-module",
+        "geometry_mesh_queue",
+        "--Mdir",
+        "/tmp/os30-mesh-integrated-source-tests-20261012/queue-obj",
+        "-CFLAGS",
+        "-std=c++17 -O1 -fsanitize=address,undefined -fno-omit-frame-pointer",
+        "-LDFLAGS",
+        "-fsanitize=address,undefined",
+        "/home/alberto/Repos/openfpgaCore/tools/experiments/os30_mesh_integrated_20261012/rtl/geometry_mesh_queue.v",
+        "/home/alberto/Repos/openfpgaCore/tools/experiments/os30_mesh_integrated_20261012/tests/test_queue.cpp"
+      ]
+    ],
+    "results": [
+      {
+        "pass": true,
+        "checks": 12308,
+        "status_combinations": 4096
+      },
+      {
+        "status": "PASS",
+        "packets": 760,
+        "checks": 2316365,
+        "cycles": 395730,
+        "words": 91157,
+        "stalled_cycles": 284652,
+        "concurrent_fill_drain_cycles": 114212,
+        "reservation_blocked_cycles": 258410
+      }
+    ],
+    "manifest_sha256": "24e9b3c1a6d945209889ba6023fbec62deff33e696c03399a7012bc2be244ada",
+    "limits": "Focused ownership/publication tests only. No game assets, full frame, physical synthesis or timing tested."
+  },
+  "focused_test_inputs_sha256": {
+    "run_tests.py": "6e3ae95ddc011765602e2f5d5cf8661b0bd995111e2fd912cdc6e8fb9c77e3f1",
+    "tests/actual_wait_test.c": "f48014b492aad1e9b63a7fe81713ecd2897ef30c840ebc57d093bed6a9117678",
+    "tests/test_queue.cpp": "397c0e04d55f4674e3b697ec37b4ba5d36a5f0ab845151954a94791f6beec541",
+    "rtl/geometry_mesh_queue.v": "a3ac412006c503332f4a6d8895155d869f367bb39924e8a6a4c4245d1ff230e4"
+  },
+  "note": "After tests, README spacing was corrected and package manifest regenerated. Test source/RTL are unchanged; no application or hardware source changed.",
+  "unqualified": true,
+  "deployed": false,
+  "performance_claim": null
+}

@@ -1,0 +1,29 @@
+{
+  "candidate_sha256": "dc82691f019420352905292bb60d71943d989a42e4b2608feeefa218fe8f50f9",
+  "parent_path": "docs/measurements/quake2-tiny-audio-20261013/timing-next/worker-local-copy/gpu_geometry_worker.v",
+  "parent_sha256": "9096979f637f1e5947d8b9ed6bc280255dc73b3c68bc968e19edad80d722f20f",
+  "reference_module_rename_only": true,
+  "added_flip_flops": 2,
+  "added_cycles": 0,
+  "normal_transcripts_parent_identical": true,
+  "normal_lockstep_cycles": 27163742,
+  "directed_lockstep_cycles": 10444712,
+  "directed_pause_clocks": 17,
+  "directed_mode_stage_pairs": 52,
+  "directed_native_mac_columns": 11,
+  "gate_receipt": "gates-v2/receipt.json",
+  "gate_receipt_sha256": "d086083354f0b6c8fc0858c814b47417d4d95ed2459501819b7093e46ece5cf6",
+  "fixture_version_correction": "gates-v1 demanded dead native states47..50; v2 tests active45/51 and each MAC column; source unchanged",
+  "files": {
+    "gpu_geometry_worker.v": "dc82691f019420352905292bb60d71943d989a42e4b2608feeefa218fe8f50f9",
+    "gpu_geometry_worker_reference.v": "0d844fc2806d25146acc965adc7293cc2d8d0ebd1f91f2ebd92e63bed3a39a5f",
+    "run_lockstep.py": "ae611ac86bdcbcc1e81dbb53129377a05eda95b5550abd7d6642bf3c844e3a51",
+    "fixtures/geometry_worker.cpp": "fee2d68d2d1d07c13487e497d231382628e2f7bed6542c0f72ead493be7b494f",
+    "fixtures/geometry_worker_tb.v": "779434f92cba8a3d81f846ac9ec2b3d9041b8319c522a0e7214d117572621445",
+    "relative-to-local-copy.patch": "cf988c48a964c46aad17316abc7005a6a87aed2249a24662bbb9d9792c4693d3",
+    "README.txt": "878973447c2244b7cf77246dd9da4ec2b60b82a0fb8400331ac50d77effc6b15"
+  },
+  "functional_qualification_passed": true,
+  "physical_timing_claim": false,
+  "dock_unchanged": true
+}

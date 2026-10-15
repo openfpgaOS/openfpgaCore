@@ -1,0 +1,282 @@
+{
+  "status": "CORRECT_QUEUED_FRONT_WITH_NO_USEFUL_NATIVE_FRAME_GAIN",
+  "models": {
+    "baseline-v3": {
+      "warm_cycles": 4366717,
+      "partition": {
+        "idle_empty": 2222226,
+        "idle_cache_drain": 129406,
+        "command_fetch": 28560,
+        "command_execute": 2780,
+        "command_barrier": 3330,
+        "clear": 199952,
+        "triangle_setup": 205965,
+        "triangle_walk": 10545,
+        "vertex_transform": 72716,
+        "vertex_cache": 23646,
+        "span_setup": 12354,
+        "framebuffer_flush": 1863,
+        "fragment_retire": 169971,
+        "fragment_color_depth_response": 492433,
+        "fragment_read_drain_or_setup": 81638,
+        "fragment_write_backpressure": 2012,
+        "fragment_depth_read_gate": 356008,
+        "fragment_texture_starved": 34220,
+        "fragment_perspective_starved": 107766,
+        "fragment_local_hold": 116487,
+        "fragment_pipeline_progress": 92839,
+        "other": 0
+      },
+      "metrics": {
+        "gpu_busy": 2144491,
+        "core_busy": 2015085,
+        "cpu_retire": 2146097,
+        "cpu_ring_publish": 48,
+        "cpu_ring_upload": 23000,
+        "cache_flush_entries": 44,
+        "cache_maintenance_cycles": 161824,
+        "cache_maintenance_scan_cycles": 45056,
+        "cache_maintenance_write_cycles": 114586,
+        "cache_misses": 12266,
+        "cache_writebacks": 19205,
+        "command_cache_barrier_wait": 3330
+      },
+      "maintenance_reasons": [
+        0,
+        158739,
+        0,
+        0,
+        3085,
+        0,
+        0,
+        0
+      ],
+      "flush_entry_reasons": [
+        0,
+        43,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0
+      ]
+    },
+    "queued-v3": {
+      "warm_cycles": 4401461,
+      "partition": {
+        "idle_empty": 2220419,
+        "idle_cache_drain": 180515,
+        "command_fetch": 28780,
+        "command_execute": 2800,
+        "command_barrier": 15926,
+        "clear": 199790,
+        "triangle_setup": 205965,
+        "triangle_walk": 10545,
+        "vertex_transform": 73696,
+        "vertex_cache": 23746,
+        "span_setup": 12354,
+        "framebuffer_flush": 1863,
+        "fragment_retire": 169971,
+        "fragment_color_depth_response": 490017,
+        "fragment_read_drain_or_setup": 84310,
+        "fragment_write_backpressure": 2012,
+        "fragment_depth_read_gate": 326434,
+        "fragment_texture_starved": 34453,
+        "fragment_perspective_starved": 108199,
+        "fragment_local_hold": 116532,
+        "fragment_pipeline_progress": 93134,
+        "other": 0
+      },
+      "metrics": {
+        "gpu_busy": 2185011,
+        "core_busy": 2006008,
+        "cpu_retire": 2106575,
+        "cpu_ring_publish": 163,
+        "cpu_ring_upload": 19172,
+        "cache_flush_entries": 81,
+        "cache_maintenance_cycles": 195834,
+        "cache_maintenance_scan_cycles": 82944,
+        "cache_maintenance_write_cycles": 110746,
+        "cache_misses": 12263,
+        "cache_writebacks": 19181,
+        "command_cache_barrier_wait": 15926
+      },
+      "maintenance_reasons": [
+        0,
+        180094,
+        0,
+        0,
+        15740,
+        0,
+        0,
+        0
+      ],
+      "flush_entry_reasons": [
+        0,
+        80,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0
+      ],
+      "queue_pressure": {
+        "output_queue_words": 512,
+        "derived_cycles": {
+          "output_word_cycle_sum": 759295320,
+          "front_empty_idle": 3052858,
+          "fifo_full": 1275716,
+          "blocked_passthrough_output": 1007596,
+          "math_request": 3039,
+          "all_math_states": 35867,
+          "math_owned": 33960,
+          "blocked_geometry_output": 267617,
+          "math_request_with_raw_job": 1907
+        },
+        "bank_valid_mask_cycles": {
+          "0": 2899459,
+          "1": 327090,
+          "3": 1040110,
+          "2": 134802
+        },
+        "weighted_bank_hold_cycles": {
+          "copy": 18060,
+          "ready_not_reading": 2215016,
+          "reading": 309036
+        },
+        "exact_overlap_cycles": {
+          "both_banks_and_output_full": 1022797,
+          "both_banks_and_math_states": 6198,
+          "both_banks_and_front_empty": 1
+        }
+      }
+    },
+    "queued-large-v1": {
+      "warm_cycles": 4367046,
+      "partition": {
+        "idle_empty": 2182239,
+        "idle_cache_drain": 179312,
+        "command_fetch": 28901,
+        "command_execute": 2811,
+        "command_barrier": 15926,
+        "clear": 199692,
+        "triangle_setup": 205965,
+        "triangle_walk": 10545,
+        "vertex_transform": 74235,
+        "vertex_cache": 23801,
+        "span_setup": 12354,
+        "framebuffer_flush": 1863,
+        "fragment_retire": 169971,
+        "fragment_color_depth_response": 492041,
+        "fragment_read_drain_or_setup": 85021,
+        "fragment_write_backpressure": 2007,
+        "fragment_depth_read_gate": 328381,
+        "fragment_texture_starved": 34235,
+        "fragment_perspective_starved": 108142,
+        "fragment_local_hold": 116533,
+        "fragment_pipeline_progress": 93071,
+        "other": 0
+      },
+      "metrics": {
+        "gpu_busy": 2188665,
+        "core_busy": 2010642,
+        "cpu_retire": 2083012,
+        "cpu_ring_publish": 207,
+        "cpu_ring_upload": 18478,
+        "cache_flush_entries": 83,
+        "cache_maintenance_cycles": 196545,
+        "cache_maintenance_scan_cycles": 84992,
+        "cache_maintenance_write_cycles": 109422,
+        "cache_misses": 12271,
+        "cache_writebacks": 19189,
+        "command_cache_barrier_wait": 15926
+      },
+      "maintenance_reasons": [
+        0,
+        180805,
+        0,
+        0,
+        15740,
+        0,
+        0,
+        0
+      ],
+      "flush_entry_reasons": [
+        0,
+        82,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0
+      ],
+      "queue_pressure": {
+        "output_queue_words": 2048,
+        "derived_cycles": {
+          "output_word_cycle_sum": 2330243109,
+          "front_empty_idle": 3420515,
+          "math_request": 2964,
+          "all_math_states": 42984,
+          "math_owned": 41400,
+          "fifo_full": 862604,
+          "blocked_geometry_output": 293025,
+          "blocked_passthrough_output": 569353,
+          "math_request_with_raw_job": 1584
+        },
+        "bank_valid_mask_cycles": {
+          "0": 3142055,
+          "1": 455567,
+          "3": 718835,
+          "2": 50589
+        },
+        "weighted_bank_hold_cycles": {
+          "copy": 23994,
+          "ready_not_reading": 1582301,
+          "reading": 337531
+        },
+        "exact_overlap_cycles": {
+          "both_banks_and_output_full": 708800,
+          "both_banks_and_math_states": 3366,
+          "both_banks_and_front_empty": 2
+        }
+      }
+    }
+  },
+  "frame_changes": {
+    "fifo512_vs_baseline_cycles": 34744,
+    "fifo512_vs_baseline_percent": 0.7956549508475241,
+    "fifo2048_vs_baseline_cycles": 329,
+    "fifo2048_vs_baseline_percent": 0.0075342642996911735,
+    "fifo2048_vs_fifo512_cycles": -34415,
+    "fifo2048_vs_fifo512_percent": -0.7818994647459054
+  },
+  "interpretation": [
+    "The larger FIFO reduced warm frame time by 34415 cycles (0.782% relative to the 512-word queued design), while leaving it 329 cycles slower than the unchanged simple core.",
+    "More storage lowers downstream passthrough blocking and snapshot-bank pressure, so it does improve overlap. Large blocked-duration changes are not equivalent frame savings because CPU and raster work overlap.",
+    "Math-request cycles are 3039 with the small FIFO and 2964 with the larger FIFO; shared-FMA admission is not the dominant queue stall in this scene.",
+    "The larger FIFO still sees 862604 full cycles, and 708800 cycles jointly holding both snapshot banks with full output. Ordered downstream raster drain bounds how quickly later generation releases can be processed.",
+    "Compared with baseline, large-FIFO maintenance grows 34721 cycles, predominantly an extra39936 scan cycles while maintenance write cycles decrease5164. These overlapped counts are not a causal frame-cost decomposition.",
+    "Idle-flush source uses !gpu_busy_core, which includes queued-worker busy. It therefore cannot trigger simply because an active accepted cull temporarily leaves output empty. Increased full idle gaps between published chunks are the plausible mechanism.",
+    "Texture-triggered cache maintenance remains zero and the explicit barrier count remains one. The extra fence wait reflects timing/dirty-cache scheduling rather than extra barriers.",
+    "Retain the baseline. A ring-capacity repartition and Quartus run are not justified by a frame-time tie; the large-FIFO model is a capacity counterfactual, not an area-qualified implementation."
+  ],
+  "limitations": [
+    "Two fixed replay intervals, synthetic display/audio traffic and bounded guest services; no sustained hardware FPS claim.",
+    "Busy/pressure/maintenance durations overlap and cannot be added or treated as guaranteed removable wall time.",
+    "Physical512 staging is source-only; no Quartus was run. The unchanged4096 ingress plus2048 output counterfactual exceeds the spare BRAM budget."
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/baseline-v3/run/gpu-profile.json": "61edd2b595f75f8199ac2af764d328219fc6eefc9667ee006a2c782d250ce418",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v3/run/gpu-profile.json": "2b9f738fd5d07c61cf650af567ae6e91d16de0adf76b90fe35a77197d4e14b94",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-large-v1/run/gpu-profile.json": "3d23fcce859feb16a82df77fab4ca6b75db4bf530efdec90908aa853aadd0441",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/review/queue-pressure-appv2-fifo512.json": "8a0753f6a175c94c732c85933d9e721c0fe94447c954e810097af48a8f00165f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/review/queue-pressure-appv2-fifo2048.json": "f7195dcd3f7f4627ad7b705bf366da6a6b40de2506bd1ce1bab7955b1a9a2820",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/native-v1/frozen/src/fpga/common/gpu_core.v": "a50e45f4e1e866973158efdd5cbf48f56a43f8e2124f713806386d372e2c1e25",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/native-v1/frozen/docs/measurements/os30-dual-20261004/validation/baseline128/tb_irq.v": "851ca439a6f0a17804eae5b22c0517bcf80d49e19f95b8d4d965880b2ae9a3f5",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/native-large-fifo-v1/counterfactual-manifest.json": "7db085a4b1e9b9af594d7890417d9a17323414489b7300a92d99837520d837d8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/review/physical-preflight-v1.json": "4be061ce8d74329b6771287d3f0e46cad4c98ac760bd64730898408d7cddfcf8"
+  }
+}

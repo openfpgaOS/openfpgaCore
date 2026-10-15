@@ -1,0 +1,86 @@
+{
+  "status": "PASS_EXACT_EVENT_INTERVAL_ATTRIBUTION",
+  "run": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run",
+  "model": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/native-v1",
+  "output_queue_words": 512,
+  "pointer_modulus": 4096,
+  "warm_begin": 4105979,
+  "warm_end": 8575416,
+  "warm_cycles": 4469437,
+  "worker_state_cycles": {
+    "header": 3228155,
+    "passthrough_payload": 977825,
+    "context": 400,
+    "wait_jobs": 80,
+    "view_request": 80,
+    "view_prime": 80,
+    "job_prime": 621,
+    "job_capture": 621,
+    "math_request": 5719,
+    "cull_start": 612,
+    "cull_wait": 34884,
+    "next_job": 621,
+    "vertex_select": 2640,
+    "vertex_prime": 4232,
+    "vertex_capture": 4232,
+    "vertex_emit": 178527,
+    "draw_select": 621,
+    "draw_prime": 317,
+    "draw_capture": 317,
+    "draw_header": 23389,
+    "draw_word": 5228,
+    "run_finish": 80,
+    "header_prime": 80,
+    "release_token": 76
+  },
+  "output_occupancy_cycles": {
+    "zero": 2687461,
+    "below_quarter": 212849,
+    "quarter_to_half": 116581,
+    "half_to_full": 226193,
+    "full": 1226353
+  },
+  "derived_cycles": {
+    "output_word_cycle_sum": 750797923,
+    "front_empty_idle": 3164834,
+    "fifo_full": 1226353,
+    "blocked_passthrough_output": 1023186,
+    "math_request": 5719,
+    "all_math_states": 41215,
+    "math_owned": 36720,
+    "blocked_geometry_output": 201749,
+    "math_request_with_raw_job": 4495
+  },
+  "bank_valid_mask_cycles": {
+    "0": 2990914,
+    "1": 412933,
+    "3": 1002026,
+    "2": 63564
+  },
+  "weighted_bank_hold_cycles": {
+    "copy": 19608,
+    "ready_not_reading": 2228072,
+    "reading": 232869
+  },
+  "exact_overlap_cycles": {
+    "both_banks_and_output_full": 986667,
+    "both_banks_and_math_states": 6294
+  },
+  "limitations": [
+    "Durations overlap CPU and GPU work and are not causal speedup estimates.",
+    "Weighted bank holds count each bank separately, not a frame partition.",
+    "Ready-not-reading includes queued work and generation lifetime between runs.",
+    "Queue-event pointers are used; legacy ring_word_sum is not used.",
+    "Event streams are treated as piecewise constant at recorded event cycles; common pre/post-edge sampling convention is inherited."
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/queue-events.tsv": "0fc4ac8de768dc48ce691694d4b3961a0ca0821f4e4029c0ca0fbad3f8f2b2f8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/bank-events.tsv": "3a947eb0bf26e8b0143e33f6c568bc1a3c83c3d633c3b0d0cb83680134cd8d9d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/boundaries.tsv": "8336f78f07cb19d29f21805625bdda9c7f7f623544b77c114e4bf03f330b355e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/prepared-queue.json": "51ce9e164ef5a72c455515202d17deea078705ed71507ee0fa865651998828da",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/native-v1/prepared.json": "dbe985926477ed119ebc5c416250d1f87a3711c568f4cff9075861b914a1b233",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/native-v1/frozen/src/fpga/common/gpu_core.v": "a50e45f4e1e866973158efdd5cbf48f56a43f8e2124f713806386d372e2c1e25",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/native-v1/frozen/src/fpga/common/gpu_queued_front.v": "ac978376a246b6860a4891fd23c9f4405ccb2e37362d0aa88091a29187b09dc6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/review/analyze-queue-pressure-v2.py": "61af870616c9cca9f85f7908dd146d9bef117d9b97a5c5b5701e8da5e7483daa"
+  }
+}

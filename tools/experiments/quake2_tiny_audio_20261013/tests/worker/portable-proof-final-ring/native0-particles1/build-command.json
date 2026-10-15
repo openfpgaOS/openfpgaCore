@@ -1,0 +1,21 @@
+[
+  "verilator",
+  "--cc",
+  "--exe",
+  "--build",
+  "-j",
+  "2",
+  "-Wno-fatal",
+  "--top-module",
+  "geometry_worker_tb",
+  "--Mdir",
+  "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/portable-proof-final-ring/native0-particles1/obj",
+  "+define+TEST_NATIVE=0",
+  "+define+TEST_PARTICLES=1",
+  "-CFLAGS",
+  "-DTEST_NATIVE=0 -DTEST_PARTICLES=1",
+  "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/lockstep-fixtures-v2/geometry_worker_tb.v",
+  "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/sweep-final-ring-audio/frozen/src/fpga/common/gpu_geometry_worker.v",
+  "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/lockstep-fixtures-v2/gpu_geometry_worker_reference.v",
+  "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-geometry/ring-lookahead/lockstep-fixtures-v2/geometry_worker.cpp"
+]

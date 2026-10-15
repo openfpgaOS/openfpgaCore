@@ -1,0 +1,30 @@
+{
+  "status": "FROZEN_FOR_MEASUREMENT",
+  "elf": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/alias/obj-v2/app.elf",
+  "elf_sha256": "bcb3e95bb8745811375628188c5b66aa5aa1122b99a78dce0a3c2f9cc23e87d9",
+  "compiler": "riscv64-elf-gcc (Arch Linux Repositories) 15.2.0",
+  "source_sha256": {
+    "src/quake2/openfpga/of_emit_q2.c": "c76ef94e560e69f06247140fe498a1aa65539cfdcd2befdc8ffc61486241d18b",
+    "src/quake2/openfpga/of_emit_q2.h": "9ffbf0a72b4821224d92e1d1fe2a7efc92099f7425c777aac5d61e7e4ac65376",
+    "src/quake2/openfpga/of_gl1.c": "b94eb35d6e72911c0ba5686a2899c833ca6d6ad92faab6a9454dbb132918d240"
+  },
+  "test_sha256": {
+    "tools/tests/quake2_opaque_batch_test.c": "bca53705e97e0b60b7d9232d782de44ee24039bf4dc2415d728d3fab58162f33",
+    "tools/check_quake2_opaque_batch.py": "4a92ba569500c52c715bfe525c1a11d48f6fbc2404d0663666f6ea629da3406f",
+    "tools/tests/quake2_renderer_test.c": "1352d09960bd6181718ac05c1b01b0ac7c742549861e5f1417d2bf523019ae1e"
+  },
+  "checks": {
+    "renderer_suites": "14 passed with ASan/UBSan, plus explicit scope-routing/clipping checks",
+    "capacity": "6270 cases, 20484660 output words checked; exact payload and order"
+  },
+  "build_log_sha256": "25650a8a99c69588f2280e72244ece10228450639847284793280a98362277e2",
+  "baseline": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/baseline",
+  "built_native": true,
+  "deployed": false,
+  "notes": [
+    "Source changed while first build could have been reading it; obj-v1 discarded as unselected history. obj-v2 was a fresh build after application source edits stopped.",
+    "Only existing packet owner and opaque alias scope change; no RTL, SDK memory interface, triangle math or new copies.",
+    "8-triangle maximum; larger-than-one reservation admitted only using capacity already known free.",
+    "Open scope contract allows only packed triangle emission; all opaque renderer paths tested to end before kick."
+  ]
+}

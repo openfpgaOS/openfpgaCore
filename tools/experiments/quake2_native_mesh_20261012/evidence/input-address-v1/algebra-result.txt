@@ -1,0 +1,1 @@
+PASS exhaustive 67121152 full-width pointer pairs (including invalid occupancies/wrap), 8320 lookahead combinations

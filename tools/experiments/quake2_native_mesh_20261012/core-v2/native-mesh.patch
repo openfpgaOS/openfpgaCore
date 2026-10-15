@@ -1,0 +1,589 @@
+--- a/src/fpga/common/gpu_geometry_worker.v
++++ b/src/fpga/common/gpu_geometry_worker.v
+@@ -9,7 +9,8 @@
+ `default_nettype none
+ module gpu_geometry_worker #(
+     parameter ADDR_BITS = 12,
+-    parameter QUEUE_BITS = ADDR_BITS
++    parameter QUEUE_BITS = ADDR_BITS,
++    parameter INCLUDE_NATIVE_MESH = 0
+ ) (
+     input wire clk, reset_n, enable, soft_reset, ring_reset,
+     input wire [ADDR_BITS-1:0] input_wrptr,
+@@ -19,7 +20,13 @@
+     input wire [ADDR_BITS-1:0] output_rdptr, output_addr,
+     output reg [31:0] output_data,
+     output reg [ADDR_BITS-1:0] output_wrptr,
+-    output wire busy
++    output wire busy,
++    input wire mesh_reset_n,
++    output wire mesh_arvalid,
++    output wire [31:0] mesh_araddr,
++    output wire [7:0] mesh_arlen,
++    input wire mesh_arready, mesh_rvalid, mesh_rlast,
++    input wire [31:0] mesh_rdata
+ );
+ localparam HEADER=0, SPACE=1, COPY=2, LOAD=3, MAC_ADDR=4,
+     MAC_LOAD=5, MAC_WAIT=6, MAC_ADD=7, ROW=8, DIV_INIT=9, DIV_RUN=10,
+@@ -28,9 +35,17 @@
+     SY_START=21, SY_WAIT=22, SY_ADD=23, SY_CLAMP=24, EMIT=25, COMMIT=26,
+     CULL_A=27, CULL_B=28, CULL_C=29, CULL_D=30, CULL_E=31, CULL_F=32,
+     CULL_G=33, CULL_H=34, CULL_I=35, CULL_J=36, TRI_HEADER=37, TRI_WORD=38,
+-    DECODE=39;
+-localparam PASS=0, OBJECT=1, RAW=2, CLIP=3, CULL=4;
+-reg [5:0] state;
++    DECODE=39, N_START=40, N_READ=41, N_WAIT=42, N_CAPTURE=43,
++    N_NEXT_VERTEX=44, N_MAC_ADDR=45, N_MAC_LOAD=46, N_MAC_LAUNCH=47,
++    N_MAC_WAIT=48, N_MAC_ADD=49, N_MAC_OFFSET=50, N_MAC_ROW=51,
++    N_PALETTE=52, N_PALETTE_WAIT=53, N_PALETTE_CAPTURE=54,
++    N_NEXT_TRI=55, N_FINISH_MESH=56, N_OUTPUT_SPACE=57,
++    N_WAIT_Q=58, N_MAC_WAIT_Q=59, N_MAC_OFFSET_Q=60, N_PALETTE_WAIT_Q=61,
++    N_HEADER_BOUND=62, N_HEADER_CHECK=63;
++localparam NP_HEADER=0, NP_SOURCE=1, NP_U=2, NP_V=3,
++    NP_OLD=4, NP_CURRENT=5, NP_TRI=6;
++localparam PASS=0, OBJECT=1, RAW=2, CLIP=3, CULL=4, NATIVE=5;
++reg [6:0] state;
+ reg [2:0] mode;
+ reg [31:0] header;
+ reg [12:0] remaining, needed;
+@@ -71,6 +86,116 @@
+ wire subtract = trial >= {1'b0, divisor};
+ wire [38:0] next_quotient = {quotient[37:0], subtract};
+ wire [31:0] next_remainder = subtract ? trial[31:0]-divisor : trial[31:0];
++// Native jobs keep immutable frame/mesh data outside the input ring. One
++// extra M10K holds coefficients, palette and three independent eight-word
++// fetch lines. Fetch ownership survives media reset until the physical burst
++// drains. No extra multiplier or reciprocal unit is introduced.
++// Writes occur only during descriptor COPY or a cache-miss fill. No RAM
++// output is consumed then; every consumer schedules a fresh read after the
++// final write and waits through both read registers. Collision forwarding
++// would add logic without changing any observable value.
++(* ramstyle = "M10K, no_rw_check" *) reg [31:0] native_mem [0:255];
++reg signed [31:0] native_xc, native_yc, native_xs, native_ys, native_nearclip;
++wire signed [31:0] active_xc = INCLUDE_NATIVE_MESH && mode == NATIVE ? native_xc : xc;
++wire signed [31:0] active_yc = INCLUDE_NATIVE_MESH && mode == NATIVE ? native_yc : yc;
++wire signed [31:0] active_xs = INCLUDE_NATIVE_MESH && mode == NATIVE ? native_xs : xs;
++wire signed [31:0] active_ys = INCLUDE_NATIVE_MESH && mode == NATIVE ? native_ys : ys;
++wire signed [31:0] active_nearclip = INCLUDE_NATIVE_MESH && mode == NATIVE ? native_nearclip : nearclip;
++reg [7:0] native_addr;
++reg [31:0] native_ram_q;
++(* preserve *) reg [31:0] native_q;
++reg native_header_valid;
++reg [9:0] native_mesh_bytes;
++reg [24:0] native_mesh_limit;
++reg [7:0] native_load_index;
++reg [31:0] native_old_base, native_current_base, native_stream, native_end;
++reg [31:0] native_source_count, native_meshes, native_flags;
++reg [5:0] native_vertices, native_vertex;
++reg [6:0] native_triangles, native_tri;
++reg [31:0] native_old_word, native_current_word;
++reg [2:0] native_column, native_purpose;
++reg [6:0] native_resume;
++reg [31:0] native_read_addr;
++reg [1:0] native_read_bank;
++reg [2:0] native_cache_valid;
++reg [18:0] native_cache_tag [0:2];
++wire native_hit = native_read_bank == 0
++    ? native_cache_valid[0] && native_cache_tag[0] == native_read_addr[23:5]
++    : native_read_bank == 1
++    ? native_cache_valid[1] && native_cache_tag[1] == native_read_addr[23:5]
++    : native_cache_valid[2] && native_cache_tag[2] == native_read_addr[23:5];
++reg [1:0] native_tx_state, native_tx_bank;
++reg [18:0] native_tx_tag;
++reg [3:0] native_tx_word;
++reg native_tx_discard;
++wire native_client_reset = !reset_n || soft_reset || ring_reset;
++wire native_fetch_start = INCLUDE_NATIVE_MESH && enable && !native_client_reset
++    && state == N_READ && !native_hit && native_tx_state == 0;
++assign mesh_arvalid = INCLUDE_NATIVE_MESH && native_tx_state == 1;
++assign mesh_araddr = {8'd0,native_tx_tag,5'd0};
++assign mesh_arlen = INCLUDE_NATIVE_MESH ? 8'd7 : 8'd0;
++wire native_fill_write = INCLUDE_NATIVE_MESH && native_tx_state == 2
++    && mesh_rvalid && !native_tx_discard && !native_client_reset
++    && native_tx_word < 8;
++wire [7:0] native_fill_addr = 8'd160 + {3'd0,native_tx_bank,3'd0}
++                                      + {4'd0,native_tx_word};
++// Frames cannot cross the physical chip boundary. Restrict counts before
++// shifting; valid source vertices are four-byte native MD2 records.
++wire native_job_valid = surface_valid && native_flags <= 2 && native_nearclip > 0
++    && native_source_count != 0 && native_source_count <= 4096
++    && native_meshes != 0 && native_meshes <= 4096
++    && native_old_base[31:24] == 0 && native_current_base[31:24] == 0
++    && native_stream[31:24] == 0 && native_end <= 32'h01000000
++    && native_stream < native_end
++    && native_old_base[1:0] == 0 && native_current_base[1:0] == 0
++    && native_stream[1:0] == 0 && native_end[1:0] == 0
++    && ({3'b0,native_old_base} + {1'b0,native_source_count,2'b0}) <= 35'h1000000
++    && ({3'b0,native_current_base} + {1'b0,native_source_count,2'b0}) <= 35'h1000000;
++always @(posedge clk) begin
++    // M10K output registration isolates memory clock skew from the decode,
++    // address arithmetic and DSP operand paths. FSM waits cover both stages.
++    native_ram_q <= native_mem[native_addr];
++    native_q <= native_ram_q;
++    if (native_fill_write) native_mem[native_fill_addr] <= mesh_rdata;
++    else if (INCLUDE_NATIVE_MESH && take_input && state == COPY && mode == NATIVE) begin
++        if (native_load_index >= 7 && native_load_index < 31)
++            native_mem[native_load_index-7] <= input_data;
++        else if (native_load_index >= 36)
++            native_mem[native_load_index-4] <= input_data;
++    end
++end
++always @(posedge clk) begin
++    if (!mesh_reset_n || !INCLUDE_NATIVE_MESH) begin
++        native_tx_state <= 0; native_tx_discard <= 0;
++        native_tx_bank <= 0; native_tx_tag <= 0; native_tx_word <= 0;
++        native_cache_valid <= 0;
++    end else begin
++        if (native_client_reset || (enable && state == N_START))
++            native_cache_valid <= 0;
++        if (native_client_reset && native_tx_state != 0)
++            native_tx_discard <= 1;
++        case (native_tx_state)
++        0: if (native_fetch_start) begin
++            native_tx_state <= 1; native_tx_bank <= native_read_bank;
++            native_tx_tag <= native_read_addr[23:5]; native_tx_word <= 0;
++            native_tx_discard <= 0;
++        end
++        1: if (mesh_arready) native_tx_state <= 2;
++        2: if (mesh_rvalid) begin
++            native_tx_word <= native_tx_word + 1'b1;
++            if (mesh_rlast) begin
++                native_tx_state <= 0;
++                if (!native_tx_discard && !native_client_reset && native_tx_word == 7) begin
++                    native_cache_valid[native_tx_bank] <= 1;
++                    native_cache_tag[native_tx_bank] <= native_tx_tag;
++                end
++            end
++        end
++        default: native_tx_state <= 0;
++        endcase
++    end
++end
++
+ wire input_empty = input_rdptr == input_wrptr;
+ wire [ADDR_BITS-1:0] used_words = write_ptr - output_rdptr;
+ wire [ADDR_BITS:0] free_words = (1 << QUEUE_BITS)-1 - {1'b0,used_words};
+@@ -80,7 +205,8 @@
+ // Look ahead on consumption so the synchronous RAM delivers the next word
+ // on the following cycle. Empty cycles continue refreshing the current head.
+ assign input_addr = input_rdptr + {{(ADDR_BITS-1){1'b0}},take_input};
+-assign busy = !input_empty || state != HEADER;
++assign busy = !input_empty || state != HEADER
++    || (INCLUDE_NATIVE_MESH && native_tx_state != 0);
+ // Explicit finite decode: Quartus implements even an 8-bit "% 5" here as
+ // a long subtract chain. These are the only valid 1..32 vertex payloads.
+ function valid_raw;
+@@ -155,6 +281,10 @@
+         input_rdptr <= (reset_n && soft_reset && !ring_reset) ? input_wrptr : 0;
+         write_ptr <= 0; output_wrptr <= 0; state <= HEADER;
+         mode <= PASS; index <= 0; remaining <= 0; needed <= 0;
++        native_load_index <= 0; native_resume <= N_START;
++        native_addr <= 0; native_read_addr <= 0; native_read_bank <= 0;
++        native_purpose <= NP_HEADER; native_vertex <= 0; native_tri <= 0;
++        native_column <= 0;
+         if (!reset_n || soft_reset) surface_valid <= 0;
+         // A viewport must normally be bound before any vertex is submitted.
+         if (!reset_n) begin xc <= 0; yc <= 0; xs <= 0; ys <= 0; nearclip <= 0; end
+@@ -175,7 +305,10 @@
+                     || (header[31:24] == 8'h4c && header[12:0] >= 9 && header[12:0] <= 24)
+                     || (header[31:24] == 8'h49 && header[12:0] == 36))
+                     surface_valid <= 1'b0;
+-                if (header[31:24] == 8'h50 && header[12:0] == 26) begin
++                if (INCLUDE_NATIVE_MESH && header[31:24] == 8'h60 && header[12:0] == 164) begin
++                    mode <= NATIVE; needed <= 0; native_load_index <= 0;
++                    native_resume <= N_START;
++                end else if (header[31:24] == 8'h50 && header[12:0] == 26) begin
+                     mode <= OBJECT; needed <= 0;
+                 end else if (header[31:24] == 8'h59 && valid_raw(header[12:0])) begin
+                     mode <= RAW;
+@@ -193,6 +326,24 @@
+                 state <= remaining == 0 ? COMMIT
+                        : (mode == RAW || mode == CLIP || mode == CULL) ? LOAD : COPY;
+             COPY: if (take_input) begin
++                if (INCLUDE_NATIVE_MESH && mode == NATIVE) begin
++                    native_load_index <= native_load_index + 1'b1;
++                    case (native_load_index)
++                    0: native_old_base <= input_data;
++                    1: native_current_base <= input_data;
++                    2: native_stream <= input_data;
++                    3: native_meshes <= input_data;
++                    4: native_flags <= input_data;
++                    5: native_source_count <= input_data;
++                    6: native_end <= input_data;
++                    31: native_xc <= input_data;
++                    32: native_yc <= input_data;
++                    33: native_xs <= input_data;
++                    34: native_ys <= input_data;
++                    35: native_nearclip <= input_data;
++                    default: ;
++                    endcase
++                end
+                 if (mode == OBJECT) case (index)
+                     20: xc <= input_data;
+                     21: yc <= input_data;
+@@ -260,33 +411,33 @@
+                 state <= row == 2 ? DIV_INIT : MAC_ADDR;
+             end
+             DIV_INIT: begin
+-                divisor <= cw < nearclip ? nearclip : cw;
++                divisor <= cw < active_nearclip ? active_nearclip : cw;
+                 remainder <= 0; quotient <= 39'h4000000000;
+-                iterations <= mode == RAW ? 39 : 33; state <= DIV_RUN;
++                iterations <= (mode == RAW || mode == NATIVE) ? 39 : 33; state <= DIV_RUN;
+             end
+             DIV_RUN: begin
+                 quotient <= next_quotient; remainder <= next_remainder;
+                 iterations <= iterations - 1'b1;
+                 if (iterations == 1) begin
+-                    zi <= mode == RAW ? {6'd0,next_quotient[31:6]} : next_quotient[31:0];
+-                    if (mode == RAW) depth <= next_quotient[31:0];
++                    zi <= (mode == RAW || mode == NATIVE) ? {6'd0,next_quotient[31:6]} : next_quotient[31:0];
++                    if (mode == RAW || mode == NATIVE) depth <= next_quotient[31:0];
+                     state <= RX_START;
+                 end
+             end
+             RX_START: begin mul_a <= cx; mul_b <= zi; state <= RX_WAIT; end
+             RX_WAIT: state <= RX_CAPTURE;
+             RX_CAPTURE: begin ratio <= product[47:16]; state <= SX_START; end
+-            SX_START: begin mul_a <= xs; mul_b <= ratio; state <= SX_WAIT; end
++            SX_START: begin mul_a <= active_xs; mul_b <= ratio; state <= SX_WAIT; end
+             SX_WAIT: state <= SX_ADD;
+-            SX_ADD: begin projected <= ($signed({{32{xc[31]}},xc}) <<< 4)
++            SX_ADD: begin projected <= ($signed({{32{active_xc[31]}},active_xc}) <<< 4)
+                                     + (product >>> 12); state <= SX_CLAMP; end
+             SX_CLAMP: begin sx <= sat16(projected); state <= RY_START; end
+             RY_START: begin mul_a <= cy; mul_b <= zi; state <= RY_WAIT; end
+             RY_WAIT: state <= RY_CAPTURE;
+             RY_CAPTURE: begin ratio <= product[47:16]; state <= SY_START; end
+-            SY_START: begin mul_a <= ys; mul_b <= ratio; state <= SY_WAIT; end
++            SY_START: begin mul_a <= active_ys; mul_b <= ratio; state <= SY_WAIT; end
+             SY_WAIT: state <= SY_ADD;
+-            SY_ADD: begin projected <= $signed({{32{yc[31]}},yc})
++            SY_ADD: begin projected <= $signed({{32{active_yc[31]}},active_yc})
+                                     - (product >>> 16); state <= SY_CLAMP; end
+             SY_CLAMP: begin sy <= sat16(projected); index <= 0; state <= EMIT; end
+             EMIT: begin
+@@ -312,7 +463,171 @@
+             TRI_WORD: state <= COMMIT;
+             COMMIT: begin
+                 output_wrptr <= write_ptr;
+-                state <= mode == RAW && remaining != 0 ? SPACE : HEADER;
++                state <= (INCLUDE_NATIVE_MESH && mode == NATIVE) ? native_resume
++                       : mode == RAW && remaining != 0 ? SPACE : HEADER;
++            end
++            N_START: if (INCLUDE_NATIVE_MESH) begin
++                if (native_job_valid) begin
++                    native_read_addr <= native_stream; native_read_bank <= 0;
++                    native_purpose <= NP_HEADER; state <= N_READ;
++                end else state <= HEADER;
++            end
++            N_READ: if (INCLUDE_NATIVE_MESH && native_hit && native_tx_state == 0) begin
++                native_addr <= 8'd160 + {3'd0,native_read_bank,3'd0}
++                                      + {5'd0,native_read_addr[4:2]};
++                state <= N_WAIT;
++            end
++            N_WAIT: state <= N_WAIT_Q;
++            N_WAIT_Q: state <= N_CAPTURE;
++            N_CAPTURE: begin
++                case (native_purpose)
++                NP_HEADER: begin
++                    // Validate counts separately from the bounded byte-size
++                    // add. A valid block needs at most 644 bytes. Keeping the
++                    // two carry chains out of one cycle fixes the v1 M10K ->
++                    // pointer write-enable critical path.
++                    native_header_valid <= native_q[31:24] == 0
++                        && native_q[7:0] != 0 && native_q[7:0] <= 32
++                        && native_q[23:8] != 0 && native_q[23:8] <= 64;
++                    native_vertices <= native_q[5:0];
++                    native_triangles <= native_q[14:8];
++                    native_mesh_bytes <= 10'd4 + ({4'd0,native_q[5:0]} * 10'd12)
++                        + {1'd0,native_q[14:8],2'b0};
++                    state <= N_HEADER_BOUND;
++                end
++                NP_SOURCE: begin
++                    if (native_q >= native_source_count) state <= HEADER;
++                    else begin
++                        // Retain the current source word address until U/V load.
++                        native_current_word <= native_q;
++                        native_stream <= native_stream + 4;
++                        native_read_addr <= native_stream + 4;
++                        native_purpose <= NP_U; state <= N_READ;
++                    end
++                end
++                NP_U: begin
++                    u <= native_q; native_stream <= native_stream + 4;
++                    native_read_addr <= native_stream + 4;
++                    native_purpose <= NP_V; state <= N_READ;
++                end
++                NP_V: begin
++                    v <= native_q; native_stream <= native_stream + 4;
++                    native_read_addr <= native_old_base + (native_current_word << 2);
++                    native_read_bank <= 1; native_purpose <= NP_OLD; state <= N_READ;
++                end
++                NP_OLD: begin
++                    native_old_word <= native_q;
++                    native_read_addr <= native_current_base + (native_current_word << 2);
++                    native_read_bank <= 2; native_purpose <= NP_CURRENT; state <= N_READ;
++                end
++                NP_CURRENT: begin
++                    native_current_word <= native_q;
++                    row <= 0; native_column <= 0; state <= N_MAC_ADDR;
++                end
++                NP_TRI: begin
++                    if (native_q[31:15] != 0 || {1'b0,native_q[4:0]} >= native_vertices
++                        || {1'b0,native_q[9:5]} >= native_vertices
++                        || {1'b0,native_q[14:10]} >= native_vertices) state <= HEADER;
++                    else begin
++                        triangle <= native_q | (native_flags << 15);
++                        point_addr <= native_q[4:0];
++                        native_stream <= native_stream + 4;
++                        native_resume <= N_NEXT_TRI;
++                        state <= native_flags == 0 ? TRI_HEADER : CULL_A;
++                    end
++                end
++                default: state <= HEADER;
++                endcase
++            end
++            N_HEADER_BOUND: begin
++                native_mesh_limit <= {1'b0,native_stream[23:0]} + {15'd0,native_mesh_bytes};
++                state <= N_HEADER_CHECK;
++            end
++            N_HEADER_CHECK: begin
++                if (!native_header_valid || native_mesh_limit > native_end[24:0]) state <= HEADER;
++                else begin
++                    native_vertex <= 0; native_tri <= 0;
++                    native_stream <= native_stream + 4;
++                    native_read_addr <= native_stream + 4;
++                    native_purpose <= NP_SOURCE; state <= N_READ;
++                end
++            end
++            N_MAC_ADDR: begin
++                native_addr <= {3'd0,row,3'd0} + {5'd0,native_column};
++                state <= N_MAC_LOAD;
++            end
++            N_MAC_LOAD: state <= N_MAC_WAIT_Q;
++            N_MAC_WAIT_Q: state <= N_MAC_LAUNCH;
++            N_MAC_LAUNCH: begin
++                mul_a <= native_q;
++                case (native_column)
++                0: mul_b <= {24'd0,native_old_word[7:0]};
++                1: mul_b <= {24'd0,native_old_word[15:8]};
++                2: mul_b <= {24'd0,native_old_word[23:16]};
++                3: mul_b <= {24'd0,native_current_word[7:0]};
++                4: mul_b <= {24'd0,native_current_word[15:8]};
++                default: mul_b <= {24'd0,native_current_word[23:16]};
++                endcase
++                state <= N_MAC_WAIT;
++            end
++            N_MAC_WAIT: state <= N_MAC_ADD;
++            N_MAC_ADD: begin
++                accumulator <= native_column == 0 ? product[47:0] : accumulator + product[47:0];
++                native_column <= native_column + 1'b1;
++                if (native_column == 5) begin
++                    native_addr <= {3'd0,row,3'd0} + 8'd6; state <= N_MAC_OFFSET;
++                end else state <= N_MAC_ADDR;
++            end
++            N_MAC_OFFSET: state <= N_MAC_OFFSET_Q;
++            N_MAC_OFFSET_Q: state <= N_MAC_ROW;
++            N_MAC_ROW: begin
++                case (row)
++                0: cx <= (accumulator >>> 16) + $signed(native_q);
++                1: cy <= (accumulator >>> 16) + $signed(native_q);
++                2: cw <= (accumulator >>> 16) + $signed(native_q);
++                default: ;
++                endcase
++                row <= row + 1'b1; native_column <= 0;
++                state <= row == 2 ? N_PALETTE : N_MAC_ADDR;
++            end
++            N_PALETTE: begin
++                native_addr <= 8'd32 + {1'b0,native_current_word[31:25]};
++                state <= N_PALETTE_WAIT;
++            end
++            N_PALETTE_WAIT: state <= N_PALETTE_WAIT_Q;
++            N_PALETTE_WAIT_Q: state <= N_PALETTE_CAPTURE;
++            N_PALETTE_CAPTURE: begin
++                rgb <= native_current_word[24] ? native_q[31:16] : native_q[15:0];
++                slot <= native_vertex[4:0]; native_resume <= N_NEXT_VERTEX;
++                state <= N_OUTPUT_SPACE;
++            end
++            N_OUTPUT_SPACE: if (free_words >= 7) state <= DIV_INIT;
++            N_NEXT_VERTEX: begin
++                native_vertex <= native_vertex + 1'b1;
++                native_read_addr <= native_stream; native_read_bank <= 0;
++                if (native_vertex + 1'b1 == native_vertices) begin
++                    native_purpose <= NP_TRI;
++                    // Reserve two output words before reading the index.
++                    state <= N_NEXT_TRI;
++                    native_tri <= 0;
++                end else begin native_purpose <= NP_SOURCE; state <= N_READ; end
++            end
++            N_NEXT_TRI: begin
++                if (native_tri == native_triangles) state <= N_FINISH_MESH;
++                else if (free_words >= 2) begin
++                    native_read_addr <= native_stream; native_read_bank <= 0;
++                    native_purpose <= NP_TRI; native_tri <= native_tri + 1'b1;
++                    state <= N_READ;
++                end
++            end
++            N_FINISH_MESH: begin
++                native_meshes <= native_meshes - 1'b1;
++                if (native_meshes == 1) state <= HEADER;
++                else if (native_stream >= native_end) state <= HEADER;
++                else begin
++                    native_read_addr <= native_stream; native_read_bank <= 0;
++                    native_purpose <= NP_HEADER; state <= N_READ;
++                end
+             end
+             default: state <= HEADER;
+         endcase
+--- a/src/fpga/common/os30/gpu_core.v
++++ b/src/fpga/common/os30/gpu_core.v
+@@ -278,6 +278,20 @@
+     input  wire        gpu_tex_mem_rlast,
+ 
+     // ================================================================
++    // Native mesh reader. Shares the target's fast-memory controller with
++    // texture fills; accepts every response beat without backpressure.
++    // Fabric reset is separate so accepted requests drain across GPU resets.
++    // ================================================================
++    input  wire        mesh_reset_n,
++    output wire        mesh_arvalid,
++    input  wire        mesh_arready,
++    output wire [31:0] mesh_araddr,
++    output wire [7:0]  mesh_arlen,
++    input  wire        mesh_rvalid,
++    input  wire [31:0] mesh_rdata,
++    input  wire        mesh_rlast,
++
++    // ================================================================
+     // Fast texture memory upload (MMIO).  reg 2 (0x08) = word address,
+     // reg 15 (0x3C) = data word (kicks a word_wr to the fast-texture
+     // controller and auto-increments the address).  reg 15 read =
+@@ -393,7 +407,8 @@
+ //                              bit3=transluc_busy, [5:4]=dma_state,
+ //                              bit6=dma_desc_full, bit7=CPU upload capability,
+ //                              bit8=CPU mode, bit9=CPU overflow,
+-//                              bit10=SM64 geometry, bit11=independent worker
++//                              bit10=SM64 geometry, bit11=independent worker,
++//                              bit12=native MD2 mesh worker
+ // 0x18  GPU_FENCE         R   Last completed fence token
+ // 0x1C  GPU_DMA_LEN       W   Word count to pull (max 4096)
+ // 0x20  GPU_TRANSLUC_ADDR W   byte address into transluc[] upload window
+@@ -424,6 +439,8 @@
+ localparam RING_WORDS = 4096;  // 16 KB
+ localparam RING_ADDR_BITS = 12;
+ localparam GEOMETRY_WORKER = `ifdef INCLUDE_GPU_GEOMETRY_WORKER 1 `else 0 `endif;
++localparam NATIVE_MESH = GEOMETRY_WORKER &&
++    (`ifdef INCLUDE_GPU_NATIVE_MESH 1 `else 0 `endif);
+ 
+ reg [31:0] ring_bram [0:RING_WORDS-1];
+ reg [RING_ADDR_BITS-1:0] ring_wr_addr;  // Append pointer (word index)
+@@ -520,13 +537,18 @@
+     wire [RING_ADDR_BITS-1:0] address;
+     reg [31:0] data;
+     always @(posedge clk) data <= ring_bram[address];
+-    gpu_geometry_worker #(.ADDR_BITS(RING_ADDR_BITS), .QUEUE_BITS(9)) worker (
++    gpu_geometry_worker #(.ADDR_BITS(RING_ADDR_BITS), .QUEUE_BITS(9),
++        .INCLUDE_NATIVE_MESH(NATIVE_MESH)) worker (
+         .clk(clk), .reset_n(reset_n), .enable(active),
+         .soft_reset(soft_reset), .ring_reset(ring_reset),
+         .input_wrptr(ring_wrptr), .input_rdptr(upload_rdptr),
+         .input_addr(address), .input_data(data),
+         .output_rdptr(ring_rdptr), .output_addr(ring_rd_addr),
+         .output_data(ring_rd_data), .output_wrptr(command_wrptr),
++        .mesh_reset_n(mesh_reset_n),
++        .mesh_arvalid(mesh_arvalid), .mesh_arready(mesh_arready),
++        .mesh_araddr(mesh_araddr), .mesh_arlen(mesh_arlen),
++        .mesh_rvalid(mesh_rvalid), .mesh_rdata(mesh_rdata), .mesh_rlast(mesh_rlast),
+         .busy(geometry_worker_busy)
+     );
+ end else begin : g_direct_commands
+@@ -536,6 +558,9 @@
+     assign command_wrptr = ring_wrptr;
+     assign upload_rdptr = ring_rdptr;
+     assign geometry_worker_busy = 1'b0;
++    assign mesh_arvalid = 1'b0;
++    assign mesh_araddr = 32'd0;
++    assign mesh_arlen = 8'd0;
+ end endgenerate
+ 
+ // DMA word-write into ring BRAM port A: asserted by the DMA FSM
+@@ -730,7 +755,7 @@
+         //   bit 9     = sticky CPU append overflow (cleared by ring reset)
+         // Bit 10 advertises the version-1 raw-vertex geometry command (0x59)
+         // and indexed-draw culling bits. Old cores return zero here.
+-        4'd5:    reg_rdata = {20'b0, (GEOMETRY_WORKER != 0), (SM64_GEOMETRY != 0), (INCLUDE_CPU_RING && cpu_ring_overflow),
++        4'd5:    reg_rdata = {19'b0, (NATIVE_MESH != 0), (GEOMETRY_WORKER != 0), (SM64_GEOMETRY != 0), (INCLUDE_CPU_RING && cpu_ring_overflow),
+                               (INCLUDE_CPU_RING && cpu_ring_mode), (INCLUDE_CPU_RING != 0),
+                               dma_desc_full, dma_state, transluc_upload_busy,
+                               dma_busy, ring_empty, busy};
+--- a/src/fpga/targets/pocket/os30/core_top.v
++++ b/src/fpga/targets/pocket/os30/core_top.v
+@@ -2630,9 +2630,11 @@
+     // SM64 raw-LOAD engine, advertising no LOAD ABI at its register window.
+     // Preserve the CPU alias bridge and its normal SDRAM forwarding path.
+     assign geometry_reg_rdata = 32'd0;
++`ifndef INCLUDE_GPU_NATIVE_MESH
+     assign geometry_arvalid = 1'b0;
+     assign geometry_araddr = 32'd0;
+     assign geometry_arlen = 8'd0;
++`endif
+     assign geometry_rready = 1'b1;
+     assign geometry_view_data = 32'd0;
+     assign geometry_view_block = 1'b0;
+@@ -3834,6 +3836,17 @@
+     .gpu_tex_mem_rvalid(gpu_tex_rvalid),
+     .gpu_tex_mem_rdata(gpu_tex_rdata),
+     .gpu_tex_mem_rlast(gpu_tex_rlast),
++`ifdef INCLUDE_GPU_NATIVE_MESH
++    // Native immutable model reads use the formerly idle second CRAM1 client.
++    // The worker retains transaction ownership across media/soft/ring reset.
++    .mesh_reset_n(cram1_reset_n),
++    .mesh_arvalid(geometry_arvalid), .mesh_arready(geometry_arready),
++    .mesh_araddr(geometry_araddr), .mesh_arlen(geometry_arlen),
++    .mesh_rvalid(geometry_rvalid), .mesh_rdata(geometry_rdata), .mesh_rlast(geometry_rlast),
++`else
++    .mesh_reset_n(reset_n_cpu_media),
++    .mesh_arready(1'b0), .mesh_rvalid(1'b0), .mesh_rdata(32'd0), .mesh_rlast(1'b0),
++`endif
+     // Fast texture upload (MMIO regs -> cram1_controller word_wr)
+     .gpu_tex_mem_up_wr(cram1_up_wr),
+     .gpu_tex_mem_up_addr(cram1_up_addr),
+--- a/src/fpga/targets/pocket/ap_core.qsf
++++ b/src/fpga/targets/pocket/ap_core.qsf
+@@ -380,6 +380,7 @@
+ 
+ # Compiler Assignments
+ # ====================
++set_global_assignment -name OPTIMIZATION_MODE "HIGH PERFORMANCE EFFORT"
+ 
+ # Analysis & Synthesis Assignments
+ # ================================
+@@ -395,8 +396,10 @@
+ set_global_assignment -name ADV_NETLIST_OPT_SYNTH_WYSIWYG_REMAP ON
+ set_global_assignment -name SYNTH_PROTECT_SDC_CONSTRAINT ON
+ set_global_assignment -name PRE_MAPPING_RESYNTHESIS ON
++set_global_assignment -name OPTIMIZATION_TECHNIQUE SPEED
+ set_global_assignment -name MUX_RESTRUCTURE ON
+ set_global_assignment -name PHYSICAL_SYNTHESIS_COMBO_LOGIC OFF
++set_global_assignment -name PHYSICAL_SYNTHESIS_REGISTER_DUPLICATION ON
+ set_global_assignment -name PHYSICAL_SYNTHESIS_REGISTER_RETIMING OFF
+ set_global_assignment -name PHYSICAL_SYNTHESIS_ASYNCHRONOUS_SIGNAL_PIPELINING OFF
+ set_global_assignment -name ROUTER_LCELL_INSERTION_AND_LOGIC_DUPLICATION ON
+@@ -981,6 +984,9 @@
+ set_global_assignment -name VERILOG_FILE ../../common/os30/geometry_raw_load.v
+ 
+ # Exact selected compact-v7 settings; no timing-constraint changes.
++set_global_assignment -name OPTIMIZATION_MODE BALANCED
++set_global_assignment -name OPTIMIZATION_TECHNIQUE AREA
++set_global_assignment -name PHYSICAL_SYNTHESIS_REGISTER_DUPLICATION OFF
+ set_instance_assignment -name OPTIMIZATION_TECHNIQUE SPEED -to ic|cpu|cpu
+ 
+ # LOD5 shares the full-capacity CRAM texture bus.
+@@ -1031,3 +1037,6 @@
+ set_global_assignment -name OPTIMIZATION_MODE "HIGH PERFORMANCE EFFORT"
+ set_global_assignment -name OPTIMIZATION_TECHNIQUE SPEED
+ set_global_assignment -name PHYSICAL_SYNTHESIS_REGISTER_DUPLICATION ON
++
++# Isolated native MD2 draw experiment (not a production variant).
++set_global_assignment -name VERILOG_MACRO INCLUDE_GPU_NATIVE_MESH

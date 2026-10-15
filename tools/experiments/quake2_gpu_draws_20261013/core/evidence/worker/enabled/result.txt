@@ -1,0 +1,7 @@
+PASS particles640 mixed jobs, 520456 exact output words, six malformed contexts, RNE/bbox/alpha/cull and preserved native context (5401144 cycles)
+PASS particle invalid record8/overflow1: no indexed triangle or hang
+PASS particle reset18 at divide/emit/alpha/basis/space/triangle; stale context rejects; fresh rebind recovers
+PASS descriptor width: rejected108 high/alignment bits, immediate valid recovery, accepted10 count/address/end boundaries (859703 cycles)
+PASS malformed19, reset12 (request-held/before-data/mid/last; soft/ring/media), postreset reuse
+PASS: 1920 mixed vertex batches, 7680 winding tests, 199032 exact output words, wrap/backpressure/enable/reset (3958603 cycles)
+Native jobs120, meshlets240, burst reads25902, returnedbeats207216, beatswhilepaused23117

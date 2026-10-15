@@ -1,0 +1,75 @@
+{
+  "status": "READY_FOR_FINAL_SELECTION_NOT_ASSEMBLED",
+  "builder": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/package/build_bundle_v3.py",
+  "builder_change": "Only README first line changed from F25-specific to neutral AJ03 title.",
+  "selected_native": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/native-v2",
+  "proposed_selected_app": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v3/evidence/app-build-v3/build-result.json",
+  "retained_app_revisions": [
+    "f25",
+    "f26"
+  ],
+  "strict_receipts_sha256": {
+    "validation/candidate-v1/check-independent-v1.json": "bbc258e47fe948537579a95b901b2c7c3e09eea9dae1fab5f4102f8cda7f4ddc",
+    "validation/candidate-v2/check-independent-v2.json": "ce19b47a20ea8105a590d26fed365be33cb8a80bb80f9cff84cbc98aaa3c04d6",
+    "validation/candidate-v3/check-independent-v2.json": "e40a81cf8b44b7be9de36a08e1be3c5f26ac2b32f4d59fd728a0c31a868b68ec",
+    "validation/control-v1/check-independent-v1.json": "fa5b49ea9df30a7d84b977f261677d7fe9f9d5cc9bdbfe3c6f18a5e3bcd7ff39",
+    "validation/control-v2/check-independent-v2.json": "edd544b6a8127271e4a2f7986026f33e5238c25591cf5558a463c1b57a2cc455",
+    "validation/control-v3/check-independent-v2.json": "def4fd96716480eb6e294d1ed58d68ee7ff68c6a38df6fc607bfb535558b8ef9",
+    "validation/single-v1/check-independent-v1.json": "4e3675a1b69e64d48437508cae426090845c2ef4bb1b27f46684dfddee577e22",
+    "validation/single-v2/check-independent-v2.json": "a9ba400f57e94775a4df29da270635dbb3ea7375f30834c20a52bc24e8bab3b4"
+  },
+  "fixtures": [
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/fixture-v1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/fixture-v2",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/fixture-v3"
+  ],
+  "physical_overlay": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/physical/prepared-v1",
+  "physical_status": "PREPARED_ONLY_NOT_FITTED",
+  "required_extra_recipe_sha256": {
+    "validation/check_replays.py": "7701c9d54bdf9e68659e1a381c26d90bed81dc15618de10909c5e3669aff56de",
+    "validation/check_replays_v2.py": "03e195550a9628e82b1d0552f514802347f8945b25c4581606b2a9e1038668a3",
+    "validation/group_hooks.py": "bce47b378cb9e394d9448ba963d7fbabc37231f7f33a9c1f69155e48478b5e3b",
+    "validation/replay.py": "46531a4d7bf78e98594a653513b652815ab0e868003fbba45995494e0b064538",
+    "validation/prepare_fixture.py": "4e12a3ee787d1c28cb96b31052b67bcc682ca262ea6cdbec2c667ae4557ea6c6",
+    "validation/independent_group_v1.py": "1f7bd962663d56e2bd1085c6dd3f1214bf9063aeb8a931aa38a3758f14cd5ab4",
+    "validation/independent_lifetime_v1.py": "87c88d19a51214aed6a6324afca121ccb1cc5dc22199ca5eccb7c7ef181ab8eb",
+    "validation/independent_lifetime_v2.py": "37fd49b83417083fbea00625ecf551682749db117c07ca95223e260101f8528d",
+    "validation/independent_single_v1.py": "4b1a25eed813dd39195c175d7be5d115ca5e192615666187b824f3bfa8164bcb",
+    "validation/independent_single_v2.py": "cb7bc7c572da314c0dc31a43cf5b8975a5c78d7840c6d75bec9e9d1bdf3fb354",
+    "analysis/profile_native.py": "66c6b9463637d903a5b1d6b6399cc925ccaeeb6596d1467d4e9e45f7984c32c8",
+    "analysis/phase_profile.py": "68e1dd707f1b0c836a5d1065c5a6eae36cb353d23846bb93b2b48547d0792a58",
+    "validation/independent-negative-v1/run.py": "4f7bd6c60463f251c39690f70b07394246666c38d9a52e148a99d6228177a845",
+    "validation/independent-negative-v1/result.json": "f73d5a678093cf72e9d124ddd190277bc776550c73efcac311807267f2dfc01b",
+    "validation/independent-negative-v2/run.py": "98c23df28009c075316f1e59fa030e975b34fa36b23b8166f93f88436efec0f3",
+    "validation/independent-negative-v2/result.json": "d86beec76ecdd276129e59504a6bd9761435f027af9d86b06393eaf7dfc34c50",
+    "validation/independent-negative-v3/run.py": "98c23df28009c075316f1e59fa030e975b34fa36b23b8166f93f88436efec0f3",
+    "validation/independent-negative-v3/result.json": "c36eb7dcc722aef9d48fadb477d94d8e572bedf5e622eddef1e6640677653d48"
+  },
+  "final_selection_required": [
+    "Explicit root outcome, REPORT.txt and bound conclusion JSON.",
+    "All eight role-labelled strict receipts and three fixture manifests.",
+    "Selected F27 and historical F25/F26 cumulative native/app/physical patches and exact postimages.",
+    "Final measurement/profile reports with same-ELF control and AJ02 comparison denominators.",
+    "Current caller-liveness/software coverage report if complete; broad handback read-only assessment remains unimplemented."
+  ],
+  "required_after_assembly": [
+    "verify.py --patches --evidence",
+    "Portable focused tests into a fresh external output directory."
+  ],
+  "checks": [
+    "V3 source compiles; only title replacement differs from V2.",
+    "Eight strict receipts start PASS; all fixture input files exist.",
+    "Prior priority/async bundles each pass six exact patch round trips and all evidence hashes; entire inventories unchanged.",
+    "Builder refuses existing output directory and binds all 181 selected native inputs.",
+    "No final bundle, RTL edit, Quartus invocation or deployment performed."
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/package/build_bundle_v2.py": "cf4e87b41eea54b77e2b11ebacd3c0444a227ce1499d5e231f31254bdc3a67ca",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/package/build_bundle_v3.py": "a5a96ec370e85f81ef4ef10ab122cf5654986692bca55389fa7a5917549cbe40",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/package/verify.py": "bd25dc7f63a0ac76e0908b99f3cd05c7b32d3344ad1543f38b43fba3b0455375",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/package/run_tests.py": "fa5dbec64dd56313cfe71eca01cfff2a5b6ff558c26407d35032f95553115cab",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/package/prior-verification-v1/result.json": "995c93b19332f10c7c5668c8903f9e90c9ff68aa8ac1baf78e8cf867ea0beeef",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/native-v2/prepared.json": "88e3f0a3d76a6c90a7a677e153c2564015dbb810aaa9610a52b472a1499fd5a0",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/physical/prepared-v1/inputs.json": "8ddc7a3714f2dcfa17fc16d0c42f60a727c0735cbc35c50b69224a5397699bf6"
+  }
+}

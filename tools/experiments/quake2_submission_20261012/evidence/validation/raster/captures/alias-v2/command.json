@@ -1,0 +1,33 @@
+{
+  "argv": [
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/raster/frozen/capture-qsim",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/raster/captures/alias-v2/app.elf",
+    "--out",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/raster/captures/alias-v2/out",
+    "--app",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/inputs/main/quake2.app",
+    "--data-dir",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/inputs/main/data",
+    "--frames",
+    "302",
+    "--max-insns",
+    "4e9",
+    "--gpu-sched",
+    "eager",
+    "--mem",
+    "flat",
+    "--no-normalize-build-stamp",
+    "--label",
+    "alias-v2",
+    "--gpuvec",
+    "20,80,180,300"
+  ],
+  "cwd": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/inputs/main",
+  "environment": {
+    "QSIM_COMMAND_TRACE": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/raster/captures/alias-v2/commands.bin",
+    "QSIM_FRAME_PIXELS": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/raster/captures/alias-v2/pixels.bin",
+    "SM64_GEOMETRY_CAP": "1",
+    "Q2_TEST_GEOMETRY_WORKER_CAP": "1"
+  },
+  "elf_sha256": "bcb3e95bb8745811375628188c5b66aa5aa1122b99a78dce0a3c2f9cc23e87d9"
+}

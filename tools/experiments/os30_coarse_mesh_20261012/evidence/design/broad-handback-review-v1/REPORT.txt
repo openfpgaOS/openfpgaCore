@@ -1,0 +1,53 @@
+Broad terminal canonical handback: read-only assessment
+
+Recommendation: do not implement whole-chain raw locking as a small CPU
+unblocking fix. It is technically feasible without another M10K or FPU, but
+it trades per-job submissions for a potentially long terminal dependency.
+It requires a separate full-frame experiment, not a claim based on saved calls.
+
+The immutable scene contains 111 state-free chains covering 320 LOADs, with a
+maximum 23 LOADs / 212 triangles per chain. These are structural counts, not
+material-qualified jobs. The current warm path still has 171 legacy LOADs
+rejected by the conservative dead-suffix proof, mostly at ENDDL.
+
+A correct aggregate handback must protect every group's retained raw row from
+legacy overwrites. For dest0 LOADs, the touched set is [0,maxcount), but 49 of 111
+chains finish with a smaller LOAD and retain 359 high slots from earlier LOADs.
+Context restoration cannot restore those rows. The worker must lock raw across
+the whole group, then lend the terminal alias to a token-matched CPU owner after
+final snapshot commit and DMA drain. The CPU may copy lazily, but must copy or
+prove rows dead and release before any later queued-progress wait. Final output
+completion remains a separate source-lifetime fence.
+
+A valid mask is essential: failed LOADs leave partial/invalid rows. Pure repair
+must also save canonical results into a group-owned CPU side record, indexed by
+slot; final valid rows use raw, invalid touched rows use the latest failed-LOAD
+record. The current repair helper emits packets only, so this is additional
+software work. Reset must preserve a granted terminal alias or reconstruct
+canonical values from retained immutable descriptors/context. Fog coefficients,
+incoming untouched slots and terminal ownership must be captured explicitly.
+
+The current warm GROUP trace illustrates the ownership cost: 14 groups / 63
+members occupy 374,262 cycles (median 12,925.5, maximum 121,132). Raster fragment
+processing overlaps 298,058 of those cycles. During 8 groups, the CPU starts 24
+legacy LOADs after the group's first member. Whole-group raw locking removes
+those demonstrated preemption opportunities. Terminal snapshot-to-final-output
+residence totals only 8,912 cycles; releasing at that point helps the final tail
+while preceding members still wait for the 511-word output FIFO. Across the
+whole warm interval, output-full overlaps raster for 1,003,944 of 1,106,209 cycles.
+These are overlapping observations, not additive costs or a speed prediction.
+
+A narrower terminal-last-LOAD shortcut can preserve priority if the final LOAD
+overwrites the entire touched set. It covers only 7 multi-LOAD chains / 19 LOADs
+before material qualification; the other 55 terminal-max chains are singletons.
+That does not recover most of the rejected suffix scope.
+
+A useful prerequisite is to measure which terminal canonical slots are actually
+read before replacement. ENDDL does not prove death or liveness. A conservative
+cached caller-aware liveness proof could avoid handback where rows are unused;
+otherwise deferred reconstruction needs explicit provenance. Neither approach
+has been implemented or assigned a predicted gain here.
+
+Evidence: result.json binds the frozen F25 native trace, strict receipt, source
+and coverage ledgers. F26/F27 measurements are separate. No RTL, production
+files, physical build or SD contents were changed by this assessment.

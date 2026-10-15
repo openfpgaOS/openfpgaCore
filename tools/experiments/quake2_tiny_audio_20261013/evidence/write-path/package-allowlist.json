@@ -1,0 +1,119 @@
+{
+  "files": [
+    {
+      "source": "final-source-wrpath/final-receipt.json",
+      "destination": "evidence/write-path/final-receipt.json",
+      "sha256": "b10bdf60c9ee5962d2491a6477c28f0ea452ebb713f6b310b631adf0330cf6d7"
+    },
+    {
+      "source": "final-source-wrpath/source-binding.json",
+      "destination": "evidence/write-path/source-binding.json",
+      "sha256": "cd7db2ed80f97b71ee220659f3d3d1d0f8e07997cb3b4b2a64e8c4ba2d52f227"
+    },
+    {
+      "source": "final-source-wrpath/receipt.json",
+      "destination": "tests/write-path/receipt.json",
+      "sha256": "5fd35193d0d9a51ca23be24b9812cb13ac3353d0ea92d1e7e8f92f33bd497960"
+    },
+    {
+      "source": "final-source-wrpath/build.log",
+      "destination": "evidence/write-path/build.log",
+      "sha256": "b5abcbdffe3d83fdaed7e212094cd5a0671bbbb9ef0fb295d8f53f9c322386c0"
+    },
+    {
+      "source": "final-source-wrpath/run.log",
+      "destination": "tests/write-path/run.log",
+      "sha256": "bfae58adaffa4de1cbe101d9d47e46295c463ae89c70f855c96f52c1c46c9596"
+    },
+    {
+      "source": "final-source-wrpath/run.py",
+      "destination": "evidence/write-path/run.py",
+      "sha256": "d31f92135a123732c803b3e41b470951e80182d73bbd14df36b403f89417fc55"
+    },
+    {
+      "source": "final-source-wrpath/replay.py",
+      "destination": "tests/write-path/replay.py",
+      "sha256": "b341090bf4096b3b4c9e39096fd44677df5cf22c09dc075802fcf15a6f99f304"
+    },
+    {
+      "source": "final-source-wrpath/inputs/altsyncram_stub.v",
+      "destination": "tests/write-path/inputs/altsyncram_stub.v",
+      "sha256": "3ac5420a4ae4fc0e10bdbb73d02c3ef523eb4159c8c9bd4d1002970bfc332db2"
+    },
+    {
+      "source": "final-source-wrpath/inputs/ap_core.qsf",
+      "destination": "tests/write-path/inputs/ap_core.qsf",
+      "sha256": "351431b8158de34a5a18361c8ae8a9d5d94a81b714c3853dfa3d315a47c1f1d1"
+    },
+    {
+      "source": "final-source-wrpath/inputs/axi_sdram_arbiter.v",
+      "destination": "tests/write-path/inputs/axi_sdram_arbiter.v",
+      "sha256": "5e9e06dca5ccf978a89f0aaacba05aa295ed7706636d8abed85ef2601ee037f1"
+    },
+    {
+      "source": "final-source-wrpath/inputs/axi_sdram_slave.v",
+      "destination": "tests/write-path/inputs/axi_sdram_slave.v",
+      "sha256": "8a0e120d569812f176f83908bb18d9cf1459403999faf7be0d2853c591cfaa4e"
+    },
+    {
+      "source": "final-source-wrpath/inputs/core_top.v",
+      "destination": "tests/write-path/inputs/core_top.v",
+      "sha256": "bc1846e6f148496d5fb41c329fc4c34fe3fd312c65b9316f36ac5a36336a60e5"
+    },
+    {
+      "source": "final-source-wrpath/inputs/gpu_color_depth_cache.sv",
+      "destination": "tests/write-path/inputs/gpu_color_depth_cache.sv",
+      "sha256": "ab1f1aeeb135cd2f80e44adb39616c35f28f1e164ab639b2f5645fbb447000ae"
+    },
+    {
+      "source": "final-source-wrpath/inputs/gpu_core.v",
+      "destination": "tests/write-path/inputs/gpu_core.v",
+      "sha256": "452b36860161c1d3c73c7cdaaf2d1d3d5006096027169f101273a297d3e2ab43"
+    },
+    {
+      "source": "final-source-wrpath/inputs/gpu_edge_walker.v",
+      "destination": "tests/write-path/inputs/gpu_edge_walker.v",
+      "sha256": "69ef2238babab6716ddc9e7c004943982190d179547895081a9e69a94259e5d3"
+    },
+    {
+      "source": "final-source-wrpath/inputs/gpu_geometry_worker.v",
+      "destination": "tests/write-path/inputs/gpu_geometry_worker.v",
+      "sha256": "e0f4ffbd20f2a20ab416543a0e9d830d7ec6b4d8d55df094479428b67f933fbb"
+    },
+    {
+      "source": "final-source-wrpath/inputs/gpu_tex_cache.v",
+      "destination": "tests/write-path/inputs/gpu_tex_cache.v",
+      "sha256": "c3fdc0adfe5ed583c37bf09ad3dbbbecb1e3c6ae1f5714cab5064eacc328e51c"
+    },
+    {
+      "source": "final-source-wrpath/inputs/io_sdram_test.v",
+      "destination": "tests/write-path/inputs/io_sdram_test.v",
+      "sha256": "97deebd07420dabaae132b09adcbe9af7e13fd326befbcb82149d782abe25ea0"
+    },
+    {
+      "source": "final-source-wrpath/inputs/sdram_model_full.v",
+      "destination": "tests/write-path/inputs/sdram_model_full.v",
+      "sha256": "a777d648d2fe8dd85af047cbc1350c65811b75838af4ffc5e3eaec3e4242302b"
+    },
+    {
+      "source": "final-source-wrpath/inputs/sync_fifo.v",
+      "destination": "tests/write-path/inputs/sync_fifo.v",
+      "sha256": "66545eaee0463d5e25e862cb5fbccb357b2d34948f93a9f8a706c04c536aa28c"
+    },
+    {
+      "source": "final-source-wrpath/inputs/synch_3.v",
+      "destination": "tests/write-path/inputs/synch_3.v",
+      "sha256": "212da69c34bb5329b0fd9b9b67415be853c0c1c43744c1ee8c95bf39db9c431c"
+    },
+    {
+      "source": "final-source-wrpath/inputs/tb_gpu_wrpath.v",
+      "destination": "tests/write-path/inputs/tb_gpu_wrpath.v",
+      "sha256": "79e67b980c1fc9e232fe743db98870eac46d2f30092c0d821dc2360ff5ebca12"
+    },
+    {
+      "source": "final-source-wrpath/inputs/tb_gpu_wrpath_main.cpp",
+      "destination": "tests/write-path/inputs/tb_gpu_wrpath_main.cpp",
+      "sha256": "72b98c6674d65399e90a7794bf5c696f361ab07071da0740c53a9ea7ff579490"
+    }
+  ]
+}

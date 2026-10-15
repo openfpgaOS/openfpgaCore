@@ -1,0 +1,38 @@
+{
+  "core_top.v": {
+    "origin": "/tmp/quake2-native-mesh-20261012/core/src/fpga/targets/pocket/os30/core_top.v",
+    "sha256": "4d29bfc0b98fdd9c36e13a5048fe7a80f6082372124d32c04d6acca2a0d5a3f8"
+  },
+  "baseline_core_top.v": {
+    "origin": "/home/alberto/Repos/openfpgaCore/src/fpga/targets/pocket/os30/core_top.v",
+    "sha256": "5d22451e4f5209750c6df561835b710db78b7fc34474952d89e22e8a8e4b9113"
+  },
+  "sw_mixer.c": {
+    "origin": "/home/alberto/Repos/openfpgaCore/src/firmware/os/hal/sw_mixer.c",
+    "sha256": "00ebe68263c9bd0e7eee36ab79a8227ca69ac172c37ccf98d383cb7bd60f6a96"
+  },
+  "sw_mixer.h": {
+    "origin": "/home/alberto/Repos/openfpgaCore/src/firmware/os/hal/sw_mixer.h",
+    "sha256": "5db30675b0c5ab10871101a430bf25fc631333dc6037ef21dd764dec156e45d7"
+  },
+  "regs.h": {
+    "origin": "/home/alberto/Repos/openfpgaCore/src/firmware/os/hal/regs.h",
+    "sha256": "8e1ca096c12b6005efa574a23a0378597536047c867ac683b5a17f261a88ecfc"
+  },
+  "axi_periph_slave.v": {
+    "origin": "/tmp/quake2-native-mesh-20261012/core/src/fpga/common/os30/axi_periph_slave.v",
+    "sha256": "1777c679b86d380c10d4e8f29ec7fe54ede9298a99bfcee33b1856a850015acc"
+  },
+  "audio_output.v": {
+    "origin": "/home/alberto/Repos/openfpgaCore/src/fpga/targets/pocket/audio_output.v",
+    "sha256": "833ce95e4adce5b647130cffd0de3cbd84b7a9fc6ff05a8668dee584cee8fef9"
+  },
+  "build_core.py": {
+    "origin": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-native-mesh-20261012/build_core.py",
+    "sha256": "619be99542c0bc47cc5f1203228460dc60adce3e47a08b1dd124108befaa5eb7"
+  },
+  "silent_ap_core.qsf": {
+    "origin": "/tmp/quake2-native-mesh-20261012/fit-silent-v3/src/fpga/targets/pocket/ap_core.qsf",
+    "sha256": "03f90b1f8761b6c93e7591ad249fa74e01267fb8949de84a6a6171a698dac22d"
+  }
+}

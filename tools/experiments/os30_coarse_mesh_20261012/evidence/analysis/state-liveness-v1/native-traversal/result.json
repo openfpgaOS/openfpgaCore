@@ -1,0 +1,132 @@
+{
+  "status": "PASS_READ_ONLY_COVERAGE_SOURCE_SAFETY_AUDIT_PENDING",
+  "allowed_skip_opcodes": {
+    "0xd7": "TEXTURE",
+    "0xfd": "SETTIMG",
+    "0xe8": "TILESYNC",
+    "0xe7": "PIPESYNC",
+    "0xd9": "GEOMETRYMODE",
+    "0xfb": "SETENVCOLOR"
+  },
+  "cases": {
+    "cold_same_list": {
+      "candidate_spans": 320,
+      "old_proved": 146,
+      "proved": 146,
+      "new_spans": 0,
+      "new_triangles": 0,
+      "new_hardware_LOADs": 0,
+      "new_by_route": {},
+      "new_by_prior_reason": {},
+      "new_by_returns": {},
+      "new_by_skipped_opcode": {},
+      "remaining_failures": {
+        "state_or_list_0xdf": 164,
+        "state_or_list_0xdc": 2,
+        "state_or_list_0xfc": 6,
+        "state_or_list_0xe6": 2
+      },
+      "single_opcode_new": {
+        "TEXTURE": 0,
+        "SETTIMG": 0,
+        "TILESYNC": 0,
+        "PIPESYNC": 0,
+        "GEOMETRYMODE": 0,
+        "SETENVCOLOR": 0
+      },
+      "lost_new_if_removed": {
+        "TEXTURE": 0,
+        "SETTIMG": 0,
+        "TILESYNC": 0,
+        "PIPESYNC": 0,
+        "GEOMETRYMODE": 0,
+        "SETENVCOLOR": 0
+      }
+    },
+    "warm_same_list": {
+      "candidate_spans": 320,
+      "old_proved": 146,
+      "proved": 146,
+      "new_spans": 0,
+      "new_triangles": 0,
+      "new_hardware_LOADs": 0,
+      "new_by_route": {},
+      "new_by_prior_reason": {},
+      "new_by_returns": {},
+      "new_by_skipped_opcode": {},
+      "remaining_failures": {
+        "state_or_list_0xdf": 164,
+        "state_or_list_0xdc": 2,
+        "state_or_list_0xfc": 6,
+        "state_or_list_0xe6": 2
+      },
+      "single_opcode_new": {
+        "TEXTURE": 0,
+        "SETTIMG": 0,
+        "TILESYNC": 0,
+        "PIPESYNC": 0,
+        "GEOMETRYMODE": 0,
+        "SETENVCOLOR": 0
+      },
+      "lost_new_if_removed": {
+        "TEXTURE": 0,
+        "SETTIMG": 0,
+        "TILESYNC": 0,
+        "PIPESYNC": 0,
+        "GEOMETRYMODE": 0,
+        "SETENVCOLOR": 0
+      }
+    },
+    "cold_with_immutable_callers": {
+      "candidate_spans": 320,
+      "old_proved": 146,
+      "proved": 146,
+      "new_spans": 0,
+      "new_triangles": 0,
+      "new_hardware_LOADs": 0,
+      "new_by_route": {},
+      "new_by_prior_reason": {},
+      "new_by_returns": {},
+      "new_by_skipped_opcode": {},
+      "remaining_failures": {
+        "state_or_list_0xf5": 13,
+        "state_or_list_0xe3": 10,
+        "state_or_list_0xe6": 49,
+        "state_or_list_0xdc": 8,
+        "mutable_or_unknown_command": 45,
+        "state_or_list_0xfc": 49
+      },
+      "single_opcode_new": {
+        "TEXTURE": 0,
+        "SETTIMG": 0,
+        "TILESYNC": 0,
+        "PIPESYNC": 0,
+        "GEOMETRYMODE": 0,
+        "SETENVCOLOR": 0
+      },
+      "lost_new_if_removed": {
+        "TEXTURE": 0,
+        "SETTIMG": 0,
+        "TILESYNC": 0,
+        "PIPESYNC": 0,
+        "GEOMETRYMODE": 0,
+        "SETENVCOLOR": 0
+      }
+    }
+  },
+  "limits": [
+    "Only liveness proof advances past the listed state opcodes; actual dispatcher and GROUP span boundaries remain unchanged.",
+    "Counts establish structural dead-slot coverage, not material eligibility, transformed arithmetic support or frame-time improvement. Previously suffix-blocked paths have not reached later material admission.",
+    "Current-list warm proofs use exact immutable command words and measured warm call identities. Caller-aware results are cold-only, from the independently matched full snapshot graph; warm caller stacks are not assumed.",
+    "Mutable commands/targets/callers, all unlisted state operations, live TRI reads, loops and depth/scan limits remain rejection barriers.",
+    "Opcode canonical-read/fog safety is independently reviewed before implementation; this report does not itself authorize skipping those instructions at runtime."
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/state-liveness-v1/native-traversal/analyze.py": "06fa3eb8b24518192b4e2dd4af6d368222333dc5f36da89c29464ed5889574b6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app-v2/.obj/sm64-priority-mesh-v2-perfdiag/app.elf": "0c2a1a8d2b1359c0b3b51ab78f81117be9b53173e5dd674d8f3978d0da35db28",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/span-coverage-v1/ledger.json": "5c6e7738604939eca3b644d3e8fbcd45f5f32231ac3bb4039ce81aff5bb61d0f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/admission-v1/result.json": "1accbc3f29b488a073eb3c8202d5cd5cd63b8ac5f7ffdc99d9e1c66800e12c43",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/caller-liveness-v1/native-traversal/events.json": "41fc8adfd27407d9455b9e9a138bdda15cf084069f6927a97c4cb2ffac0144bc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/caller-liveness-v1/native-traversal/result.json": "4d9edfae875c24589f89d8662610607ebd63d24b30081981e428e0bde43b6b8c"
+  }
+}

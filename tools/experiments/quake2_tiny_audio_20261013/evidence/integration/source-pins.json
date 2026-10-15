@@ -1,0 +1,10 @@
+{
+  "src/fpga/common/os30/axi_periph_slave.v": "2ad87cc989af89b56492fa898d3f51dea55029fe6b8947c7e385e0859a100444",
+  "src/fpga/common/os30/audio_mixer.v": "c6d2517af662f356b44617230c27aa880c449928282e738c374a2db86663f73a",
+  "src/fpga/common/os30/audio_sample_cache.v": "ac018efd17a7e1012d1456f12375575a4c4f57784ab6a03c2132bb00795c111d",
+  "src/fpga/common/sync_fifo.v": "66545eaee0463d5e25e862cb5fbccb357b2d34948f93a9f8a706c04c536aa28c",
+  "src/fpga/targets/pocket/snac_shifter.v": "4a3953a9729af3c001101e85d67cdd73e4334bc76ef0ad984c55b8c66f42eebf",
+  "src/fpga/targets/pocket/apf/common.v": "26aa1637c4eaaef2fb6acaa38475826fdf9420c86d06a262eaa104422a32c4a8",
+  "src/fpga/targets/pocket/os30/core_top.v": "bc1846e6f148496d5fb41c329fc4c34fe3fd312c65b9316f36ac5a36336a60e5",
+  "src/fpga/targets/pocket/ap_core.qsf": "351431b8158de34a5a18361c8ae8a9d5d94a81b714c3853dfa3d315a47c1f1d1"
+}

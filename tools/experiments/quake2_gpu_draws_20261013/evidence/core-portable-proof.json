@@ -1,0 +1,12 @@
+{
+  "passed": true,
+  "core_manifest_sha256": "bf4855ce20e202897fad48417981d0b316665fc9e583deb6aec9a300d46a6d1b",
+  "bitstream_sha256": "a45744ecf2181ccce580eaf0f1afc45e18b94075c7cf62f3b19281209d8d7a7e",
+  "stage_input_files": 127,
+  "stage_check_passed": true,
+  "portable_build_prepare_only_passed": true,
+  "worker_regression_passed": true,
+  "worker_transcripts_and_cycles_match_recorded_fit_gate": true,
+  "worker_receipt_sha256": "75d3d7e6e645d1aa557583cab484aff644ef36283c5a0b70e44323a3a447e6aa",
+  "scope": "Package verified,127 sources staged and checked, portable build preparation verified without re-running Quartus, standalone packaged worker tests freshly compiled and executed."
+}

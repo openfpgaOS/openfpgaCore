@@ -1,0 +1,107 @@
+Quake2 native mesh experiment — implementation and qualification
+
+Selected: app-v3 + silent core-v4, deployed to POCKETDEV on 2026-10-12.
+Normal app/core/metadata and unchanged OS/loader hashes verified on the card.
+Previous installation backed up; see deployment package last-deployment.json.
+The card was safely unmounted after verification.
+17,115 / 18,480 ALMs (1,365 free); 296 / 308 M10Ks; 35 / 66 DSPs.
+Main-clock restricted Fmax: 92.27 MHz at 85C, 91.47 MHz at 0C.
+Configured clock remains 100 MHz. Worst setup slack is -0.933 ns, so this
+is NOT timing-qualified at 100 MHz. Hold/recovery/removal/pulse-width checks
+pass at all four corners; minimum hold slack is +0.009 ns.
+The last pointer-path simplification (v5) was cycle-identical but fitted worse
+at 88.02 / 85.30 MHz; it is retained as unselected evidence. Selected working
+source has been restored to the exact v4 worker.
+
+The new native draw path moves MD2 animation interpolation, vertex transforms,
+projection, backface rejection and triangle packet production to the GPU. It
+reuses the geometry worker's multiplier, divider, vertex cache and output queue.
+The CPU supplies one copied 165-word descriptor for an accepted model and can
+continue immediately. The GPU reads resident immutable frames and meshlets from
+CRAM1 and feeds the rasterizer without a CPU readback or per-model completion
+wait. It is a fixed-function mesh draw processor, not another general CPU.
+
+The existing world-v1 batching remains. In the sampled workloads, native draws
+cover 74.1%, 80.3% and 78.2% of rendered MD2 models. Clipped, translucent, shell,
+weapon/depth-hack, shadow-dependent or unsupported draws retain the original
+CPU path. Unsupported cores also retain the complete original renderer.
+
+Measured software work (same audio setting; geometry change alone):
+
+Workload     Previous cycles/frame   Native cycles/frame   Change
+Main              5,513,142.64          4,189,813.04       -24.00%
+Sound             6,590,626.61          4,586,422.28       -30.41%
+Live              5,871,016.52          4,744,824.59       -19.18%
+
+GPU command words/frame fall from 36,137 to 23,037 (main), 45,483 to 25,724
+(sound), and 31,490 to 20,023 (live). These are scalar CPU/cache estimates,
+not measured Vexii execution time or Pocket FPS. The no-mixer app saves a
+further 0%, 1.40% and 0.43% in these workloads; that is counted separately,
+not attributed to geometry acceleration. OS interrupt/DMA savings are not
+modeled by this observer.
+
+The exchange is real: maximum-rate GPU replay takes approximately 9–20% more
+cycles in the four main samples. The worker overlaps rasterization for
+344,251–726,630 cycles/frame, while CPU software submission has no per-model
+wait for resident draws. This does not prove sustained whole-device overlap
+or an FPS gain: CPU tracing and GPU replay are separate measurements. Actual
+shared CRAM arbitration, adapter, controller, PHY and timing-checked PSRAM are
+included in GPU replay; CPU and scanout traffic are not. CRAM1 remains the
+normal 16-bit, 100 MHz port, not the earlier 32-bit PSRAM experiment.
+
+GPU replay cycles, previous -> native (final zero-cycle timing fixes preserve
+these counts):
+  frame 20:  2,564,510 -> 3,076,766
+  frame 80:  3,271,483 -> 3,812,485
+  frame 180: 3,153,254 -> 3,446,182
+  frame 300: 2,274,280 -> 2,492,418
+
+Correctness and ownership:
+  * Complete GPU color/depth agree with an independent integer reference in
+    four main frames and two sound-enabled startup frames on the silent core.
+  * Legacy command streams produce identical pixels and cycle counts.
+  * The old floating-point renderer differs at 4–38 color pixels out of
+    76,800 in sampled frames. Depth coverage is unchanged; small fixed-point
+    edge/texture/depth differences remain. This is not float bit-equivalence.
+  * Malformed descriptors, paused execution, queue wrap/backpressure and
+    resets at request/response boundaries pass focused RTL checks.
+  * In-flight memory requests drain across GPU/media reset before reuse.
+  * Two padding poisons produce identical output; every consumed source word
+    is independently checked as uploaded data.
+  * Map cycling demo1 -> demo2 -> demo1 reclaims native memory and returns to
+    the same mesh addresses. Existing 5.3/7.8 MB texture prefixes remain exact.
+  * First use may stall to upload native models. Resident draws avoid those
+    waits. These warm rendering results exclude initial upload latency.
+
+Native geometry grows downward from the fast-memory end; textures grow upward.
+Map registration waits for prior GPU work before reclaiming only native storage.
+Every mutable coefficient, palette and viewport is copied into the ordered job;
+the GPU never borrows the CPU's temporary interpolated-vertex buffer. Different
+skin dimensions within an allocation generation fall back rather than leak a
+new copy of every animation frame.
+
+Sound is temporarily disabled for the mixer-less native core. The pipelined
+native design with the hardware mixer required 1,860 LABs; the device has 1,848.
+The experimental app skips audio/mixer initialization when native capability
+bit12 is present and the hardware mixer is absent. The core removes the PCM
+FIFO, retains audio clocks with a zero DAC signal, and reports FIFO full so
+the existing OS does not render silent samples. Tests of the actual OS pump
+show zero render/PCM writes over 3,000 calls; one-time initialization and small
+periodic polling overhead remain. Normal audio branches are unchanged.
+
+Timing work retains the CPU/GPU configuration at 100 MHz and seed2. The native
+BRAM output and header bounds were pipelined after the first physical timing
+failure. Subsequent selector/address simplifications preserve all command
+words and cycle counts. No full seed sweep was run. Final resource/timing
+selection is recorded separately in selection.json and physical evidence.
+
+Final app-v3 ELF SHA256:
+44f668ef55af64b579f3800d57567b7da7a2b3f9e16c325976d021d9237595b4
+Profile companion SHA256:
+b09bfb423fa405c222613834d585e6cb1cbd84996594b1bff279ee44a8a59b1b
+
+The source packages pin the complete native/control app trees, core source,
+tool inputs, ABI, forward/reverse deltas and tested revisions. Staging refuses
+existing destinations and rejects modified or unsafe members. The unchanged
+installer will accept only the final complete paired app/core package and the
+pinned OS/loader versions. Physical Pocket validation remains outstanding.

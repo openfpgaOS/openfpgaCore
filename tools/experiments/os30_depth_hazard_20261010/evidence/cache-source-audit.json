@@ -1,0 +1,60 @@
+{
+  "status": "PASS_INDEPENDENT_SOURCE_ARCHITECTURE_AUDIT",
+  "model_source_hashes_verified": 169,
+  "only_changed_model_sources": [
+    "frozen/src/fpga/common/gpu_core.v",
+    "frozen/src/fpga/common/gpu_color_depth_cache.sv"
+  ],
+  "width_guard": {
+    "enumerated_word_offsets_and_all_AXI_lengths": 4096,
+    "sum_bits": 9,
+    "maximum_sum": 270,
+    "line_words": 16,
+    "result": "No overflow; complete inclusive last-word range must remain in one cache line, with word alignment and distinct full physical line tags."
+  },
+  "acceptance_and_ownership": [
+    "s_awready, s_arready and IDLE AW branch all use cache_prefer_read. Neither request can be accepted while INIT/busy/flush; only one acceptance occurs.",
+    "Absent feature or REGISTER_READ_LOOKUP=0 gives constant false preference and exact original arbitration.",
+    "Accepted AW remains owned through W commits. Current unaccepted AW may be bypassed only when its complete line is disjoint from the read line; same-line different-word and cross-line cases retain AW priority.",
+    "REGISTER_READ_LOOKUP=1 enters R_ACCEPT after capturing AR. Data/meta/victim addresses then use owned addr; speculative IDLE AW/hot addresses are never consumed as read results.",
+    "Dirty same-set/different-tag eviction is safe because read ownership covers replacement/writeback/fill; posted-write fill hazards remain active until downstream B.",
+    "Depth queue tag coverage is continuous through req/stage, delayed pending entry, array and pop. On pop edge the old tag still blocks; afterward current AW or accepted cache ownership covers the write. A held depth AR stalls fragment production, so no older same-line write appears without prior coverage.",
+    "Full fence/flip/clear/idle ownership barriers, blend admission, early-restart snoop/kill logic, cache flush and split soft/bus reset behavior are unchanged."
+  ],
+  "observer": {
+    "variant_header_members": {
+      "native-legacy-srw-v1": {
+        "depth_read_safe": false,
+        "depth_read_tag": false,
+        "fb_read_barrier_clear": true,
+        "wc_busy": false
+      },
+      "native-depth-v1": {
+        "depth_read_safe": false,
+        "depth_read_tag": true,
+        "fb_read_barrier_clear": false,
+        "wc_busy": false
+      },
+      "native-priority-v1": {
+        "depth_read_safe": false,
+        "depth_read_tag": true,
+        "fb_read_barrier_clear": false,
+        "wc_busy": false
+      }
+    },
+    "verdict": "v3 chooses actual gate wire if present; otherwise reconstructs pending+valid FIFO tag conflict and conservative local holding registers. wc_busy omission is valid for the bound WRITE_COMBINE=0 model. Depth_psram_ar_only and depth drain diagnostics use actual gate. Command barriers remain full drain.",
+    "scope": "Reconstruction assumes this bound16-entry FIFO/Z8/WC0 configuration; not a generic guarantee for other parameters."
+  },
+  "validation_scope": "Source/invariant review, complete offset+len guard enumeration, and frozen-model hash binding. Directed integration tests/native oracle are owned and reported separately; this report makes no measured performance, ALM, fit or timing claim.",
+  "evidence_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/work/gpu_core.v": "56ab019679f812cdce2020b34085e0238ef9ab3ebc97c92394f6aae102f9c0c7",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/work/depth-selective.patch": "c7c0f7f7e0d64045a47cb36a3ec37d714b156ad484f8c050e55d12c22f6b607f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/work-v2/gpu_color_depth_cache.sv": "7748ec9e9b818215144d6170d5bdb05fd8a254c3e7863547b96396dbc5de069e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/work-v2/cache-read-priority.patch": "f423c6cf99dffeb6722e509d8a1a02697acb6ddd29fa9750bde22aa3452e67f1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/observer-v3/gpu_observer.hpp": "2298256de292e981b87188358fe982dedc173b6e02adace4b7d1d28e62681bdb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/native-priority-v1/prepared.json": "8239e32c5f31b7472788a13da0e59c06e8a5e2b5c2b9e6b0cb486ddc3160c4bb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/native-priority-v1/obj/Vtb_system_tb_system.h": "fc873aa5e5fe2df9b45ef512d1beb64cb2d61636c35be7015cfb4c8f76dc8872",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/src/fpga/common/gpu_color_depth_cache.sv": "ab1f1aeeb135cd2f80e44adb39616c35f28f1e164ab639b2f5645fbb447000ae",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/frozen/docs/measurements/os30-dual-20261004/validation/baseline128/tb_irq.v": "427694f419d5585b93b01791579512c6cf301a4a07f0ad25db8bf78c67a48d52"
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "status": "PASS_ACTUAL_CURRENT_CPU_SCENE_CULL_ORACLE",
+  "vectors": 4918,
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/run_scene_cull_oracle.py": "30ddf8f2bb81d07c5d560d634541125587a484de67e5fe5eade56c83e348a501",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/tests/native_cull.c": "ce9e440b3f8d3a575c145c23324355fb215944ea4bfcafd56cbca63d203cbb99",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/tests/cpu-arithmetic-v1/host": "31c52087112e1b3cd913eae6d1e8734a3b798033f77fdfc0d1dcdd73f3bbec4f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/tests/cpu-arithmetic-v1/manifest.json": "114eb88c6439759359d66efecafe505e6d700293ebf822998727e18797eff36a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native-task-v2/tasks-classified.json": "50201e4045f73a5f10dfbe77e1d08df501c6191ec540cf949c25ea4abca3fc0b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native-task-v2/run/task-raw-vertices.tsv": "b71d96b20a57385d13e8e48320e2a7a83c8c8d6f92e435a8fc9d722ee41fc457",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/scene-cull-oracle-v1/vectors.h": "3053755646e849d3a524c1476bcb51869825d8f23e41800796913a60de2fa517",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/scene-cull-oracle-v1/inputs.json": "e84a58d7a9e80b4133b809f0a0e9daa236026875b17fa007fd228f629dc9f285",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/scene-cull-oracle-v1/start.S": "a4c5d96a2c0fed8e88b156fb6d017bcae8921ced7ea7344d64fb0543efa8e785",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/scene-cull-oracle-v1/kernel.ld": "6f74364a543633b4960f6d87ef10cf7fe2538708e24634e95495357f2f564bfd"
+  },
+  "commands": [
+    [
+      "riscv64-elf-gcc",
+      "-march=rv32imafc_zicsr_zifencei",
+      "-mabi=ilp32f",
+      "-O2",
+      "-fno-strict-aliasing",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-msmall-data-limit=0",
+      "-nostdlib",
+      "-I/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/scene-cull-oracle-v1",
+      "-Wl,--no-relax,-T,kernel.ld",
+      "start.S",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/tests/native_cull.c",
+      "-o",
+      "kernel.elf"
+    ],
+    [
+      "riscv64-elf-objcopy",
+      "-O",
+      "binary",
+      "kernel.elf",
+      "kernel.bin"
+    ],
+    [
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/tests/cpu-arithmetic-v1/host",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/scene-cull-oracle-v1/kernel.bin",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/scene-cull-oracle-v1/outputs.bin",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/scene-cull-oracle-v1/result.json",
+      "4918"
+    ]
+  ],
+  "outputs_sha256": {
+    "kernel.elf": "b24c5ed2ceef286d0801ccfecb6c26279aae85350eb457a130a5e92ae79cc646",
+    "kernel.bin": "30d80b0ec984da9d31b3abdc12973ef506822491df01658636ae743772380c17",
+    "outputs.bin": "082db91cc1412fef6c013c7b567bee752f23ebe48ff3e4ed8b25d8e3e955ce9f",
+    "result.json": "7df2a0d5ce3d27b3940fb574df6e548e7b472c152a3027aceddc34fd09592b20"
+  },
+  "scope": "Captured transformed triangle operands executed through exact unchanged native CPU nineoperation cull kernel. No sourceDMA or packet test; consumed separately by mesh chain."
+}

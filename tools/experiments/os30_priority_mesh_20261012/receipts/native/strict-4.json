@@ -1,0 +1,3291 @@
+{
+  "binding": {
+    "bound_files": 43,
+    "model_sources": 181
+  },
+  "health": {
+    "cycles": [
+      4624527,
+      4657010
+    ],
+    "latency_maxima": {
+      "0": {
+        "scan_latency": 0,
+        "audio_latency": 0,
+        "audio_queue_latency": 0
+      },
+      "1": {
+        "scan_latency": 387,
+        "audio_latency": 434,
+        "audio_queue_latency": 372
+      },
+      "2": {
+        "scan_latency": 385,
+        "audio_latency": 424,
+        "audio_queue_latency": 370
+      }
+    },
+    "gpu_counters_reconcile": true,
+    "commands": 5618,
+    "command_words": 41901
+  },
+  "frames": [
+    {
+      "frame": 1,
+      "buffer": 0,
+      "sha256": "b7a2e67c63ec5f1ce5f787bedad2fff8743d2c7a1edadaf9bcb8d274fe3ac5bc"
+    },
+    {
+      "frame": 2,
+      "buffer": 1,
+      "sha256": "a42df17ef68b61162980c48170bf3a307ce909b7d1c1ba265f1b3a1b2b1bb8eb"
+    }
+  ],
+  "register_differences": {
+    "entry-regs.bin": {},
+    "entry-2.bin": {
+      "21": [
+        3853125,
+        1837931904
+      ]
+    },
+    "entry-3.bin": {
+      "21": [
+        8515651,
+        1844253054
+      ]
+    }
+  },
+  "all_FCSR_and_FP_registers_exact": true,
+  "final_surface_pool_sha256": "1da7c6d5dfef9cabd3b5ee2cf3d298c103c9d0f8692e355a09a9369e31d26bdb",
+  "untouched_buffer_history_exact": true,
+  "removed_reference_clear": [
+    {
+      "word": 23036,
+      "payload": [
+        270532608,
+        41943280,
+        41943040
+      ]
+    }
+  ],
+  "front_preparation": {
+    "probe_address": 288702040,
+    "probe_before": 2,
+    "probe_after": 0
+  },
+  "mesh_preparation": {
+    "probe_address": 288702148,
+    "probe_before": 2,
+    "probe_after": 0
+  },
+  "async_preparation": {
+    "probe_address": 288702144,
+    "probe_before": 2,
+    "probe_after": 0
+  },
+  "pair": {
+    "elf_sha256": "abcdf9bfb5729edb5fa96489c543b203cfba8f721b0a5b3043166475183ec8bd",
+    "identical_prepared_inputs": true
+  },
+  "semantics": {
+    "indexed_draws": 1708,
+    "all_effective_draw_payloads_and_state_exact": true
+  },
+  "async_lifetime": {
+    "physical_snapshot_writes": 12151,
+    "snapshot_jobs": 124,
+    "early_snapshot_grants": [
+      {
+        "seq": 14,
+        "cycle": 997579,
+        "phase": 1,
+        "snapshot_cycle": 997330,
+        "ticket": 26
+      },
+      {
+        "seq": 16,
+        "cycle": 1048786,
+        "phase": 1,
+        "snapshot_cycle": 1042743,
+        "ticket": 29
+      },
+      {
+        "seq": 16,
+        "cycle": 1059053,
+        "phase": 1,
+        "snapshot_cycle": 1042743,
+        "ticket": 30
+      },
+      {
+        "seq": 17,
+        "cycle": 1068170,
+        "phase": 1,
+        "snapshot_cycle": 1068167,
+        "ticket": 31
+      },
+      {
+        "seq": 18,
+        "cycle": 1074658,
+        "phase": 1,
+        "snapshot_cycle": 1073174,
+        "ticket": 32
+      },
+      {
+        "seq": 18,
+        "cycle": 1079654,
+        "phase": 1,
+        "snapshot_cycle": 1073174,
+        "ticket": 33
+      },
+      {
+        "seq": 18,
+        "cycle": 1085394,
+        "phase": 1,
+        "snapshot_cycle": 1073174,
+        "ticket": 34
+      },
+      {
+        "seq": 19,
+        "cycle": 1096859,
+        "phase": 1,
+        "snapshot_cycle": 1095837,
+        "ticket": 35
+      },
+      {
+        "seq": 19,
+        "cycle": 1106769,
+        "phase": 1,
+        "snapshot_cycle": 1095837,
+        "ticket": 36
+      },
+      {
+        "seq": 27,
+        "cycle": 1162453,
+        "phase": 1,
+        "snapshot_cycle": 1162450,
+        "ticket": 40
+      },
+      {
+        "seq": 32,
+        "cycle": 1173251,
+        "phase": 1,
+        "snapshot_cycle": 1173248,
+        "ticket": 42
+      },
+      {
+        "seq": 34,
+        "cycle": 1179245,
+        "phase": 1,
+        "snapshot_cycle": 1179242,
+        "ticket": 43
+      },
+      {
+        "seq": 46,
+        "cycle": 1275545,
+        "phase": 1,
+        "snapshot_cycle": 1275542,
+        "ticket": 46
+      },
+      {
+        "seq": 49,
+        "cycle": 1283354,
+        "phase": 1,
+        "snapshot_cycle": 1283351,
+        "ticket": 47
+      },
+      {
+        "seq": 61,
+        "cycle": 1568169,
+        "phase": 1,
+        "snapshot_cycle": 1568166,
+        "ticket": 52
+      },
+      {
+        "seq": 67,
+        "cycle": 1643887,
+        "phase": 1,
+        "snapshot_cycle": 1643884,
+        "ticket": 56
+      },
+      {
+        "seq": 79,
+        "cycle": 1880857,
+        "phase": 1,
+        "snapshot_cycle": 1880854,
+        "ticket": 61
+      },
+      {
+        "seq": 82,
+        "cycle": 1888638,
+        "phase": 1,
+        "snapshot_cycle": 1888351,
+        "ticket": 62
+      },
+      {
+        "seq": 88,
+        "cycle": 2052758,
+        "phase": 1,
+        "snapshot_cycle": 2052755,
+        "ticket": 66
+      },
+      {
+        "seq": 90,
+        "cycle": 2060140,
+        "phase": 1,
+        "snapshot_cycle": 2060137,
+        "ticket": 67
+      },
+      {
+        "seq": 98,
+        "cycle": 2734396,
+        "phase": 1,
+        "snapshot_cycle": 2734393,
+        "ticket": 80
+      },
+      {
+        "seq": 100,
+        "cycle": 5038700,
+        "phase": 2,
+        "snapshot_cycle": 5026508,
+        "ticket": 84
+      },
+      {
+        "seq": 100,
+        "cycle": 5060629,
+        "phase": 2,
+        "snapshot_cycle": 5026508,
+        "ticket": 85
+      },
+      {
+        "seq": 105,
+        "cycle": 5608331,
+        "phase": 2,
+        "snapshot_cycle": 5607356,
+        "ticket": 123
+      },
+      {
+        "seq": 106,
+        "cycle": 5638332,
+        "phase": 2,
+        "snapshot_cycle": 5638329,
+        "ticket": 128
+      },
+      {
+        "seq": 106,
+        "cycle": 5643267,
+        "phase": 2,
+        "snapshot_cycle": 5638329,
+        "ticket": 129
+      },
+      {
+        "seq": 106,
+        "cycle": 5648744,
+        "phase": 2,
+        "snapshot_cycle": 5638329,
+        "ticket": 130
+      },
+      {
+        "seq": 106,
+        "cycle": 5655299,
+        "phase": 2,
+        "snapshot_cycle": 5638329,
+        "ticket": 131
+      },
+      {
+        "seq": 106,
+        "cycle": 5674082,
+        "phase": 2,
+        "snapshot_cycle": 5638329,
+        "ticket": 132
+      },
+      {
+        "seq": 108,
+        "cycle": 5682017,
+        "phase": 2,
+        "snapshot_cycle": 5679414,
+        "ticket": 133
+      },
+      {
+        "seq": 108,
+        "cycle": 5686631,
+        "phase": 2,
+        "snapshot_cycle": 5679414,
+        "ticket": 134
+      },
+      {
+        "seq": 108,
+        "cycle": 5692416,
+        "phase": 2,
+        "snapshot_cycle": 5679414,
+        "ticket": 135
+      },
+      {
+        "seq": 108,
+        "cycle": 5696929,
+        "phase": 2,
+        "snapshot_cycle": 5679414,
+        "ticket": 136
+      },
+      {
+        "seq": 108,
+        "cycle": 5701610,
+        "phase": 2,
+        "snapshot_cycle": 5679414,
+        "ticket": 137
+      },
+      {
+        "seq": 109,
+        "cycle": 5705890,
+        "phase": 2,
+        "snapshot_cycle": 5705720,
+        "ticket": 138
+      },
+      {
+        "seq": 127,
+        "cycle": 5782259,
+        "phase": 2,
+        "snapshot_cycle": 5782254,
+        "ticket": 142
+      },
+      {
+        "seq": 138,
+        "cycle": 5907081,
+        "phase": 2,
+        "snapshot_cycle": 5896545,
+        "ticket": 147
+      },
+      {
+        "seq": 138,
+        "cycle": 5925431,
+        "phase": 2,
+        "snapshot_cycle": 5896545,
+        "ticket": 148
+      },
+      {
+        "seq": 138,
+        "cycle": 5939113,
+        "phase": 2,
+        "snapshot_cycle": 5896545,
+        "ticket": 149
+      },
+      {
+        "seq": 138,
+        "cycle": 5955743,
+        "phase": 2,
+        "snapshot_cycle": 5896545,
+        "ticket": 150
+      },
+      {
+        "seq": 138,
+        "cycle": 5973185,
+        "phase": 2,
+        "snapshot_cycle": 5896545,
+        "ticket": 151
+      },
+      {
+        "seq": 139,
+        "cycle": 5998730,
+        "phase": 2,
+        "snapshot_cycle": 5987918,
+        "ticket": 152
+      },
+      {
+        "seq": 141,
+        "cycle": 6012140,
+        "phase": 2,
+        "snapshot_cycle": 6011263,
+        "ticket": 153
+      },
+      {
+        "seq": 143,
+        "cycle": 6053080,
+        "phase": 2,
+        "snapshot_cycle": 6053077,
+        "ticket": 157
+      },
+      {
+        "seq": 144,
+        "cycle": 6059990,
+        "phase": 2,
+        "snapshot_cycle": 6057886,
+        "ticket": 158
+      },
+      {
+        "seq": 144,
+        "cycle": 6065570,
+        "phase": 2,
+        "snapshot_cycle": 6057886,
+        "ticket": 159
+      },
+      {
+        "seq": 144,
+        "cycle": 6069339,
+        "phase": 2,
+        "snapshot_cycle": 6057886,
+        "ticket": 160
+      },
+      {
+        "seq": 156,
+        "cycle": 6244925,
+        "phase": 2,
+        "snapshot_cycle": 6244922,
+        "ticket": 175
+      },
+      {
+        "seq": 158,
+        "cycle": 6250891,
+        "phase": 2,
+        "snapshot_cycle": 6250888,
+        "ticket": 176
+      },
+      {
+        "seq": 160,
+        "cycle": 6257186,
+        "phase": 2,
+        "snapshot_cycle": 6257183,
+        "ticket": 177
+      },
+      {
+        "seq": 163,
+        "cycle": 6297070,
+        "phase": 2,
+        "snapshot_cycle": 6297067,
+        "ticket": 180
+      },
+      {
+        "seq": 165,
+        "cycle": 6655479,
+        "phase": 2,
+        "snapshot_cycle": 6655476,
+        "ticket": 182
+      },
+      {
+        "seq": 167,
+        "cycle": 6662856,
+        "phase": 2,
+        "snapshot_cycle": 6662416,
+        "ticket": 183
+      },
+      {
+        "seq": 173,
+        "cycle": 7268825,
+        "phase": 2,
+        "snapshot_cycle": 7268822,
+        "ticket": 194
+      }
+    ],
+    "legacy_raw_starts_during_old_output": [
+      {
+        "seq": 14,
+        "cycle": 997904,
+        "phase": 1
+      },
+      {
+        "seq": 16,
+        "cycle": 1049472,
+        "phase": 1
+      },
+      {
+        "seq": 16,
+        "cycle": 1059361,
+        "phase": 1
+      },
+      {
+        "seq": 18,
+        "cycle": 1075070,
+        "phase": 1
+      },
+      {
+        "seq": 18,
+        "cycle": 1080415,
+        "phase": 1
+      },
+      {
+        "seq": 18,
+        "cycle": 1086489,
+        "phase": 1
+      },
+      {
+        "seq": 19,
+        "cycle": 1098030,
+        "phase": 1
+      },
+      {
+        "seq": 19,
+        "cycle": 1107250,
+        "phase": 1
+      },
+      {
+        "seq": 88,
+        "cycle": 2053126,
+        "phase": 1
+      },
+      {
+        "seq": 90,
+        "cycle": 2060505,
+        "phase": 1
+      },
+      {
+        "seq": 98,
+        "cycle": 2734702,
+        "phase": 1
+      },
+      {
+        "seq": 100,
+        "cycle": 5039353,
+        "phase": 2
+      },
+      {
+        "seq": 100,
+        "cycle": 5061938,
+        "phase": 2
+      },
+      {
+        "seq": 105,
+        "cycle": 5608631,
+        "phase": 2
+      },
+      {
+        "seq": 106,
+        "cycle": 5639423,
+        "phase": 2
+      },
+      {
+        "seq": 106,
+        "cycle": 5644335,
+        "phase": 2
+      },
+      {
+        "seq": 106,
+        "cycle": 5650134,
+        "phase": 2
+      },
+      {
+        "seq": 106,
+        "cycle": 5656751,
+        "phase": 2
+      },
+      {
+        "seq": 106,
+        "cycle": 5674587,
+        "phase": 2
+      },
+      {
+        "seq": 108,
+        "cycle": 5682736,
+        "phase": 2
+      },
+      {
+        "seq": 108,
+        "cycle": 5687305,
+        "phase": 2
+      },
+      {
+        "seq": 108,
+        "cycle": 5693442,
+        "phase": 2
+      },
+      {
+        "seq": 108,
+        "cycle": 5697698,
+        "phase": 2
+      },
+      {
+        "seq": 108,
+        "cycle": 5702097,
+        "phase": 2
+      },
+      {
+        "seq": 109,
+        "cycle": 5707317,
+        "phase": 2
+      },
+      {
+        "seq": 138,
+        "cycle": 5907838,
+        "phase": 2
+      },
+      {
+        "seq": 138,
+        "cycle": 5926263,
+        "phase": 2
+      },
+      {
+        "seq": 138,
+        "cycle": 5939422,
+        "phase": 2
+      },
+      {
+        "seq": 138,
+        "cycle": 5956588,
+        "phase": 2
+      },
+      {
+        "seq": 138,
+        "cycle": 5973512,
+        "phase": 2
+      },
+      {
+        "seq": 139,
+        "cycle": 5999497,
+        "phase": 2
+      },
+      {
+        "seq": 141,
+        "cycle": 6012449,
+        "phase": 2
+      },
+      {
+        "seq": 143,
+        "cycle": 6053375,
+        "phase": 2
+      },
+      {
+        "seq": 144,
+        "cycle": 6060730,
+        "phase": 2
+      },
+      {
+        "seq": 144,
+        "cycle": 6065993,
+        "phase": 2
+      },
+      {
+        "seq": 144,
+        "cycle": 6069767,
+        "phase": 2
+      },
+      {
+        "seq": 163,
+        "cycle": 6297374,
+        "phase": 2
+      },
+      {
+        "seq": 165,
+        "cycle": 6655775,
+        "phase": 2
+      }
+    ],
+    "source_upload_words": 1856,
+    "source_upload_words_during_live_task": 240,
+    "queued_contexts_restored_after_legacy_writes": [
+      {
+        "seq": 2,
+        "phase": 1,
+        "CPU_LOAD_call": 11,
+        "legacy_write_cycle": 474914,
+        "job_take_cycle": 477998,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 3,
+        "phase": 1,
+        "CPU_LOAD_call": 12,
+        "legacy_write_cycle": 474914,
+        "job_take_cycle": 478853,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 4,
+        "phase": 1,
+        "CPU_LOAD_call": 13,
+        "legacy_write_cycle": 474914,
+        "job_take_cycle": 481798,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 5,
+        "phase": 1,
+        "CPU_LOAD_call": 14,
+        "legacy_write_cycle": 474914,
+        "job_take_cycle": 483293,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 6,
+        "phase": 1,
+        "CPU_LOAD_call": 15,
+        "legacy_write_cycle": 510356,
+        "job_take_cycle": 514589,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 7,
+        "phase": 1,
+        "CPU_LOAD_call": 16,
+        "legacy_write_cycle": 541805,
+        "job_take_cycle": 545871,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 8,
+        "phase": 1,
+        "CPU_LOAD_call": 17,
+        "legacy_write_cycle": 541805,
+        "job_take_cycle": 584286,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 9,
+        "phase": 1,
+        "CPU_LOAD_call": 18,
+        "legacy_write_cycle": 609464,
+        "job_take_cycle": 612610,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 10,
+        "phase": 1,
+        "CPU_LOAD_call": 19,
+        "legacy_write_cycle": 609464,
+        "job_take_cycle": 613925,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 11,
+        "phase": 1,
+        "CPU_LOAD_call": 20,
+        "legacy_write_cycle": 637133,
+        "job_take_cycle": 639941,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 12,
+        "phase": 1,
+        "CPU_LOAD_call": 21,
+        "legacy_write_cycle": 637133,
+        "job_take_cycle": 641376,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 13,
+        "phase": 1,
+        "CPU_LOAD_call": 23,
+        "legacy_write_cycle": 842085,
+        "job_take_cycle": 845695,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 14,
+        "phase": 1,
+        "CPU_LOAD_call": 33,
+        "legacy_write_cycle": 988399,
+        "job_take_cycle": 995811,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 15,
+        "phase": 1,
+        "CPU_LOAD_call": 38,
+        "legacy_write_cycle": 1005944,
+        "job_take_cycle": 1013844,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 16,
+        "phase": 1,
+        "CPU_LOAD_call": 39,
+        "legacy_write_cycle": 1038020,
+        "job_take_cycle": 1041271,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 17,
+        "phase": 1,
+        "CPU_LOAD_call": 40,
+        "legacy_write_cycle": 1059321,
+        "job_take_cycle": 1066703,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 18,
+        "phase": 1,
+        "CPU_LOAD_call": 41,
+        "legacy_write_cycle": 1068787,
+        "job_take_cycle": 1071826,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 19,
+        "phase": 1,
+        "CPU_LOAD_call": 42,
+        "legacy_write_cycle": 1086440,
+        "job_take_cycle": 1094365,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 20,
+        "phase": 1,
+        "CPU_LOAD_call": 43,
+        "legacy_write_cycle": 1107210,
+        "job_take_cycle": 1110120,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 21,
+        "phase": 1,
+        "CPU_LOAD_call": 44,
+        "legacy_write_cycle": 1107210,
+        "job_take_cycle": 1112645,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 22,
+        "phase": 1,
+        "CPU_LOAD_call": 46,
+        "legacy_write_cycle": 1107210,
+        "job_take_cycle": 1114983,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 23,
+        "phase": 1,
+        "CPU_LOAD_call": 47,
+        "legacy_write_cycle": 1116138,
+        "job_take_cycle": 1118390,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 24,
+        "phase": 1,
+        "CPU_LOAD_call": 48,
+        "legacy_write_cycle": 1140205,
+        "job_take_cycle": 1141752,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 25,
+        "phase": 1,
+        "CPU_LOAD_call": 49,
+        "legacy_write_cycle": 1140205,
+        "job_take_cycle": 1143351,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 26,
+        "phase": 1,
+        "CPU_LOAD_call": 50,
+        "legacy_write_cycle": 1156023,
+        "job_take_cycle": 1159349,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 27,
+        "phase": 1,
+        "CPU_LOAD_call": 51,
+        "legacy_write_cycle": 1156023,
+        "job_take_cycle": 1160951,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 28,
+        "phase": 1,
+        "CPU_LOAD_call": 55,
+        "legacy_write_cycle": 1163148,
+        "job_take_cycle": 1165365,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 29,
+        "phase": 1,
+        "CPU_LOAD_call": 56,
+        "legacy_write_cycle": 1163148,
+        "job_take_cycle": 1166960,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 30,
+        "phase": 1,
+        "CPU_LOAD_call": 57,
+        "legacy_write_cycle": 1163148,
+        "job_take_cycle": 1167811,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 31,
+        "phase": 1,
+        "CPU_LOAD_call": 59,
+        "legacy_write_cycle": 1169044,
+        "job_take_cycle": 1171244,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 32,
+        "phase": 1,
+        "CPU_LOAD_call": 60,
+        "legacy_write_cycle": 1169044,
+        "job_take_cycle": 1172095,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 33,
+        "phase": 1,
+        "CPU_LOAD_call": 61,
+        "legacy_write_cycle": 1174238,
+        "job_take_cycle": 1176438,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 34,
+        "phase": 1,
+        "CPU_LOAD_call": 62,
+        "legacy_write_cycle": 1174238,
+        "job_take_cycle": 1178033,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 35,
+        "phase": 1,
+        "CPU_LOAD_call": 63,
+        "legacy_write_cycle": 1179726,
+        "job_take_cycle": 1182020,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 36,
+        "phase": 1,
+        "CPU_LOAD_call": 64,
+        "legacy_write_cycle": 1179726,
+        "job_take_cycle": 1183095,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 37,
+        "phase": 1,
+        "CPU_LOAD_call": 65,
+        "legacy_write_cycle": 1179726,
+        "job_take_cycle": 1183950,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 38,
+        "phase": 1,
+        "CPU_LOAD_call": 66,
+        "legacy_write_cycle": 1185556,
+        "job_take_cycle": 1187923,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 39,
+        "phase": 1,
+        "CPU_LOAD_call": 67,
+        "legacy_write_cycle": 1185556,
+        "job_take_cycle": 1189410,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 40,
+        "phase": 1,
+        "CPU_LOAD_call": 75,
+        "legacy_write_cycle": 1185556,
+        "job_take_cycle": 1197140,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 47,
+        "phase": 1,
+        "CPU_LOAD_call": 106,
+        "legacy_write_cycle": 1275853,
+        "job_take_cycle": 1278397,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 48,
+        "phase": 1,
+        "CPU_LOAD_call": 107,
+        "legacy_write_cycle": 1275853,
+        "job_take_cycle": 1280062,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 49,
+        "phase": 1,
+        "CPU_LOAD_call": 108,
+        "legacy_write_cycle": 1275853,
+        "job_take_cycle": 1282053,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 51,
+        "phase": 1,
+        "CPU_LOAD_call": 113,
+        "legacy_write_cycle": 1409307,
+        "job_take_cycle": 1413018,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 52,
+        "phase": 1,
+        "CPU_LOAD_call": 114,
+        "legacy_write_cycle": 1446521,
+        "job_take_cycle": 1448840,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 53,
+        "phase": 1,
+        "CPU_LOAD_call": 115,
+        "legacy_write_cycle": 1481361,
+        "job_take_cycle": 1484210,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 54,
+        "phase": 1,
+        "CPU_LOAD_call": 116,
+        "legacy_write_cycle": 1481361,
+        "job_take_cycle": 1486106,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 55,
+        "phase": 1,
+        "CPU_LOAD_call": 117,
+        "legacy_write_cycle": 1481361,
+        "job_take_cycle": 1488244,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 56,
+        "phase": 1,
+        "CPU_LOAD_call": 118,
+        "legacy_write_cycle": 1481361,
+        "job_take_cycle": 1490075,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 57,
+        "phase": 1,
+        "CPU_LOAD_call": 119,
+        "legacy_write_cycle": 1481361,
+        "job_take_cycle": 1492290,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 58,
+        "phase": 1,
+        "CPU_LOAD_call": 120,
+        "legacy_write_cycle": 1509237,
+        "job_take_cycle": 1512264,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 59,
+        "phase": 1,
+        "CPU_LOAD_call": 121,
+        "legacy_write_cycle": 1509237,
+        "job_take_cycle": 1563100,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 60,
+        "phase": 1,
+        "CPU_LOAD_call": 122,
+        "legacy_write_cycle": 1509237,
+        "job_take_cycle": 1564805,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 61,
+        "phase": 1,
+        "CPU_LOAD_call": 123,
+        "legacy_write_cycle": 1509237,
+        "job_take_cycle": 1566873,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 62,
+        "phase": 1,
+        "CPU_LOAD_call": 124,
+        "legacy_write_cycle": 1568842,
+        "job_take_cycle": 1571256,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 63,
+        "phase": 1,
+        "CPU_LOAD_call": 125,
+        "legacy_write_cycle": 1568842,
+        "job_take_cycle": 1572799,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 64,
+        "phase": 1,
+        "CPU_LOAD_call": 126,
+        "legacy_write_cycle": 1597367,
+        "job_take_cycle": 1599898,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 65,
+        "phase": 1,
+        "CPU_LOAD_call": 127,
+        "legacy_write_cycle": 1617947,
+        "job_take_cycle": 1620316,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 66,
+        "phase": 1,
+        "CPU_LOAD_call": 128,
+        "legacy_write_cycle": 1639078,
+        "job_take_cycle": 1641027,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 67,
+        "phase": 1,
+        "CPU_LOAD_call": 129,
+        "legacy_write_cycle": 1639078,
+        "job_take_cycle": 1642485,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 68,
+        "phase": 1,
+        "CPU_LOAD_call": 130,
+        "legacy_write_cycle": 1644485,
+        "job_take_cycle": 1646780,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 69,
+        "phase": 1,
+        "CPU_LOAD_call": 131,
+        "legacy_write_cycle": 1703649,
+        "job_take_cycle": 1706967,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 70,
+        "phase": 1,
+        "CPU_LOAD_call": 141,
+        "legacy_write_cycle": 1750081,
+        "job_take_cycle": 1751465,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 71,
+        "phase": 1,
+        "CPU_LOAD_call": 142,
+        "legacy_write_cycle": 1750081,
+        "job_take_cycle": 1753332,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 72,
+        "phase": 1,
+        "CPU_LOAD_call": 143,
+        "legacy_write_cycle": 1767824,
+        "job_take_cycle": 1769974,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 73,
+        "phase": 1,
+        "CPU_LOAD_call": 144,
+        "legacy_write_cycle": 1767824,
+        "job_take_cycle": 1771472,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 74,
+        "phase": 1,
+        "CPU_LOAD_call": 145,
+        "legacy_write_cycle": 1767824,
+        "job_take_cycle": 1773514,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 75,
+        "phase": 1,
+        "CPU_LOAD_call": 146,
+        "legacy_write_cycle": 1767824,
+        "job_take_cycle": 1774915,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 76,
+        "phase": 1,
+        "CPU_LOAD_call": 147,
+        "legacy_write_cycle": 1767824,
+        "job_take_cycle": 1776058,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 77,
+        "phase": 1,
+        "CPU_LOAD_call": 148,
+        "legacy_write_cycle": 1767824,
+        "job_take_cycle": 1777277,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 80,
+        "phase": 1,
+        "CPU_LOAD_call": 161,
+        "legacy_write_cycle": 1881172,
+        "job_take_cycle": 1883423,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 81,
+        "phase": 1,
+        "CPU_LOAD_call": 162,
+        "legacy_write_cycle": 1881172,
+        "job_take_cycle": 1885357,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 82,
+        "phase": 1,
+        "CPU_LOAD_call": 163,
+        "legacy_write_cycle": 1881172,
+        "job_take_cycle": 1886825,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 83,
+        "phase": 1,
+        "CPU_LOAD_call": 164,
+        "legacy_write_cycle": 1889413,
+        "job_take_cycle": 1891504,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 84,
+        "phase": 1,
+        "CPU_LOAD_call": 165,
+        "legacy_write_cycle": 1889413,
+        "job_take_cycle": 1893307,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 85,
+        "phase": 1,
+        "CPU_LOAD_call": 173,
+        "legacy_write_cycle": 1942487,
+        "job_take_cycle": 1944817,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 86,
+        "phase": 1,
+        "CPU_LOAD_call": 174,
+        "legacy_write_cycle": 1942487,
+        "job_take_cycle": 1946789,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 89,
+        "phase": 1,
+        "CPU_LOAD_call": 187,
+        "legacy_write_cycle": 2053077,
+        "job_take_cycle": 2055444,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 90,
+        "phase": 1,
+        "CPU_LOAD_call": 188,
+        "legacy_write_cycle": 2053077,
+        "job_take_cycle": 2058250,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 91,
+        "phase": 1,
+        "CPU_LOAD_call": 192,
+        "legacy_write_cycle": 2085725,
+        "job_take_cycle": 2088045,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 92,
+        "phase": 1,
+        "CPU_LOAD_call": 202,
+        "legacy_write_cycle": 2175248,
+        "job_take_cycle": 2177586,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 93,
+        "phase": 1,
+        "CPU_LOAD_call": 206,
+        "legacy_write_cycle": 2205166,
+        "job_take_cycle": 2207507,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 94,
+        "phase": 1,
+        "CPU_LOAD_call": 211,
+        "legacy_write_cycle": 2248242,
+        "job_take_cycle": 2250474,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 95,
+        "phase": 1,
+        "CPU_LOAD_call": 220,
+        "legacy_write_cycle": 2336660,
+        "job_take_cycle": 2341579,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 96,
+        "phase": 1,
+        "CPU_LOAD_call": 227,
+        "legacy_write_cycle": 2405242,
+        "job_take_cycle": 2407639,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 99,
+        "phase": 2,
+        "CPU_LOAD_call": 365,
+        "legacy_write_cycle": 5007836,
+        "job_take_cycle": 5018845,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 100,
+        "phase": 2,
+        "CPU_LOAD_call": 366,
+        "legacy_write_cycle": 5021157,
+        "job_take_cycle": 5024329,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 101,
+        "phase": 2,
+        "CPU_LOAD_call": 367,
+        "legacy_write_cycle": 5061889,
+        "job_take_cycle": 5064211,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 102,
+        "phase": 2,
+        "CPU_LOAD_call": 372,
+        "legacy_write_cycle": 5097879,
+        "job_take_cycle": 5109005,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 103,
+        "phase": 2,
+        "CPU_LOAD_call": 374,
+        "legacy_write_cycle": 5128864,
+        "job_take_cycle": 5131125,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 104,
+        "phase": 2,
+        "CPU_LOAD_call": 377,
+        "legacy_write_cycle": 5204346,
+        "job_take_cycle": 5209769,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 105,
+        "phase": 2,
+        "CPU_LOAD_call": 387,
+        "legacy_write_cycle": 5600273,
+        "job_take_cycle": 5605833,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 106,
+        "phase": 2,
+        "CPU_LOAD_call": 393,
+        "legacy_write_cycle": 5632872,
+        "job_take_cycle": 5636857,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 107,
+        "phase": 2,
+        "CPU_LOAD_call": 394,
+        "legacy_write_cycle": 5674538,
+        "job_take_cycle": 5676266,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 108,
+        "phase": 2,
+        "CPU_LOAD_call": 395,
+        "legacy_write_cycle": 5674538,
+        "job_take_cycle": 5678066,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 109,
+        "phase": 2,
+        "CPU_LOAD_call": 396,
+        "legacy_write_cycle": 5702057,
+        "job_take_cycle": 5704248,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 110,
+        "phase": 2,
+        "CPU_LOAD_call": 397,
+        "legacy_write_cycle": 5707277,
+        "job_take_cycle": 5719686,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 111,
+        "phase": 2,
+        "CPU_LOAD_call": 398,
+        "legacy_write_cycle": 5707277,
+        "job_take_cycle": 5722243,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 112,
+        "phase": 2,
+        "CPU_LOAD_call": 400,
+        "legacy_write_cycle": 5707277,
+        "job_take_cycle": 5724608,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 113,
+        "phase": 2,
+        "CPU_LOAD_call": 402,
+        "legacy_write_cycle": 5707277,
+        "job_take_cycle": 5725903,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 114,
+        "phase": 2,
+        "CPU_LOAD_call": 404,
+        "legacy_write_cycle": 5707277,
+        "job_take_cycle": 5731837,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 115,
+        "phase": 2,
+        "CPU_LOAD_call": 405,
+        "legacy_write_cycle": 5707277,
+        "job_take_cycle": 5733439,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 116,
+        "phase": 2,
+        "CPU_LOAD_call": 409,
+        "legacy_write_cycle": 5765968,
+        "job_take_cycle": 5768103,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 117,
+        "phase": 2,
+        "CPU_LOAD_call": 410,
+        "legacy_write_cycle": 5765968,
+        "job_take_cycle": 5769698,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 118,
+        "phase": 2,
+        "CPU_LOAD_call": 411,
+        "legacy_write_cycle": 5765968,
+        "job_take_cycle": 5770549,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 119,
+        "phase": 2,
+        "CPU_LOAD_call": 413,
+        "legacy_write_cycle": 5765968,
+        "job_take_cycle": 5771400,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 120,
+        "phase": 2,
+        "CPU_LOAD_call": 414,
+        "legacy_write_cycle": 5765968,
+        "job_take_cycle": 5772251,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 121,
+        "phase": 2,
+        "CPU_LOAD_call": 415,
+        "legacy_write_cycle": 5765968,
+        "job_take_cycle": 5773701,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 122,
+        "phase": 2,
+        "CPU_LOAD_call": 416,
+        "legacy_write_cycle": 5765968,
+        "job_take_cycle": 5775296,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 123,
+        "phase": 2,
+        "CPU_LOAD_call": 417,
+        "legacy_write_cycle": 5765968,
+        "job_take_cycle": 5776693,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 124,
+        "phase": 2,
+        "CPU_LOAD_call": 418,
+        "legacy_write_cycle": 5765968,
+        "job_take_cycle": 5777768,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 125,
+        "phase": 2,
+        "CPU_LOAD_call": 419,
+        "legacy_write_cycle": 5765968,
+        "job_take_cycle": 5778620,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 126,
+        "phase": 2,
+        "CPU_LOAD_call": 420,
+        "legacy_write_cycle": 5765968,
+        "job_take_cycle": 5779472,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 127,
+        "phase": 2,
+        "CPU_LOAD_call": 421,
+        "legacy_write_cycle": 5765968,
+        "job_take_cycle": 5780956,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 128,
+        "phase": 2,
+        "CPU_LOAD_call": 429,
+        "legacy_write_cycle": 5783283,
+        "job_take_cycle": 5804104,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 129,
+        "phase": 2,
+        "CPU_LOAD_call": 454,
+        "legacy_write_cycle": 5862411,
+        "job_take_cycle": 5868565,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 130,
+        "phase": 2,
+        "CPU_LOAD_call": 455,
+        "legacy_write_cycle": 5862411,
+        "job_take_cycle": 5869685,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 131,
+        "phase": 2,
+        "CPU_LOAD_call": 456,
+        "legacy_write_cycle": 5862411,
+        "job_take_cycle": 5871526,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 132,
+        "phase": 2,
+        "CPU_LOAD_call": 457,
+        "legacy_write_cycle": 5862411,
+        "job_take_cycle": 5873321,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 133,
+        "phase": 2,
+        "CPU_LOAD_call": 458,
+        "legacy_write_cycle": 5862411,
+        "job_take_cycle": 5874825,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 134,
+        "phase": 2,
+        "CPU_LOAD_call": 459,
+        "legacy_write_cycle": 5862411,
+        "job_take_cycle": 5876615,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 135,
+        "phase": 2,
+        "CPU_LOAD_call": 460,
+        "legacy_write_cycle": 5862411,
+        "job_take_cycle": 5878168,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 136,
+        "phase": 2,
+        "CPU_LOAD_call": 461,
+        "legacy_write_cycle": 5862411,
+        "job_take_cycle": 5879763,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 137,
+        "phase": 2,
+        "CPU_LOAD_call": 462,
+        "legacy_write_cycle": 5862411,
+        "job_take_cycle": 5881758,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 138,
+        "phase": 2,
+        "CPU_LOAD_call": 469,
+        "legacy_write_cycle": 5862411,
+        "job_take_cycle": 5895090,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 139,
+        "phase": 2,
+        "CPU_LOAD_call": 470,
+        "legacy_write_cycle": 5973472,
+        "job_take_cycle": 5986303,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 140,
+        "phase": 2,
+        "CPU_LOAD_call": 471,
+        "legacy_write_cycle": 5999448,
+        "job_take_cycle": 6003699,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 141,
+        "phase": 2,
+        "CPU_LOAD_call": 472,
+        "legacy_write_cycle": 5999448,
+        "job_take_cycle": 6009579,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 142,
+        "phase": 2,
+        "CPU_LOAD_call": 475,
+        "legacy_write_cycle": 6044613,
+        "job_take_cycle": 6048118,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 143,
+        "phase": 2,
+        "CPU_LOAD_call": 476,
+        "legacy_write_cycle": 6044613,
+        "job_take_cycle": 6051493,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 144,
+        "phase": 2,
+        "CPU_LOAD_call": 477,
+        "legacy_write_cycle": 6053335,
+        "job_take_cycle": 6056597,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 145,
+        "phase": 2,
+        "CPU_LOAD_call": 478,
+        "legacy_write_cycle": 6069727,
+        "job_take_cycle": 6073957,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 146,
+        "phase": 2,
+        "CPU_LOAD_call": 482,
+        "legacy_write_cycle": 6081674,
+        "job_take_cycle": 6099149,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 147,
+        "phase": 2,
+        "CPU_LOAD_call": 483,
+        "legacy_write_cycle": 6081674,
+        "job_take_cycle": 6102123,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 148,
+        "phase": 2,
+        "CPU_LOAD_call": 495,
+        "legacy_write_cycle": 6195777,
+        "job_take_cycle": 6205675,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 149,
+        "phase": 2,
+        "CPU_LOAD_call": 497,
+        "legacy_write_cycle": 6195777,
+        "job_take_cycle": 6211758,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 150,
+        "phase": 2,
+        "CPU_LOAD_call": 498,
+        "legacy_write_cycle": 6195777,
+        "job_take_cycle": 6213256,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 151,
+        "phase": 2,
+        "CPU_LOAD_call": 499,
+        "legacy_write_cycle": 6195777,
+        "job_take_cycle": 6217114,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 152,
+        "phase": 2,
+        "CPU_LOAD_call": 500,
+        "legacy_write_cycle": 6195777,
+        "job_take_cycle": 6218515,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 153,
+        "phase": 2,
+        "CPU_LOAD_call": 501,
+        "legacy_write_cycle": 6220050,
+        "job_take_cycle": 6222410,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 154,
+        "phase": 2,
+        "CPU_LOAD_call": 502,
+        "legacy_write_cycle": 6220050,
+        "job_take_cycle": 6223798,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 155,
+        "phase": 2,
+        "CPU_LOAD_call": 513,
+        "legacy_write_cycle": 6239684,
+        "job_take_cycle": 6241804,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 156,
+        "phase": 2,
+        "CPU_LOAD_call": 514,
+        "legacy_write_cycle": 6239684,
+        "job_take_cycle": 6243334,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 157,
+        "phase": 2,
+        "CPU_LOAD_call": 515,
+        "legacy_write_cycle": 6245433,
+        "job_take_cycle": 6247678,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 158,
+        "phase": 2,
+        "CPU_LOAD_call": 516,
+        "legacy_write_cycle": 6245433,
+        "job_take_cycle": 6249612,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 159,
+        "phase": 2,
+        "CPU_LOAD_call": 517,
+        "legacy_write_cycle": 6251522,
+        "job_take_cycle": 6253749,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 160,
+        "phase": 2,
+        "CPU_LOAD_call": 518,
+        "legacy_write_cycle": 6251522,
+        "job_take_cycle": 6255677,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 161,
+        "phase": 2,
+        "CPU_LOAD_call": 519,
+        "legacy_write_cycle": 6257597,
+        "job_take_cycle": 6259864,
+        "legacy_context_differed": true
+      },
+      {
+        "seq": 162,
+        "phase": 2,
+        "CPU_LOAD_call": 527,
+        "legacy_write_cycle": 6291187,
+        "job_take_cycle": 6293365,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 163,
+        "phase": 2,
+        "CPU_LOAD_call": 528,
+        "legacy_write_cycle": 6291187,
+        "job_take_cycle": 6295337,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 164,
+        "phase": 2,
+        "CPU_LOAD_call": 539,
+        "legacy_write_cycle": 6648953,
+        "job_take_cycle": 6651289,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 165,
+        "phase": 2,
+        "CPU_LOAD_call": 540,
+        "legacy_write_cycle": 6648953,
+        "job_take_cycle": 6653664,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 166,
+        "phase": 2,
+        "CPU_LOAD_call": 541,
+        "legacy_write_cycle": 6655735,
+        "job_take_cycle": 6657719,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 167,
+        "phase": 2,
+        "CPU_LOAD_call": 542,
+        "legacy_write_cycle": 6655735,
+        "job_take_cycle": 6660529,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 168,
+        "phase": 2,
+        "CPU_LOAD_call": 546,
+        "legacy_write_cycle": 6677825,
+        "job_take_cycle": 6680130,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 169,
+        "phase": 2,
+        "CPU_LOAD_call": 556,
+        "legacy_write_cycle": 6762521,
+        "job_take_cycle": 6764875,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 170,
+        "phase": 2,
+        "CPU_LOAD_call": 560,
+        "legacy_write_cycle": 6793021,
+        "job_take_cycle": 6795246,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 171,
+        "phase": 2,
+        "CPU_LOAD_call": 565,
+        "legacy_write_cycle": 6832417,
+        "job_take_cycle": 6834720,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 172,
+        "phase": 2,
+        "CPU_LOAD_call": 574,
+        "legacy_write_cycle": 6916267,
+        "job_take_cycle": 6918863,
+        "legacy_context_differed": false
+      },
+      {
+        "seq": 174,
+        "phase": 2,
+        "CPU_LOAD_call": 620,
+        "legacy_write_cycle": 7269154,
+        "job_take_cycle": 7271560,
+        "legacy_context_differed": false
+      }
+    ],
+    "priority_grants_before_requested_prefix_completed": [
+      {
+        "cycle": 469927,
+        "phase": 1,
+        "lease_target": 12,
+        "completed_serial": 1,
+        "granted_ticket": 2
+      },
+      {
+        "cycle": 507777,
+        "phase": 1,
+        "lease_target": 13,
+        "completed_serial": 5,
+        "granted_ticket": 3
+      },
+      {
+        "cycle": 541086,
+        "phase": 1,
+        "lease_target": 13,
+        "completed_serial": 6,
+        "granted_ticket": 4
+      },
+      {
+        "cycle": 607823,
+        "phase": 1,
+        "lease_target": 13,
+        "completed_serial": 8,
+        "granted_ticket": 5
+      },
+      {
+        "cycle": 635246,
+        "phase": 1,
+        "lease_target": 13,
+        "completed_serial": 10,
+        "granted_ticket": 6
+      },
+      {
+        "cycle": 683134,
+        "phase": 1,
+        "lease_target": 13,
+        "completed_serial": 12,
+        "granted_ticket": 7
+      },
+      {
+        "cycle": 694967,
+        "phase": 1,
+        "lease_target": 13,
+        "completed_serial": 12,
+        "granted_ticket": 8
+      },
+      {
+        "cycle": 711821,
+        "phase": 1,
+        "lease_target": 13,
+        "completed_serial": 12,
+        "granted_ticket": 9
+      },
+      {
+        "cycle": 723143,
+        "phase": 1,
+        "lease_target": 13,
+        "completed_serial": 12,
+        "granted_ticket": 10
+      },
+      {
+        "cycle": 744813,
+        "phase": 1,
+        "lease_target": 13,
+        "completed_serial": 12,
+        "granted_ticket": 11
+      },
+      {
+        "cycle": 768456,
+        "phase": 1,
+        "lease_target": 14,
+        "completed_serial": 12,
+        "granted_ticket": 12
+      },
+      {
+        "cycle": 780872,
+        "phase": 1,
+        "lease_target": 14,
+        "completed_serial": 12,
+        "granted_ticket": 13
+      },
+      {
+        "cycle": 790340,
+        "phase": 1,
+        "lease_target": 14,
+        "completed_serial": 12,
+        "granted_ticket": 14
+      },
+      {
+        "cycle": 794930,
+        "phase": 1,
+        "lease_target": 14,
+        "completed_serial": 12,
+        "granted_ticket": 15
+      },
+      {
+        "cycle": 841707,
+        "phase": 1,
+        "lease_target": 21,
+        "completed_serial": 12,
+        "granted_ticket": 16
+      },
+      {
+        "cycle": 867069,
+        "phase": 1,
+        "lease_target": 27,
+        "completed_serial": 13,
+        "granted_ticket": 17
+      },
+      {
+        "cycle": 877624,
+        "phase": 1,
+        "lease_target": 27,
+        "completed_serial": 13,
+        "granted_ticket": 18
+      },
+      {
+        "cycle": 886133,
+        "phase": 1,
+        "lease_target": 27,
+        "completed_serial": 13,
+        "granted_ticket": 19
+      },
+      {
+        "cycle": 909867,
+        "phase": 1,
+        "lease_target": 30,
+        "completed_serial": 13,
+        "granted_ticket": 20
+      },
+      {
+        "cycle": 942158,
+        "phase": 1,
+        "lease_target": 39,
+        "completed_serial": 13,
+        "granted_ticket": 21
+      },
+      {
+        "cycle": 950031,
+        "phase": 1,
+        "lease_target": 39,
+        "completed_serial": 13,
+        "granted_ticket": 22
+      },
+      {
+        "cycle": 957627,
+        "phase": 1,
+        "lease_target": 39,
+        "completed_serial": 13,
+        "granted_ticket": 23
+      },
+      {
+        "cycle": 973786,
+        "phase": 1,
+        "lease_target": 39,
+        "completed_serial": 13,
+        "granted_ticket": 24
+      },
+      {
+        "cycle": 987485,
+        "phase": 1,
+        "lease_target": 39,
+        "completed_serial": 13,
+        "granted_ticket": 25
+      },
+      {
+        "cycle": 997579,
+        "phase": 1,
+        "lease_target": 39,
+        "completed_serial": 13,
+        "granted_ticket": 26
+      },
+      {
+        "cycle": 1005318,
+        "phase": 1,
+        "lease_target": 39,
+        "completed_serial": 14,
+        "granted_ticket": 27
+      },
+      {
+        "cycle": 1036651,
+        "phase": 1,
+        "lease_target": 40,
+        "completed_serial": 15,
+        "granted_ticket": 28
+      },
+      {
+        "cycle": 1048786,
+        "phase": 1,
+        "lease_target": 40,
+        "completed_serial": 15,
+        "granted_ticket": 29
+      },
+      {
+        "cycle": 1059053,
+        "phase": 1,
+        "lease_target": 40,
+        "completed_serial": 15,
+        "granted_ticket": 30
+      },
+      {
+        "cycle": 1068170,
+        "phase": 1,
+        "lease_target": 40,
+        "completed_serial": 16,
+        "granted_ticket": 31
+      },
+      {
+        "cycle": 1074658,
+        "phase": 1,
+        "lease_target": 40,
+        "completed_serial": 17,
+        "granted_ticket": 32
+      },
+      {
+        "cycle": 1079654,
+        "phase": 1,
+        "lease_target": 40,
+        "completed_serial": 17,
+        "granted_ticket": 33
+      },
+      {
+        "cycle": 1085394,
+        "phase": 1,
+        "lease_target": 40,
+        "completed_serial": 17,
+        "granted_ticket": 34
+      },
+      {
+        "cycle": 1096859,
+        "phase": 1,
+        "lease_target": 40,
+        "completed_serial": 18,
+        "granted_ticket": 35
+      },
+      {
+        "cycle": 1106769,
+        "phase": 1,
+        "lease_target": 40,
+        "completed_serial": 18,
+        "granted_ticket": 36
+      },
+      {
+        "cycle": 1115888,
+        "phase": 1,
+        "lease_target": 40,
+        "completed_serial": 22,
+        "granted_ticket": 37
+      },
+      {
+        "cycle": 1138569,
+        "phase": 1,
+        "lease_target": 40,
+        "completed_serial": 23,
+        "granted_ticket": 38
+      },
+      {
+        "cycle": 1155266,
+        "phase": 1,
+        "lease_target": 40,
+        "completed_serial": 25,
+        "granted_ticket": 39
+      },
+      {
+        "cycle": 1162453,
+        "phase": 1,
+        "lease_target": 40,
+        "completed_serial": 26,
+        "granted_ticket": 40
+      },
+      {
+        "cycle": 1168620,
+        "phase": 1,
+        "lease_target": 40,
+        "completed_serial": 30,
+        "granted_ticket": 41
+      },
+      {
+        "cycle": 1173251,
+        "phase": 1,
+        "lease_target": 40,
+        "completed_serial": 31,
+        "granted_ticket": 42
+      },
+      {
+        "cycle": 1179245,
+        "phase": 1,
+        "lease_target": 40,
+        "completed_serial": 33,
+        "granted_ticket": 43
+      },
+      {
+        "cycle": 1184827,
+        "phase": 1,
+        "lease_target": 40,
+        "completed_serial": 37,
+        "granted_ticket": 44
+      },
+      {
+        "cycle": 1275545,
+        "phase": 1,
+        "lease_target": 49,
+        "completed_serial": 45,
+        "granted_ticket": 46
+      },
+      {
+        "cycle": 1283354,
+        "phase": 1,
+        "lease_target": 49,
+        "completed_serial": 48,
+        "granted_ticket": 47
+      },
+      {
+        "cycle": 1408815,
+        "phase": 1,
+        "lease_target": 69,
+        "completed_serial": 50,
+        "granted_ticket": 48
+      },
+      {
+        "cycle": 1445268,
+        "phase": 1,
+        "lease_target": 69,
+        "completed_serial": 51,
+        "granted_ticket": 49
+      },
+      {
+        "cycle": 1480187,
+        "phase": 1,
+        "lease_target": 69,
+        "completed_serial": 52,
+        "granted_ticket": 50
+      },
+      {
+        "cycle": 1508071,
+        "phase": 1,
+        "lease_target": 69,
+        "completed_serial": 57,
+        "granted_ticket": 51
+      },
+      {
+        "cycle": 1568169,
+        "phase": 1,
+        "lease_target": 69,
+        "completed_serial": 60,
+        "granted_ticket": 52
+      },
+      {
+        "cycle": 1596313,
+        "phase": 1,
+        "lease_target": 69,
+        "completed_serial": 63,
+        "granted_ticket": 53
+      },
+      {
+        "cycle": 1617273,
+        "phase": 1,
+        "lease_target": 69,
+        "completed_serial": 64,
+        "granted_ticket": 54
+      },
+      {
+        "cycle": 1638234,
+        "phase": 1,
+        "lease_target": 69,
+        "completed_serial": 65,
+        "granted_ticket": 55
+      },
+      {
+        "cycle": 1643887,
+        "phase": 1,
+        "lease_target": 69,
+        "completed_serial": 66,
+        "granted_ticket": 56
+      },
+      {
+        "cycle": 1701587,
+        "phase": 1,
+        "lease_target": 77,
+        "completed_serial": 68,
+        "granted_ticket": 57
+      },
+      {
+        "cycle": 1749384,
+        "phase": 1,
+        "lease_target": 77,
+        "completed_serial": 69,
+        "granted_ticket": 58
+      },
+      {
+        "cycle": 1766910,
+        "phase": 1,
+        "lease_target": 77,
+        "completed_serial": 71,
+        "granted_ticket": 59
+      },
+      {
+        "cycle": 1880857,
+        "phase": 1,
+        "lease_target": 84,
+        "completed_serial": 78,
+        "granted_ticket": 61
+      },
+      {
+        "cycle": 1888638,
+        "phase": 1,
+        "lease_target": 84,
+        "completed_serial": 81,
+        "granted_ticket": 62
+      },
+      {
+        "cycle": 1942154,
+        "phase": 1,
+        "lease_target": 86,
+        "completed_serial": 84,
+        "granted_ticket": 64
+      },
+      {
+        "cycle": 2052758,
+        "phase": 1,
+        "lease_target": 90,
+        "completed_serial": 87,
+        "granted_ticket": 66
+      },
+      {
+        "cycle": 2060140,
+        "phase": 1,
+        "lease_target": 90,
+        "completed_serial": 89,
+        "granted_ticket": 67
+      },
+      {
+        "cycle": 2085420,
+        "phase": 1,
+        "lease_target": 91,
+        "completed_serial": 90,
+        "granted_ticket": 68
+      },
+      {
+        "cycle": 2174799,
+        "phase": 1,
+        "lease_target": 92,
+        "completed_serial": 91,
+        "granted_ticket": 70
+      },
+      {
+        "cycle": 2204844,
+        "phase": 1,
+        "lease_target": 93,
+        "completed_serial": 92,
+        "granted_ticket": 72
+      },
+      {
+        "cycle": 2247937,
+        "phase": 1,
+        "lease_target": 94,
+        "completed_serial": 93,
+        "granted_ticket": 74
+      },
+      {
+        "cycle": 2336330,
+        "phase": 1,
+        "lease_target": 95,
+        "completed_serial": 94,
+        "granted_ticket": 76
+      },
+      {
+        "cycle": 2404872,
+        "phase": 1,
+        "lease_target": 96,
+        "completed_serial": 95,
+        "granted_ticket": 78
+      },
+      {
+        "cycle": 2734396,
+        "phase": 1,
+        "lease_target": 98,
+        "completed_serial": 97,
+        "granted_ticket": 80
+      },
+      {
+        "cycle": 5007233,
+        "phase": 2,
+        "lease_target": 101,
+        "completed_serial": 98,
+        "granted_ticket": 82
+      },
+      {
+        "cycle": 5019658,
+        "phase": 2,
+        "lease_target": 101,
+        "completed_serial": 99,
+        "granted_ticket": 83
+      },
+      {
+        "cycle": 5038700,
+        "phase": 2,
+        "lease_target": 101,
+        "completed_serial": 99,
+        "granted_ticket": 84
+      },
+      {
+        "cycle": 5060629,
+        "phase": 2,
+        "lease_target": 101,
+        "completed_serial": 99,
+        "granted_ticket": 85
+      },
+      {
+        "cycle": 5097552,
+        "phase": 2,
+        "lease_target": 102,
+        "completed_serial": 101,
+        "granted_ticket": 86
+      },
+      {
+        "cycle": 5112551,
+        "phase": 2,
+        "lease_target": 103,
+        "completed_serial": 102,
+        "granted_ticket": 87
+      },
+      {
+        "cycle": 5128579,
+        "phase": 2,
+        "lease_target": 103,
+        "completed_serial": 102,
+        "granted_ticket": 88
+      },
+      {
+        "cycle": 5145014,
+        "phase": 2,
+        "lease_target": 104,
+        "completed_serial": 103,
+        "granted_ticket": 89
+      },
+      {
+        "cycle": 5152165,
+        "phase": 2,
+        "lease_target": 104,
+        "completed_serial": 103,
+        "granted_ticket": 90
+      },
+      {
+        "cycle": 5158236,
+        "phase": 2,
+        "lease_target": 104,
+        "completed_serial": 103,
+        "granted_ticket": 91
+      },
+      {
+        "cycle": 5172223,
+        "phase": 2,
+        "lease_target": 104,
+        "completed_serial": 103,
+        "granted_ticket": 92
+      },
+      {
+        "cycle": 5197999,
+        "phase": 2,
+        "lease_target": 104,
+        "completed_serial": 103,
+        "granted_ticket": 93
+      },
+      {
+        "cycle": 5204086,
+        "phase": 2,
+        "lease_target": 104,
+        "completed_serial": 103,
+        "granted_ticket": 94
+      },
+      {
+        "cycle": 5265188,
+        "phase": 2,
+        "lease_target": 105,
+        "completed_serial": 104,
+        "granted_ticket": 96
+      },
+      {
+        "cycle": 5276733,
+        "phase": 2,
+        "lease_target": 105,
+        "completed_serial": 104,
+        "granted_ticket": 97
+      },
+      {
+        "cycle": 5284790,
+        "phase": 2,
+        "lease_target": 105,
+        "completed_serial": 104,
+        "granted_ticket": 98
+      },
+      {
+        "cycle": 5288700,
+        "phase": 2,
+        "lease_target": 105,
+        "completed_serial": 104,
+        "granted_ticket": 99
+      },
+      {
+        "cycle": 5302299,
+        "phase": 2,
+        "lease_target": 105,
+        "completed_serial": 104,
+        "granted_ticket": 100
+      },
+      {
+        "cycle": 5340584,
+        "phase": 2,
+        "lease_target": 111,
+        "completed_serial": 104,
+        "granted_ticket": 101
+      },
+      {
+        "cycle": 5351985,
+        "phase": 2,
+        "lease_target": 112,
+        "completed_serial": 104,
+        "granted_ticket": 102
+      },
+      {
+        "cycle": 5369199,
+        "phase": 2,
+        "lease_target": 113,
+        "completed_serial": 104,
+        "granted_ticket": 103
+      },
+      {
+        "cycle": 5389051,
+        "phase": 2,
+        "lease_target": 115,
+        "completed_serial": 104,
+        "granted_ticket": 104
+      },
+      {
+        "cycle": 5400056,
+        "phase": 2,
+        "lease_target": 115,
+        "completed_serial": 104,
+        "granted_ticket": 105
+      },
+      {
+        "cycle": 5408262,
+        "phase": 2,
+        "lease_target": 115,
+        "completed_serial": 104,
+        "granted_ticket": 106
+      },
+      {
+        "cycle": 5433467,
+        "phase": 2,
+        "lease_target": 118,
+        "completed_serial": 104,
+        "granted_ticket": 107
+      },
+      {
+        "cycle": 5458544,
+        "phase": 2,
+        "lease_target": 127,
+        "completed_serial": 104,
+        "granted_ticket": 108
+      },
+      {
+        "cycle": 5465640,
+        "phase": 2,
+        "lease_target": 127,
+        "completed_serial": 104,
+        "granted_ticket": 109
+      },
+      {
+        "cycle": 5472856,
+        "phase": 2,
+        "lease_target": 127,
+        "completed_serial": 104,
+        "granted_ticket": 110
+      },
+      {
+        "cycle": 5494276,
+        "phase": 2,
+        "lease_target": 127,
+        "completed_serial": 104,
+        "granted_ticket": 111
+      },
+      {
+        "cycle": 5507577,
+        "phase": 2,
+        "lease_target": 127,
+        "completed_serial": 104,
+        "granted_ticket": 112
+      },
+      {
+        "cycle": 5517025,
+        "phase": 2,
+        "lease_target": 127,
+        "completed_serial": 104,
+        "granted_ticket": 113
+      },
+      {
+        "cycle": 5525305,
+        "phase": 2,
+        "lease_target": 127,
+        "completed_serial": 104,
+        "granted_ticket": 114
+      },
+      {
+        "cycle": 5542371,
+        "phase": 2,
+        "lease_target": 128,
+        "completed_serial": 104,
+        "granted_ticket": 115
+      },
+      {
+        "cycle": 5552148,
+        "phase": 2,
+        "lease_target": 128,
+        "completed_serial": 104,
+        "granted_ticket": 116
+      },
+      {
+        "cycle": 5562811,
+        "phase": 2,
+        "lease_target": 128,
+        "completed_serial": 104,
+        "granted_ticket": 117
+      },
+      {
+        "cycle": 5570488,
+        "phase": 2,
+        "lease_target": 128,
+        "completed_serial": 104,
+        "granted_ticket": 118
+      },
+      {
+        "cycle": 5576518,
+        "phase": 2,
+        "lease_target": 128,
+        "completed_serial": 104,
+        "granted_ticket": 119
+      },
+      {
+        "cycle": 5581551,
+        "phase": 2,
+        "lease_target": 128,
+        "completed_serial": 104,
+        "granted_ticket": 120
+      },
+      {
+        "cycle": 5586229,
+        "phase": 2,
+        "lease_target": 128,
+        "completed_serial": 104,
+        "granted_ticket": 121
+      },
+      {
+        "cycle": 5599632,
+        "phase": 2,
+        "lease_target": 128,
+        "completed_serial": 104,
+        "granted_ticket": 122
+      },
+      {
+        "cycle": 5608331,
+        "phase": 2,
+        "lease_target": 128,
+        "completed_serial": 104,
+        "granted_ticket": 123
+      },
+      {
+        "cycle": 5617186,
+        "phase": 2,
+        "lease_target": 128,
+        "completed_serial": 105,
+        "granted_ticket": 124
+      },
+      {
+        "cycle": 5622501,
+        "phase": 2,
+        "lease_target": 128,
+        "completed_serial": 105,
+        "granted_ticket": 125
+      },
+      {
+        "cycle": 5625820,
+        "phase": 2,
+        "lease_target": 128,
+        "completed_serial": 105,
+        "granted_ticket": 126
+      },
+      {
+        "cycle": 5631337,
+        "phase": 2,
+        "lease_target": 128,
+        "completed_serial": 105,
+        "granted_ticket": 127
+      },
+      {
+        "cycle": 5638332,
+        "phase": 2,
+        "lease_target": 128,
+        "completed_serial": 105,
+        "granted_ticket": 128
+      },
+      {
+        "cycle": 5643267,
+        "phase": 2,
+        "lease_target": 128,
+        "completed_serial": 105,
+        "granted_ticket": 129
+      },
+      {
+        "cycle": 5648744,
+        "phase": 2,
+        "lease_target": 128,
+        "completed_serial": 105,
+        "granted_ticket": 130
+      },
+      {
+        "cycle": 5655299,
+        "phase": 2,
+        "lease_target": 128,
+        "completed_serial": 105,
+        "granted_ticket": 131
+      },
+      {
+        "cycle": 5674082,
+        "phase": 2,
+        "lease_target": 128,
+        "completed_serial": 105,
+        "granted_ticket": 132
+      },
+      {
+        "cycle": 5682017,
+        "phase": 2,
+        "lease_target": 128,
+        "completed_serial": 107,
+        "granted_ticket": 133
+      },
+      {
+        "cycle": 5686631,
+        "phase": 2,
+        "lease_target": 128,
+        "completed_serial": 107,
+        "granted_ticket": 134
+      },
+      {
+        "cycle": 5692416,
+        "phase": 2,
+        "lease_target": 128,
+        "completed_serial": 107,
+        "granted_ticket": 135
+      },
+      {
+        "cycle": 5696929,
+        "phase": 2,
+        "lease_target": 128,
+        "completed_serial": 107,
+        "granted_ticket": 136
+      },
+      {
+        "cycle": 5701610,
+        "phase": 2,
+        "lease_target": 128,
+        "completed_serial": 107,
+        "granted_ticket": 137
+      },
+      {
+        "cycle": 5705890,
+        "phase": 2,
+        "lease_target": 128,
+        "completed_serial": 108,
+        "granted_ticket": 138
+      },
+      {
+        "cycle": 5742237,
+        "phase": 2,
+        "lease_target": 137,
+        "completed_serial": 115,
+        "granted_ticket": 139
+      },
+      {
+        "cycle": 5751459,
+        "phase": 2,
+        "lease_target": 137,
+        "completed_serial": 115,
+        "granted_ticket": 140
+      },
+      {
+        "cycle": 5765655,
+        "phase": 2,
+        "lease_target": 137,
+        "completed_serial": 115,
+        "granted_ticket": 141
+      },
+      {
+        "cycle": 5782259,
+        "phase": 2,
+        "lease_target": 137,
+        "completed_serial": 126,
+        "granted_ticket": 142
+      },
+      {
+        "cycle": 5807113,
+        "phase": 2,
+        "lease_target": 137,
+        "completed_serial": 128,
+        "granted_ticket": 143
+      },
+      {
+        "cycle": 5817458,
+        "phase": 2,
+        "lease_target": 137,
+        "completed_serial": 128,
+        "granted_ticket": 144
+      },
+      {
+        "cycle": 5851980,
+        "phase": 2,
+        "lease_target": 141,
+        "completed_serial": 128,
+        "granted_ticket": 145
+      },
+      {
+        "cycle": 5862049,
+        "phase": 2,
+        "lease_target": 141,
+        "completed_serial": 128,
+        "granted_ticket": 146
+      },
+      {
+        "cycle": 5907081,
+        "phase": 2,
+        "lease_target": 145,
+        "completed_serial": 137,
+        "granted_ticket": 147
+      },
+      {
+        "cycle": 5925431,
+        "phase": 2,
+        "lease_target": 145,
+        "completed_serial": 137,
+        "granted_ticket": 148
+      },
+      {
+        "cycle": 5939113,
+        "phase": 2,
+        "lease_target": 145,
+        "completed_serial": 137,
+        "granted_ticket": 149
+      },
+      {
+        "cycle": 5955743,
+        "phase": 2,
+        "lease_target": 147,
+        "completed_serial": 137,
+        "granted_ticket": 150
+      },
+      {
+        "cycle": 5973185,
+        "phase": 2,
+        "lease_target": 147,
+        "completed_serial": 137,
+        "granted_ticket": 151
+      },
+      {
+        "cycle": 5998730,
+        "phase": 2,
+        "lease_target": 147,
+        "completed_serial": 138,
+        "granted_ticket": 152
+      },
+      {
+        "cycle": 6012140,
+        "phase": 2,
+        "lease_target": 147,
+        "completed_serial": 140,
+        "granted_ticket": 153
+      },
+      {
+        "cycle": 6019796,
+        "phase": 2,
+        "lease_target": 147,
+        "completed_serial": 141,
+        "granted_ticket": 154
+      },
+      {
+        "cycle": 6028948,
+        "phase": 2,
+        "lease_target": 147,
+        "completed_serial": 141,
+        "granted_ticket": 155
+      },
+      {
+        "cycle": 6044296,
+        "phase": 2,
+        "lease_target": 147,
+        "completed_serial": 141,
+        "granted_ticket": 156
+      },
+      {
+        "cycle": 6053080,
+        "phase": 2,
+        "lease_target": 147,
+        "completed_serial": 142,
+        "granted_ticket": 157
+      },
+      {
+        "cycle": 6059990,
+        "phase": 2,
+        "lease_target": 147,
+        "completed_serial": 143,
+        "granted_ticket": 158
+      },
+      {
+        "cycle": 6065570,
+        "phase": 2,
+        "lease_target": 147,
+        "completed_serial": 143,
+        "granted_ticket": 159
+      },
+      {
+        "cycle": 6069339,
+        "phase": 2,
+        "lease_target": 147,
+        "completed_serial": 143,
+        "granted_ticket": 160
+      },
+      {
+        "cycle": 6081350,
+        "phase": 2,
+        "lease_target": 148,
+        "completed_serial": 145,
+        "granted_ticket": 161
+      },
+      {
+        "cycle": 6105124,
+        "phase": 2,
+        "lease_target": 154,
+        "completed_serial": 147,
+        "granted_ticket": 162
+      },
+      {
+        "cycle": 6113335,
+        "phase": 2,
+        "lease_target": 154,
+        "completed_serial": 147,
+        "granted_ticket": 163
+      },
+      {
+        "cycle": 6116391,
+        "phase": 2,
+        "lease_target": 154,
+        "completed_serial": 147,
+        "granted_ticket": 164
+      },
+      {
+        "cycle": 6132952,
+        "phase": 2,
+        "lease_target": 154,
+        "completed_serial": 147,
+        "granted_ticket": 165
+      },
+      {
+        "cycle": 6139677,
+        "phase": 2,
+        "lease_target": 154,
+        "completed_serial": 147,
+        "granted_ticket": 166
+      },
+      {
+        "cycle": 6153874,
+        "phase": 2,
+        "lease_target": 154,
+        "completed_serial": 147,
+        "granted_ticket": 167
+      },
+      {
+        "cycle": 6160533,
+        "phase": 2,
+        "lease_target": 154,
+        "completed_serial": 147,
+        "granted_ticket": 168
+      },
+      {
+        "cycle": 6173107,
+        "phase": 2,
+        "lease_target": 154,
+        "completed_serial": 147,
+        "granted_ticket": 169
+      },
+      {
+        "cycle": 6185337,
+        "phase": 2,
+        "lease_target": 154,
+        "completed_serial": 147,
+        "granted_ticket": 170
+      },
+      {
+        "cycle": 6195455,
+        "phase": 2,
+        "lease_target": 154,
+        "completed_serial": 147,
+        "granted_ticket": 171
+      },
+      {
+        "cycle": 6219616,
+        "phase": 2,
+        "lease_target": 161,
+        "completed_serial": 152,
+        "granted_ticket": 172
+      },
+      {
+        "cycle": 6227872,
+        "phase": 2,
+        "lease_target": 161,
+        "completed_serial": 154,
+        "granted_ticket": 173
+      },
+      {
+        "cycle": 6239362,
+        "phase": 2,
+        "lease_target": 161,
+        "completed_serial": 154,
+        "granted_ticket": 174
+      },
+      {
+        "cycle": 6244925,
+        "phase": 2,
+        "lease_target": 161,
+        "completed_serial": 155,
+        "granted_ticket": 175
+      },
+      {
+        "cycle": 6250891,
+        "phase": 2,
+        "lease_target": 161,
+        "completed_serial": 157,
+        "granted_ticket": 176
+      },
+      {
+        "cycle": 6257186,
+        "phase": 2,
+        "lease_target": 161,
+        "completed_serial": 159,
+        "granted_ticket": 177
+      },
+      {
+        "cycle": 6290704,
+        "phase": 2,
+        "lease_target": 163,
+        "completed_serial": 161,
+        "granted_ticket": 179
+      },
+      {
+        "cycle": 6297070,
+        "phase": 2,
+        "lease_target": 163,
+        "completed_serial": 162,
+        "granted_ticket": 180
+      },
+      {
+        "cycle": 6648602,
+        "phase": 2,
+        "lease_target": 167,
+        "completed_serial": 163,
+        "granted_ticket": 181
+      },
+      {
+        "cycle": 6655479,
+        "phase": 2,
+        "lease_target": 167,
+        "completed_serial": 164,
+        "granted_ticket": 182
+      },
+      {
+        "cycle": 6662856,
+        "phase": 2,
+        "lease_target": 167,
+        "completed_serial": 166,
+        "granted_ticket": 183
+      },
+      {
+        "cycle": 6677500,
+        "phase": 2,
+        "lease_target": 168,
+        "completed_serial": 167,
+        "granted_ticket": 184
+      },
+      {
+        "cycle": 6762216,
+        "phase": 2,
+        "lease_target": 169,
+        "completed_serial": 168,
+        "granted_ticket": 186
+      },
+      {
+        "cycle": 6792699,
+        "phase": 2,
+        "lease_target": 170,
+        "completed_serial": 169,
+        "granted_ticket": 188
+      },
+      {
+        "cycle": 6832084,
+        "phase": 2,
+        "lease_target": 171,
+        "completed_serial": 170,
+        "granted_ticket": 190
+      },
+      {
+        "cycle": 6915954,
+        "phase": 2,
+        "lease_target": 172,
+        "completed_serial": 171,
+        "granted_ticket": 192
+      },
+      {
+        "cycle": 7268825,
+        "phase": 2,
+        "lease_target": 174,
+        "completed_serial": 172,
+        "granted_ticket": 194
+      }
+    ],
+    "full_context_bundles": 174,
+    "abi": "AJ02",
+    "status": "PASS_ORDERED_TASK_SOURCE_AND_OWNERSHIP",
+    "jobs": 174,
+    "legacy_acquires": 195,
+    "repairs": 22,
+    "input_triangles": 1343,
+    "phases": {
+      "1": {
+        "jobs": 98,
+        "input_triangles": 772,
+        "repairs": 22
+      },
+      "2": {
+        "jobs": 76,
+        "input_triangles": 571,
+        "repairs": 0
+      }
+    },
+    "original_LOAD_calls": 708,
+    "exact_raw_contexts": 652,
+    "legacy_raw_contexts": 478,
+    "checks": [
+      "Committed snapshot reconstructed from both M10K write sources, exact read/packet payload checks, no raw reads or snapshot writes after detachment, and real legacy raw work concurrent with old output while completed sequence remains unchanged.",
+      "Exact original LOAD call identity/order, upload-to-call binding, immutable VTX/TRI ELF bytes versus accepted PSRAM source snapshots.",
+      "Independent dead-slot suffix traversal, scoped shader flag/UV constraints, full context ingress-to-handshake identity; all consumed raw transform inputs equal same-ELF baseline at exact CPU LOAD call.",
+      "Every ordinary input word forwarded exactly; every generated packet stored within owning task; output bytes bind actual FIFO handshakes.",
+      "AJ02 priority grants before requested-prefix completion; indivisible full-context/job ownership; legacy lease acquire/grant/release and repair token ACK/DATA/END checks; matching complete sequences and no outstanding ownership at final boundary."
+    ],
+    "source_sha256": {
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/native-v2/frozen/src/fpga/common/gpu_mesh_job_front.v": "8257e2cfe49d7d4186206fa539d7563de829cd63a695a0ebefefca0f631a3d99",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/native-v2/frozen/src/fpga/common/geometry_async_mesh.v": "a0dfbfb6b047c1be06dc2bff10df9071ecbebe73cbf355579cff3256098cf123",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/native-v2/frozen/src/fpga/common/geometry_mesh_packet.v": "59781cee057d8fbeaec43f96ed9eb4cca8b44484be8dd125f0466a1080b694fc",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/native-v2/frozen/src/fpga/common/geometry_mesh_task_ctrl.v": "49a70c3174f91d698916dd6eca0e826f00e91a6f641cfc015ed30c0848740133",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/native-v2/frozen/src/fpga/common/geometry_mesh_stream.v": "18947ec0aed3901031e03b536815cc6f6165617e7f52a036377e8ddbfa8fa7b7",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app/.obj/sm64-priority-mesh-v1-perfdiag/app.elf": "abcdf9bfb5729edb5fa96489c543b203cfba8f721b0a5b3043166475183ec8bd",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app/evidence/app-build-v1/build-result.json": "3ef1e327ae74a9c79537ad23b3ebcd1f0b947ec820caf909edd502a69242fdb7",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/async_lifetime_v2.py": "e43f390f4df77573118523bdf051b0d0cc7ac0a506e4e2850091ddf18e837431"
+    }
+  },
+  "status": "PASS_AJ02_SAME_ELF_FULL_NATIVE_FUNCTIONAL_AND_ORDERED_SEMANTICS",
+  "fixture": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/fixture-v1",
+  "fixture_manifest_sha256": "098729a5a92c214be89e52ef1cdacf3865deccb0ffa4c9c666f34dca409f556b",
+  "evidence_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/input.cfg": "1803f981687cae471d2592fe06963edbbf3e154e986da692cfa0cbb19e52f832",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/run.log": "97bb8a73aeddc461d9ed96a63b3059f939eec2e2188f605bb1c79531d919ec31",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/prepared-async.json": "464b1dea480f71212d2253eb65a220657d0eb4eb91c57fdf7a30a5b53cded37f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/prepared-mesh.json": "288f4d99c6e5d7be9b79b05c9e8c1e5ce82b592eb4e25ab009c83d05c5ee2230",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/prepared-memory.json": "1b1cbdd739343e49ba19b4f319c23dee11e1525917336f0a8ca3c953c69b51c5",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/prepared-front.json": "129e447a1f43ff6a1236b0211fbe819f351f68bda13e7e583b7670cbe37ff9f1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/commands.bin": "701e0a0fe3f0f2ade5911bc02de9f8d6f009cd5b1fba5002ab31342679acd27e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/mmio.tsv": "088f716a3d4cd041fbbff985cda0453cba8e938f5d81ba091662ac350040e897",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/result.json": "85d06e862139e61d93842f1eda27b719b71647c8f92f66464e04f2881ca66764",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/pc.csv": "f06c5d9550631954b09e8a2fb46d8999362cadac7e22bbc0ecbc30309d3ebc55",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/async-events.tsv": "14b58ec5edd8eac72294d0c547eb5830fc31b6d53cff7336184ee913599faee6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/worker-commands.bin": "f521d12b943e8c3993355c33aa71c94b7a1856f5bc0436deae8c4356a913d6b7",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/worker-words.tsv": "398eb7947d6ce9357d274f39150a3b9381cb95a4acb448744e7f00f0c0a6d463",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/job-sources.tsv": "1452575cc72d76fe00b7e48d584507e7194fabc797ac5d1f67b6988b1ceebf1c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/snapshot-stores.tsv": "ae950bc1bc639ebd521d61acbe9554f25cd1eec51148d0541db6f3638b771e17",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/vtx-calls.tsv": "dd35c847c60aed70f0f71c54e03459b17e552478413c731966a9abe4912ca0c6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/boundaries.tsv": "0a4288d052a0e6175e279f07646f28546e1526234564537ffd1cc8b3c23ec300",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/entry-regs.bin": "a0a0baf57a25a3b68fd6e698da38e7d3ced3aa34df4cfae7b49459cb4c647e00",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/entry-2.bin": "7afe5030144d7625a9141923c5857afff0d45a0a0d8dba2bcb28167c1190e94b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/frame-1.bin": "b7a2e67c63ec5f1ce5f787bedad2fff8743d2c7a1edadaf9bcb8d274fe3ac5bc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/frame-1-buffer0.bin": "b7a2e67c63ec5f1ce5f787bedad2fff8743d2c7a1edadaf9bcb8d274fe3ac5bc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/frame-1-buffer1.bin": "5087dc62a353e03130310ca0925575785854d33dc6233b6dfb158ba0c07bfeb4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/frame-1-buffer2.bin": "1a74bac257b8449c58783ab93cc39ec07d83ba9ff9289e19d1bc49310b58fe4a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/entry-3.bin": "6f0565d1fae99b56412d455d60638b380c9e551cae5d47de009674cd2c2e5270",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/frame-2.bin": "8988e7dc092d095848a747606969533a477157ab9dca917313200f90991538e3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/frame-2-buffer0.bin": "0fc3c70f9d86c5f4a655efa383ca56a2258c619a6ec004e8f80d684e476d210e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/frame-2-buffer1.bin": "a42df17ef68b61162980c48170bf3a307ce909b7d1c1ba265f1b3a1b2b1bb8eb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/frame-2-buffer2.bin": "8988e7dc092d095848a747606969533a477157ab9dca917313200f90991538e3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/surface-arena.bin": "1da7c6d5dfef9cabd3b5ee2cf3d298c103c9d0f8692e355a09a9369e31d26bdb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/surface-arena.physical.bin": "1da7c6d5dfef9cabd3b5ee2cf3d298c103c9d0f8692e355a09a9369e31d26bdb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/surface-arena.json": "d6ed70ba0d3e99d5d7997dda6ae8f6179c2ff467f17372ca8e977be9e5f30831",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/async-hint-stats.bin": "ed48f2386a4fc3a53ed89e1bc6a6ab82487d2b4d46bad9619f8cff8a358a57b4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/async-hint-stats.physical.bin": "ed48f2386a4fc3a53ed89e1bc6a6ab82487d2b4d46bad9619f8cff8a358a57b4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/async-hint-stats.json": "b2eaa96cc4609e21e6c95c76585ed5d7d1e8eb0a10a6aee5b2f760ec9bcf6320",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/import-stats.bin": "f1c19314208ec565b4e50664b650fc0d256b4eb5a177acdccefc78bef7543a6c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/import-stats.physical.bin": "f1c19314208ec565b4e50664b650fc0d256b4eb5a177acdccefc78bef7543a6c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/import-stats.json": "f37809360d41b51edb748e36cd1b215944daee632355941b7892583df4c6b695",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/front-stats.bin": "f366f82b0177478c240783195f72602e8b14b8f4f683508ef88b05682d8ed539",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/front-stats.physical.bin": "f366f82b0177478c240783195f72602e8b14b8f4f683508ef88b05682d8ed539",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/front-stats.json": "b0fa6bd6369e7721b5b30b2362f54fa138e518fe3f788bb81f6047e94f14b24d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/mesh-stats.bin": "9399924550beb743b23749d236bdd1cd58e7a44aab05d8ec598be1117d4a3547",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/mesh-stats.physical.bin": "9399924550beb743b23749d236bdd1cd58e7a44aab05d8ec598be1117d4a3547",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/mesh-stats.json": "f89fe7453dfe602ade419d41d3afe2d5f1be9848664750edde2f77aef3cbe8b7",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/async-stats.bin": "da2166784b59268edea66b278a654ed3ca72d46fc061f6815ff14243721a485c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/async-stats.physical.bin": "da2166784b59268edea66b278a654ed3ca72d46fc061f6815ff14243721a485c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/async-stats.json": "d017a7d4ef7da4293ed248ad2604b3642165490d3a81c01d9a166a702a34d1bc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/frame.bin": "0fc3c70f9d86c5f4a655efa383ca56a2258c619a6ec004e8f80d684e476d210e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/stalls.json": "7ec00f11efab8de9afbff9d1ef67b539de53b594b28b3b1b3c244ecadd412182",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/stalls-pcs.csv": "6b9f9d99cce80f37d2cc9ddaa790f1de88281ce0e6afffd07727a694f9813bd3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/stalls-pages.csv": "867bb50a3c8da4bc8b6f8c946fb1c97e551bac5263c1ffa89c08a596188cc017",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/first-word.json": "21094f1a056231bbdb5964df9d1aa96167861a8b9ab73c8f5b2833303eadf2f1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/gpu-profile.json": "fbf33307a88e35e5180866a5d5f32441a318bcc39692365e4f79c99d3d009619",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/gpu-profile-timeline.csv": "490ebcce9a6cc021081a47c854c59dd15073f7ed9924d6348f36541331ca101e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/gpu-profile-events.csv": "2bdf6aee34a394d1a803dbcaa7da0bb52ae83cb8d6c74b95867b0008ea72e34c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/pc-phase-1.csv": "dad14b3c05a2e264f02a1ed23f2b684cabbec208696261068b437b8f02ae0156",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/pc-phase-2.csv": "3d5a75717d989a1401e1228882f56c5f780ebab319174fae1964c7e37b3191d9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/async-overlap.tsv": "56d36b9115ce8e72aceaabcfff1ef4945b806fabeb030a7078c0cbdb6acf62ce",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/process.json": "b1a67655553a46384207f655eb468b0bba43b58b2bccf22905cb364ca40011dc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/run/manifest.json": "a2c4be91cfd1751132443265016c5744d6283d46c0ea2e6583d7ab45957e53ae"
+  },
+  "checker_sources_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/check_replays.py": "ffafce5e635cb3f6dbe60be7f57c64170314a8f2dcff286b1cc194037d7d30c7",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/check_replays.py": "0b136a3a7d377af3e1268975d33995380fba9a5e275dbfdc2cd8e01497f70ba3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/tests/check_replays.py": "4dbf49fc2ccf0a416b21eadf4978dd93a1bd731a316e7e30c44b7caa140c92f9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/gpu-bottleneck-v1/review/check_runs.py": "cc73ef3582f0c4594162e3635bbb6704089ad5879f2c36441b8de04a5cef9793",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/async_lifetime_v2.py": "e43f390f4df77573118523bdf051b0d0cc7ac0a506e4e2850091ddf18e837431"
+  },
+  "normalization": "Only known framebuffer bases/flip indices, the one prepared zero-clear, known s5 timestamp at later frame entries and redundant sticky material/vertex preparation. Every actual indexed draw resolves exact vertex payload and material/object state; other side effects retain exact order. Registers/FCSR otherwise remain strict.",
+  "limitations": [
+    "Two prepared, GPU-drained full game/render/audio intervals on actual native CPU and raster RTL.",
+    "Fixed synthetic display/audio arrivals and bounded service implementations; not sustained Pocket FPS or full OS/PCM/interrupt qualification.",
+    "No ideal producer, instruction-cost subtraction or assumed overlap is credited as a frame-time gain.",
+    "Physical area, timing and hardware behavior require separate qualification after measured benefit."
+  ]
+}

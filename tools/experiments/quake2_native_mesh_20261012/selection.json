@@ -1,0 +1,228 @@
+{
+  "status": "DEPLOYED_EXPERIMENTAL_TRIAL",
+  "selected_core_bundle": "core-v4",
+  "selected_app_bundle": "app",
+  "selected_physical_evidence": "qualification/physical/fit-silent-v4/result.json",
+  "selected_gpu_validation": "qualification/final-result-core-v4.json",
+  "worker_sha256": "829827085023e6bf62832595e8f75ee57558d232e478640a6e65b4c728abdca5",
+  "core_bundle_manifest_sha256": "3c89b2a398aded2ef27e921a1ae04fd7f6b60fdaaead41d08bfd30f6c8922cea",
+  "app_bundle_manifest_sha256": "ef544ab8936145742361f0b8d7edc85ebb92154d58584110059f0f69498b5c1e",
+  "physical": {
+    "fit": "/tmp/quake2-native-mesh-20261012/fit-silent-v4",
+    "phase_returncodes": {
+      "map": 0,
+      "fit": 0,
+      "asm": 0,
+      "sta": 0,
+      "corners": 3
+    },
+    "configured_clock_MHz": 100,
+    "seed": 2,
+    "constrained_timing_passed": false,
+    "source_recipe_sha256": "619be99542c0bc47cc5f1203228460dc60adce3e47a08b1dd124108befaa5eb7",
+    "report_sha256": {
+      "build-receipt.json": "958076e806312e6ae85e18cb0bd62f2c245c5864ccd986a43af3d3a7b92000dc",
+      "fit.log": "c45ef54623916f430b26738dba83552b61bacaaff40f4ed564bb9bf9e31f98b6",
+      "corners.log": "09cb0f48494a3ca207070e8c5cc4c8d7cfa996ab2dfc6934138423ce074f7ffe",
+      "src/fpga/targets/pocket/output_files/ap_core.map.summary": "e27076201b92768191cb355866df487b6076c58d71ecd4acff345ab0882c4cec",
+      "src/fpga/targets/pocket/output_files/ap_core.fit.summary": "6141e3b15da394d8e7ede22e17cac6366cf2ba5d9c02c03343664d53ef521ccc",
+      "src/fpga/targets/pocket/output_files/ap_core.sta.summary": "76d1d9a0fcd53f711c08f6171aa5adccdfed6fc77620ff12bccd93f145f82fa5",
+      "src/fpga/targets/pocket/output_files/ap_core.sta.rpt": "e18f90e26d648ed370d409b85d17a69aa635cc77c1ee28958070108e82b48045",
+      "timing/clocks.tsv": "01e59b605673fa20d01b57130218c3fc927e3fd8bded91f3a566d43a8f896f4c",
+      "timing/fast_0_hold.rpt": "9d865fc148c71b81273966c8e175baab1baa514dc1c3d714d90bb49bf28e72fd",
+      "timing/fast_0_pulse_width.rpt": "2abc1f2d38351a054f7eb829acf5db8164742601b5e8c63a463ae8ea0ccd2b19",
+      "timing/fast_0_recovery.rpt": "dfdf93b838708451067cd7900cc4f7a0735bd2d54651f4a79ad4a8be06379dfd",
+      "timing/fast_0_removal.rpt": "e5c5a4a0e41c5153def9c9e5d6583023386d02881978a93ef4642da2189d3093",
+      "timing/fast_0_setup.rpt": "6bd7e4093695a583f8dd2ed42e9ed8dd30c71a572ce1644e2e2d02cddfdcd943",
+      "timing/fast_85_hold.rpt": "aad83508048512bcc7cd7d1bb8ee39cb1d08d4d48b645bbde98ed0c26c51911f",
+      "timing/fast_85_pulse_width.rpt": "2abc1f2d38351a054f7eb829acf5db8164742601b5e8c63a463ae8ea0ccd2b19",
+      "timing/fast_85_recovery.rpt": "5c0848cecaac5a081670da64c472fd8be8fd4c84e6cf3cdb356a48e3e16f509c",
+      "timing/fast_85_removal.rpt": "075d0b1e1a1cf1dca77cc6135159961b6497c801b010ac35b461a15a83da30c0",
+      "timing/fast_85_setup.rpt": "e6fd3e8ccb6c09d5e89ce68c753cdc8b8acb872c76c85a5bb45651b28428b064",
+      "timing/slow_0_hold.rpt": "e05a01c626917cc40e926ba0abdaa41c98ef7bc51edbfc976933998a8c92e5a1",
+      "timing/slow_0_pulse_width.rpt": "2abc1f2d38351a054f7eb829acf5db8164742601b5e8c63a463ae8ea0ccd2b19",
+      "timing/slow_0_recovery.rpt": "2ad672ec40318fe3f0eb3911ab3597ea6bff846f88424faabd2409457c409820",
+      "timing/slow_0_removal.rpt": "23baa1af33505983dd69dcc4e30d3ed016a5e33e7775981db2b6d4b8eb9cf46c",
+      "timing/slow_0_setup.rpt": "5989eb7a864d8b9c55e1050ab4b873630584a311a46d0256c0bbda61dcc965fb",
+      "timing/slow_85_hold.rpt": "6fc87ef34ec062a6125fd771ce5f88daaf2dd1f8ca6322f34ac6ac4a3d63265b",
+      "timing/slow_85_pulse_width.rpt": "2abc1f2d38351a054f7eb829acf5db8164742601b5e8c63a463ae8ea0ccd2b19",
+      "timing/slow_85_recovery.rpt": "00219c01b2127064d1b98bb7d772fea7d1d5290c27bfe7c49369b041b386c953",
+      "timing/slow_85_removal.rpt": "aab2aa1099672ebc0892adad2c54c5032d819b74d1583f1bef2af62e8dcda1dd",
+      "timing/slow_85_setup.rpt": "5a1d1c1739397388525cfb16a3bfb27a2b64e60b938ae08755d424362a5f2685",
+      "timing/summary.tsv": "c45b51855b9e1e969e582131de15122cc64e6734a7b310204acca15515eee572"
+    },
+    "deployed": false,
+    "fit_successful": true,
+    "ALMs": {
+      "used": 17115,
+      "available": 18480
+    },
+    "M10Ks": {
+      "used": 296,
+      "available": 308
+    },
+    "DSPs": {
+      "used": 35,
+      "available": 66
+    },
+    "main_clock_restricted_Fmax_MHz": {
+      "slow_85": 92.27,
+      "slow_0": 91.47
+    },
+    "all_corner_checks": [
+      {
+        "model": "slow",
+        "temperature": "85",
+        "check": "setup",
+        "slack": "-0.838"
+      },
+      {
+        "model": "slow",
+        "temperature": "85",
+        "check": "hold",
+        "slack": "0.300"
+      },
+      {
+        "model": "slow",
+        "temperature": "85",
+        "check": "recovery",
+        "slack": "3.203"
+      },
+      {
+        "model": "slow",
+        "temperature": "85",
+        "check": "removal",
+        "slack": "0.963"
+      },
+      {
+        "model": "slow",
+        "temperature": "85",
+        "check": "pulse_width",
+        "slack": "0.500"
+      },
+      {
+        "model": "slow",
+        "temperature": "0",
+        "check": "setup",
+        "slack": "-0.933"
+      },
+      {
+        "model": "slow",
+        "temperature": "0",
+        "check": "hold",
+        "slack": "0.295"
+      },
+      {
+        "model": "slow",
+        "temperature": "0",
+        "check": "recovery",
+        "slack": "3.448"
+      },
+      {
+        "model": "slow",
+        "temperature": "0",
+        "check": "removal",
+        "slack": "0.898"
+      },
+      {
+        "model": "slow",
+        "temperature": "0",
+        "check": "pulse_width",
+        "slack": "0.500"
+      },
+      {
+        "model": "fast",
+        "temperature": "85",
+        "check": "setup",
+        "slack": "0.948"
+      },
+      {
+        "model": "fast",
+        "temperature": "85",
+        "check": "hold",
+        "slack": "0.038"
+      },
+      {
+        "model": "fast",
+        "temperature": "85",
+        "check": "recovery",
+        "slack": "6.604"
+      },
+      {
+        "model": "fast",
+        "temperature": "85",
+        "check": "removal",
+        "slack": "0.366"
+      },
+      {
+        "model": "fast",
+        "temperature": "85",
+        "check": "pulse_width",
+        "slack": "0.500"
+      },
+      {
+        "model": "fast",
+        "temperature": "0",
+        "check": "setup",
+        "slack": "0.964"
+      },
+      {
+        "model": "fast",
+        "temperature": "0",
+        "check": "hold",
+        "slack": "0.009"
+      },
+      {
+        "model": "fast",
+        "temperature": "0",
+        "check": "recovery",
+        "slack": "7.051"
+      },
+      {
+        "model": "fast",
+        "temperature": "0",
+        "check": "removal",
+        "slack": "0.335"
+      },
+      {
+        "model": "fast",
+        "temperature": "0",
+        "check": "pulse_width",
+        "slack": "0.500"
+      }
+    ],
+    "worst_setup_ns": -0.933,
+    "worst_hold_ns": 0.009,
+    "worst_recovery_ns": 3.203,
+    "worst_removal_ns": 0.335,
+    "worst_pulse_width_ns": 0.5,
+    "bitstream_sha256": "a74fd5479299e9cb6d3c3121becb7e936ff6c09498b38887822e44ea5db1dbb1",
+    "raw_rbf_sha256": "e667b279658424583ba7704fb626149bf706cea9068b0da5703e0f1827e9c0fe"
+  },
+  "audio": "Temporarily disabled; mixer and PCM FIFO removed, silent clocked output and FIFO-full safeguard",
+  "hardware_FPS_measured": false,
+  "full_seed_sweep_performed": false,
+  "deployed": true,
+  "deployment_authorization": "User: sd card mounted, following the ready experimental build and deployment context",
+  "package": "../../../docs/measurements/quake2-native-mesh-20261012/deployment-native-v3",
+  "selection_reason": "V4 is the best tested same-seed fit:92.27/91.47MHz main-clock restricted Fmax, all hold/recovery/removal/pulse-width checks positive. V5 logical simplification is identical in simulation but physically slower88.02/85.30MHz. Configured100MHz setup still fails; this is an explicit experimental trial.",
+  "deployment": {
+    "deployed": true,
+    "normal_app": true,
+    "readback_sha256": {
+      "Assets/quake2/common/quake2.elf": "44f668ef55af64b579f3800d57567b7da7a2b3f9e16c325976d021d9237595b4",
+      "Cores/thinkelastic.quake2/os30.rbf_r": "a74fd5479299e9cb6d3c3121becb7e936ff6c09498b38887822e44ea5db1dbb1",
+      "Cores/thinkelastic.quake2/core.json": "6760fc8eb91c4d4b3992ea7c3ad125cde76cec0f71d37479e64553de89b415c4",
+      "Assets/quake2/common/os.bin": "054abd4b3d2c57d55b4ecec23f2fcaa3703206db3df14ebe7793c22941d34ef7",
+      "Cores/thinkelastic.quake2/loader.bin": "fc1f8d37eb0fb322006b4428f0b59d2801c9b74978bd3f24103f5f9bbfca3c99"
+    },
+    "backup_verified": true,
+    "backup": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-native-mesh-20261012/deployment-native-v3/backups/before-20261012T222751Z-n3_5ykzd",
+    "prepared_and_fixture_tested_manifest_sha256": "2dc5eaa933466d9075989a471a4e754efe608b4f12eaf75a2b78406f759355b4",
+    "receipt": "last-deployment.json",
+    "safely_unmounted": true,
+    "unmount_result": "Unmounted /dev/sda1."
+  },
+  "deployment_manifest_sha256": "35d875817a2af757d2f922af52ccccb67ed43dedb150da8d278f0dc4044838e7",
+  "physical_Pocket_tested": false
+}

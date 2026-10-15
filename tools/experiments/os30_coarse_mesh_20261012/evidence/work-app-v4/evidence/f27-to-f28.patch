@@ -1,0 +1,222 @@
+--- a/src/sm64/sm64/src/pc/gfx/gfx_pc.c
++++ b/src/sm64/sm64/src/pc/gfx/gfx_pc.c
+@@ -1118,6 +1118,11 @@
+     uint16_t dead_after, prefer_legacy;
+ };
+ static struct MeshTask mesh_tasks[512];
++/* A contextual proof must never change source-only MeshTask.dead_after.
++ * kind:0 empty,1 caller-independent success,2 caller-bound success,3 failure. */
++struct AsyncDeadProof { Gfx *return_command; unsigned kind; };
++static struct AsyncDeadProof async_dead_proofs[512];
++static Gfx *async_return_command;
+ /* Keep the hot topology layout unchanged. These optional physical offsets
+  * belong to one exact immutable task, source shape and live pool generation. */
+ struct AsyncTaskSources {
+@@ -1126,7 +1131,8 @@
+ };
+ static struct AsyncTaskSources async_task_sources[512];
+ struct AsyncGroup {
+-    Gfx *next;
++    Gfx *next,*return_command;
++    unsigned caller_sensitive;
+     uint32_t generation,hint_epoch,hint_cursor,descriptor_offset,loaded_mask;
+     uint16_t members,triangles;
+     uint32_t cull;
+@@ -1248,11 +1254,77 @@
+     }
+     return 0;
+ }
++/* Look past canonical-neutral state only while proving rows dead. The CPU
++ * dispatcher still executes each opcode, and GROUP still stops at state/list
++ * boundaries. Other-mode commands remain barriers because they can flush fog. */
++static __attribute__((cold,noinline)) unsigned gfx_async_dead_caller(
++        const Gfx *scan,unsigned count,const Gfx *return_command) {
++    uint32_t pending=count==32?0xffffffffu:((1u<<count)-1u);
++    const uintptr_t end=(uintptr_t)__EH_FRAME_BEGIN__;
++    const Gfx *returns[8];unsigned depth=0,external_return=0;
++    for(unsigned steps=0;steps<256;++steps) {
++        const uintptr_t p=(uintptr_t)scan;
++        if((p&7u)||p<(uintptr_t)&_start||p>end-8u)return 0;
++        const uint32_t a=scan->words.w0,b=scan->words.w1;
++        const unsigned op=a>>24;
++        if(op==(uint8_t)G_VTX) {
++            const unsigned n=(a>>12)&255u,limit=(a>>1)&127u;
++            if(!n||n>32||limit<n||limit>32)return 0;
++            pending&=~(n==32?0xffffffffu:((1u<<n)-1u)<<(limit-n));
++            if(!pending)return external_return?2u:1u;
++        } else if(op==(uint8_t)G_TRI1||op==(uint8_t)G_TRI2) {
++            const unsigned n=op==(uint8_t)G_TRI2?2u:1u;
++            for(unsigned t=0;t<n;++t) {
++                const uint32_t word=t?b:a;
++                for(unsigned shift=0;shift<=16;shift+=8) {
++                    const unsigned slot=((word>>shift)&255u)/2u;
++                    if(slot>=32||(pending&(1u<<slot)))return 0;
++                }
++            }
++        } else if(op==(uint8_t)G_DL) {
++            if(!(a&(1u<<16))) {
++                if(depth==8)return 0;
++                returns[depth++]=scan+1;
++            }
++            scan=(const Gfx *)(uintptr_t)b;continue;
++        } else if(op==(uint8_t)G_ENDDL) {
++            if(depth)scan=returns[--depth];
++            else {
++                if(external_return||!return_command)return 0;
++                scan=return_command;external_return=1;
++            }
++            continue;
++        } else {
++            switch(op) {
++            case 0xd7: case 0xfd: case 0xd9: case 0xfb:
++            case 0xf5: case 0xf2: case 0xf3: case 0xf4:
++            case 0xf0: case 0xfa: case 0xfc: case 0xf8:
++            case 0xe6: case 0xe7: case 0xe8: case 0xe9:
++                break;
++            default:return 0;
++            }
++        }
++        ++scan;
++    }
++    return 0;
++}
++static inline unsigned gfx_async_task_proof(const struct MeshTask *task) {
++    if(task->dead_after)return 1;
++    struct AsyncDeadProof *proof=&async_dead_proofs[task-mesh_tasks];
++    if(proof->kind==1)return 1;
++    if(proof->kind&&proof->return_command==async_return_command)
++        return proof->kind==2?2u:0u;
++    const unsigned result=gfx_async_dead_caller(task->next,
++        (task->source->words.w0>>12)&255u,async_return_command);
++    proof->return_command=async_return_command;
++    proof->kind=result?result:3u;
++    return result;
++}
+ static const struct MeshTask *gfx_async_route_task(const struct MeshTask *entry,int asynchronous,int account) {
+     if(!entry->next)return NULL;
+     /* Static routing proof/hint needs no dynamic material/context setup. Keep
+      * the original diagnostic accounting while skipping the larger helper. */
+-    if(asynchronous&&(entry->prefer_legacy||!entry->dead_after)) {
++    if(asynchronous&&(entry->prefer_legacy||!gfx_async_task_proof(entry))) {
+         if(account) {
+             ++gfx_async_stats[0];
+             if(entry->prefer_legacy)++gfx_async_hint_stats[3];
+@@ -1278,6 +1350,7 @@
+     }
+     if(!entry)return NULL;
+     entry->source=cmd;
++    memset(&async_dead_proofs[entry-mesh_tasks],0,sizeof(struct AsyncDeadProof));
+     async_task_sources[entry-mesh_tasks].vertices=NULL;
+     memset(&async_groups[entry-mesh_tasks],0,sizeof(struct AsyncGroup));
+     entry->prefer_legacy=0;
+@@ -1310,10 +1383,11 @@
+     return gfx_mesh_lookup_impl(cmd,asynchronous,1);
+ }
+ 
+-/* A group contains only the exact state-free tasks the old path could admit.
+- * Context/material eligibility is checked once by its first LOAD; no state,
+- * list or return opcode is consumed here. Each member retains the old complete
+- * dead-slot proof and has an immutable direct ELF vertex pointer. */
++/* A group contains only individually proven state-free tasks. Context and
++ * material eligibility are checked once by its first LOAD; no state, list or
++ * return opcode is consumed here. Each member has a bounded dead-slot proof
++ * and an immutable direct ELF vertex pointer. Caller-dependent proofs bind
++ * the cached group to this exact immediate continuation. */
+ static __attribute__((cold,noinline)) int gfx_async_group_refresh(
+         const struct MeshTask *first,struct AsyncGroup *group) {
+     const uintptr_t begin=(uintptr_t)first->source,end=(uintptr_t)group->next;
+@@ -1335,8 +1409,11 @@
+         generation=gfx_gpu_cram_source_generation();
+         const struct MeshTask *task=first;
+         Gfx *next=first->next;
+-        unsigned members=0,triangles=0;uint32_t mask=0;
+-        while(task&&members<32&&!task->prefer_legacy&&task->dead_after) {
++        unsigned members=0,triangles=0,caller_sensitive=0;uint32_t mask=0;
++        while(task&&members<32&&!task->prefer_legacy) {
++            const unsigned proof=gfx_async_task_proof(task);
++            if(!task->dead_after&&proof!=1)caller_sensitive=1;
++            if(!proof)break;
+             const unsigned count=(task->source->words.w0>>12)&255u;
+             const uintptr_t source=(uintptr_t)task->source->words.w1;
+             const uintptr_t end=(uintptr_t)__EH_FRAME_BEGIN__;
+@@ -1354,7 +1431,7 @@
+             mask|=count==32?0xffffffffu:((1u<<count)-1u);
+             next=task->next;
+             if(members==32||(next->words.w0>>24)!=(uint8_t)G_VTX)break;
+-            task=gfx_mesh_lookup_impl(next,1,0);
++            task=gfx_mesh_lookup_impl(next,0,0);
+         }
+         if(generation!=gfx_gpu_cram_source_generation()||epoch!=async_hint_epoch) {
+             ++gfx_async_group_stats[4];continue;
+@@ -1369,6 +1446,7 @@
+         }
+         if(epoch!=async_hint_epoch) {++gfx_async_group_stats[4];continue;}
+         group->next=next;group->generation=generation;group->hint_epoch=epoch;
++        group->caller_sensitive=caller_sensitive;group->return_command=async_return_command;
+         group->hint_cursor=async_hint_count;
+         group->descriptor_offset=offset;group->loaded_mask=mask;
+         group->members=members;group->triangles=triangles;group->cull=cull;
+@@ -1383,6 +1461,7 @@
+     struct AsyncGroup *group=&async_groups[first-mesh_tasks];
+     const uint32_t generation=gfx_gpu_cram_source_generation();
+     if(group->members&&group->generation==generation&&group->cull==cull&&
++       (!group->caller_sensitive||group->return_command==async_return_command)&&
+        (group->hint_epoch==async_hint_epoch||gfx_async_group_refresh(first,group))) {
+         ++gfx_async_group_stats[2];
+         return group->members>1?group:NULL;
+@@ -3512,7 +3591,7 @@
+         const Vtx *vertices,float aspect,int eager_fog) {
+     ++gfx_async_stats[0];
+     if(async_armed->prefer_legacy){++gfx_async_hint_stats[3];return 0;}
+-    if(!async_armed->dead_after){++gfx_async_stats[1];return 0;}
++    if(!gfx_async_task_proof(async_armed)){++gfx_async_stats[1];return 0;}
+     if(!triangle_material_ready||!triangle_vc_elig){++gfx_async_stats[2];return 0;}
+     const uintptr_t p=(uintptr_t)vertices,end=(uintptr_t)__EH_FRAME_BEGIN__;
+     const unsigned lit=(rsp.geometry_mode&G_LIGHTING)!=0;
+@@ -4152,7 +4231,7 @@
+ #endif
+ }
+ 
+-static void gfx_run_dl(Gfx* cmd) {
++static __attribute__((noinline)) void gfx_run_dl(Gfx* cmd,Gfx *return_command) {
+ #if LOAD_ALIAS_ENABLED
+     /* A display-list entry is a useful repair boundary. Ordinary commands
+      * need no MMIO poll: raw LOAD, ring/fence waits, subsequent list entries
+@@ -4235,7 +4314,7 @@
+                 mesh_raw_completed=0;async_submitted=0;
+                 async_armed=NULL;
+                 if(gfx_gpu_async_supported()) {
+-                    mesh_armed=NULL;async_armed=gfx_mesh_lookup(cmd);
++                    mesh_armed=NULL;async_return_command=return_command;async_armed=gfx_mesh_lookup(cmd);
+                 } else mesh_armed=gfx_mesh_lookup(cmd);
+ #endif
+                 gfx_sp_vertex(C0(12, 8), C0(1, 7) - C0(12, 8), seg_addr(cmd->words.w1));
+@@ -4258,7 +4337,7 @@
+             case G_DL:
+                 if (C0(16, 1) == 0) {
+                     // Push return address
+-                    gfx_run_dl((Gfx *)seg_addr(cmd->words.w1));
++                    gfx_run_dl((Gfx *)seg_addr(cmd->words.w1),cmd+1);
+                 } else {
+                     cmd = (Gfx *)seg_addr(cmd->words.w1);
+                     --cmd; // increase after break
+@@ -4604,7 +4683,7 @@
+ #ifdef TARGET_POCKET
+     uint32_t _t1 = PROF_TMR();
+ #endif
+-    { SM64_PERF_SCOPE(SM64_PERF_DL); gfx_run_dl(commands); }
++    { SM64_PERF_SCOPE(SM64_PERF_DL); gfx_run_dl(commands,NULL); }
+ #if LOAD_ALIAS_ENABLED
+     gfx_gpu_queued_front_release();
+     gfx_gpu_queued_front_service();
+--- a/src/sm64/pocket/perf_pocket.c
++++ b/src/sm64/pocket/perf_pocket.c
+@@ -381,7 +381,7 @@
+ #if SM64_PERF_DETAILS
+     print_text(12,210,"PERF P3 VERT");
+ #else
+-    print_text(12,210,"PERF F27 GROUP");
++    print_text(12,210,"PERF F28 GROUP");
+ #endif
+     if(!s->valid) {
+         print_text(12,178,"WAIT 5 SECONDS IN LEVEL");

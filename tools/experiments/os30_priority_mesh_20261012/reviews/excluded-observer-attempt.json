@@ -1,0 +1,15 @@
+{
+  "status": "EXCLUDED_PRE_BINDING_OBSERVER_ATTEMPT_NO_MEASUREMENT",
+  "attempt_directory": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23",
+  "observed_directory_empty": true,
+  "failure_description": "The parent report records a generated-header alias assertion before observer binding/build. The accepted hook resolves the Verilator alias and records actual physical snapshot RAM writes.",
+  "failed_source_receipt_available": false,
+  "measured_results_used": false,
+  "accepted_supplemental": "validation/candidate-v2-f23-a2/check-independent-v2.json",
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/REPORT.txt": "82d4407cdba463cef78cb3e905a4767913fb95167f57a114390491532f4179b3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/async_hooks_v2.py": "702ab6a79af7a31c6cce3431ce3532908e72cde5a07df76db1844025db592fe8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/replay_v2.py": "3a166f3137d8b677f71ec1a095087faf458dafbd04345d7e67282a455e7bf1b9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/check-independent-v2.json": "366dcecc60b750a3e4a2b2e9ed3e7bd42025790bc993ab4b1a413b935f9decfe"
+  }
+}

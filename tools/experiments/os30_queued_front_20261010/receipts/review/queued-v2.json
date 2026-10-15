@@ -1,0 +1,147 @@
+{
+  "binding": {
+    "bound_files": 40,
+    "model_sources": 175
+  },
+  "health": {
+    "cycles": [
+      4104599,
+      4469437
+    ],
+    "latency_maxima": {
+      "0": {
+        "scan_latency": 0,
+        "audio_latency": 0,
+        "audio_queue_latency": 0
+      },
+      "1": {
+        "scan_latency": 386,
+        "audio_latency": 433,
+        "audio_queue_latency": 369
+      },
+      "2": {
+        "scan_latency": 411,
+        "audio_latency": 445,
+        "audio_queue_latency": 397
+      }
+    },
+    "gpu_counters_reconcile": true,
+    "commands": 5605,
+    "command_words": 38166
+  },
+  "frames": [
+    {
+      "frame": 1,
+      "buffer": 0,
+      "sha256": "b7a2e67c63ec5f1ce5f787bedad2fff8743d2c7a1edadaf9bcb8d274fe3ac5bc"
+    },
+    {
+      "frame": 2,
+      "buffer": 2,
+      "sha256": "a42df17ef68b61162980c48170bf3a307ce909b7d1c1ba265f1b3a1b2b1bb8eb"
+    }
+  ],
+  "register_differences": {
+    "entry-regs.bin": {},
+    "entry-2.bin": {
+      "21": [
+        3341286,
+        1809599433
+      ]
+    },
+    "entry-3.bin": {
+      "21": [
+        7813084,
+        1815768048
+      ]
+    }
+  },
+  "all_FCSR_and_FP_registers_exact": true,
+  "final_surface_pool_sha256": "e00885d05aabfb19fc2b40227387332b53b0c997f3b90547f0f50fee927a2b0f",
+  "untouched_buffer_history_exact": true,
+  "removed_reference_clear": [
+    {
+      "word": 23036,
+      "payload": [
+        270532608,
+        41943280,
+        41943040
+      ]
+    }
+  ],
+  "preparation": {
+    "probe_address": 288652872,
+    "probe_before": 2,
+    "probe_after": 0
+  },
+  "semantics": {
+    "indexed_draws": 1708,
+    "all_draws_and_state_exact": true
+  },
+  "queue": {
+    "runs": 162,
+    "released_generations": 154,
+    "snapshot_allocations": 154,
+    "snapshot_observations_after_raw_advanced": 116,
+    "protocol_errors": 0,
+    "final_snapshot_banks_empty": true
+  },
+  "raw_load_commands_exact": true,
+  "status": "PASS_QGF1_QUEUED",
+  "evidence_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/input.cfg": "415ba35a8b81d85ce18d80fffa024a101d196384dbdd5367f1c8fcd45afa3ffc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/run.log": "33c98d654c15fcc67919a6eb70e2454253d673a0ee754e9c2e429e4ffb77d486",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/prepared-memory.json": "66bc1730c206a65de2bbf08a44b571625d79ecac415fb33a00fa4bc157673ba9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/prepared-front.json": "25178bef30d9ff44d5e461bd38f70a25168d0a6740c33febc5d5731e46b7557a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/prepared-queue.json": "51ce9e164ef5a72c455515202d17deea078705ed71507ee0fa865651998828da",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/commands.bin": "724e0e5109c3c3dd99776a6ac5beb80b0a07a467e4b04ad2a922bfeef6c44eaf",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/mmio.tsv": "fcf1aaf7be2f3ac81415011829d732feb9d435fd209e02e34508ba12a664fca8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/result.json": "5cadb5f367183bca7d1e443f3b0ddf245b416ad3bd48960bca6d98703656adc5",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/pc.csv": "2331508418d02e3409486f7b725655bdb51fc1fe4eac64e8f7983314cc674bce",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/bank-events.tsv": "3a947eb0bf26e8b0143e33f6c568bc1a3c83c3d633c3b0d0cb83680134cd8d9d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/worker-commands.bin": "334d1aef7534233790a4b1df59fce5e110266101b28b8db93a1d3da77e90e816",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/queue-events.tsv": "0fc4ac8de768dc48ce691694d4b3961a0ca0821f4e4029c0ca0fbad3f8f2b2f8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/boundaries.tsv": "8336f78f07cb19d29f21805625bdda9c7f7f623544b77c114e4bf03f330b355e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/entry-regs.bin": "e33d3f1e1cd133bd34f79cccf40e0dda6483ab1b4fbc678062cba1d1778bde53",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/entry-2.bin": "2615d713060aff878f35f4e743680059aea392a112a1dc75326c5fc78c6baf15",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/frame-1.bin": "b7a2e67c63ec5f1ce5f787bedad2fff8743d2c7a1edadaf9bcb8d274fe3ac5bc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/frame-1-buffer0.bin": "b7a2e67c63ec5f1ce5f787bedad2fff8743d2c7a1edadaf9bcb8d274fe3ac5bc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/frame-1-buffer1.bin": "5087dc62a353e03130310ca0925575785854d33dc6233b6dfb158ba0c07bfeb4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/frame-1-buffer2.bin": "1a74bac257b8449c58783ab93cc39ec07d83ba9ff9289e19d1bc49310b58fe4a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/entry-3.bin": "b776d5aa8287a2b616f2d4545e662c062a070781a022bdf984774b764ea7a5dc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/frame-2.bin": "a42df17ef68b61162980c48170bf3a307ce909b7d1c1ba265f1b3a1b2b1bb8eb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/frame-2-buffer0.bin": "0fc3c70f9d86c5f4a655efa383ca56a2258c619a6ec004e8f80d684e476d210e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/frame-2-buffer1.bin": "2e0673ab3ba1900e839cfd476ef19e330e4f653b6d21be38fe74ebe7b5c9125e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/frame-2-buffer2.bin": "a42df17ef68b61162980c48170bf3a307ce909b7d1c1ba265f1b3a1b2b1bb8eb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/surface-arena.bin": "e00885d05aabfb19fc2b40227387332b53b0c997f3b90547f0f50fee927a2b0f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/surface-arena.physical.bin": "e00885d05aabfb19fc2b40227387332b53b0c997f3b90547f0f50fee927a2b0f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/surface-arena.json": "cb1fdcfba10e3a14f025d55e3098eaf3d292898e273a9bacc713f150c1cedcb8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/import-stats.bin": "954a6575b642bdddd05409cf5973ba837f25b2e391950be91fa23334093d88f5",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/import-stats.physical.bin": "954a6575b642bdddd05409cf5973ba837f25b2e391950be91fa23334093d88f5",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/import-stats.json": "2c8d98601bba6223ef47daa3c0c1d5d763ca44aae714c7093f70e0c53200317c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/front-stats.bin": "8c06e2dc6d0c41cebd413fc63a424f301facbee87c9437c518e8b2189ecc9107",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/front-stats.physical.bin": "8c06e2dc6d0c41cebd413fc63a424f301facbee87c9437c518e8b2189ecc9107",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/front-stats.json": "05c1adc9de5ec2ac1025b9a844aaab7e4a9c7811cc0c20519c15e971c2a94474",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/frame.bin": "0fc3c70f9d86c5f4a655efa383ca56a2258c619a6ec004e8f80d684e476d210e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/stalls.json": "67ae2b8867d9e7f71c7cf4b77104425de361f1dd02f37ee1aef66988c4ce42e7",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/stalls-pcs.csv": "78b9cacc7441e54b65e08964101384c6d6baa0d3096a796bd10dc8f75f66ba5d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/stalls-pages.csv": "1795dceb513c2134dc9507ca0b61894a1b021dce651701ee599d5bb38f43de46",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/first-word.json": "9125bbccee2a42cfd5d73a306fbd056a54f201b27bede20fafcaadf688e979c5",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/gpu-profile.json": "0359c335a8ee848c948d807b32456d0054bf4e183b5c212dda39affdc8bd0800",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/gpu-profile-timeline.csv": "61a659f40459ffd077af1cd3f25f1479299ce1c2fa7758be433fe1b6e80f839a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/gpu-profile-events.csv": "190a8d5c7068a8282460634927fa63e82c8178e689a955e72b50e3fd7f6c409e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/pc-phase-1.csv": "d45e6112ab59d84443b03269cf2a9c8813eee5676205899988569deb4b797fa4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/pc-phase-2.csv": "5ad8a92f11644da9fcc85047b5db81892860c255f613e8923ce2cdab01ec4fca",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/process.json": "fdd1fd1a2082edab865969a92a22e80b91495653a943e92266cb2f46a2d0ff4d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/queued-v2/run/manifest.json": "1d82ace53e1d29db1973414e99a0af9041861bb3cb3675cfef065c748ac9aae3"
+  },
+  "checker_sources_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/check_replays.py": "0b136a3a7d377af3e1268975d33995380fba9a5e275dbfdc2cd8e01497f70ba3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/tests/check_replays.py": "4dbf49fc2ccf0a416b21eadf4978dd93a1bd731a316e7e30c44b7caa140c92f9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/gpu-bottleneck-v1/review/check_runs.py": "cc73ef3582f0c4594162e3635bbb6704089ad5879f2c36441b8de04a5cef9793"
+  },
+  "fixture_manifest_sha256": "90f151c1769ee3a82e54bd4fc6bbe5324ed0149687fcc82248d87a3c71fda9bc",
+  "limitations": [
+    "Two prepared native intervals with synthetic display/audio and bounded services; not hardware FPS, FPGA fit or timing."
+  ]
+}

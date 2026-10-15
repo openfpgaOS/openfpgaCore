@@ -1,0 +1,32 @@
+{
+  "status": "FUNCTIONAL_PASS_PHYSICAL_PENDING",
+  "worker_sha256": "f535bc90a271228196358413120cdc4badda2094d2ffe8e8d4d95e78fd2aa7fa",
+  "parent_sha256": "e0f4ffbd20f2a20ab416543a0e9d830d7ec6b4d8d55df094479428b67f933fbb",
+  "reference_sha256": "c427042984b29753347e5e41d39cee5cbf2851c2cd1030331d5e4893f9cf6dc2",
+  "reference_is_exact_parent_except_module_name": true,
+  "module_scope_register_declarations_identical": true,
+  "module_scope_register_declaration_count": 55,
+  "unchanged_full_regression_transcripts": {
+    "native1-particles1": {
+      "same": true,
+      "result_sha256": "b30bfa97587d9142f38409115bf4d3b578db5ad161ebb99ce93351d689cd8d99"
+    },
+    "native1-particles0": {
+      "same": true,
+      "result_sha256": "7c610fcffc13239abc7bfffe177a5c573e7a62e3bbf9b4041a7480694f5812bd"
+    },
+    "native0-particles1": {
+      "same": true,
+      "result_sha256": "f2fcdd450d8a3a9566d58b7b25207a97474800dfe7092fcc9bdf7b9f8a93bee9"
+    },
+    "native0-particles0": {
+      "same": true,
+      "result_sha256": "5e5ec9855f8c92b5d4bc432fac4de16e5691a0f22eaaa2671008833e074ab321"
+    }
+  },
+  "receipt": "gates-v1/receipt.json",
+  "receipt_sha256": "ccaec3e5d25af8f9bd75714c1ec025f60ab0e1ca856695f66cc0e17ec65d71c5",
+  "patch_sha256": "77e0fc2be621af51eddcb986893b0cb0c03885f3e0a50f89c00a1b071c35cb21",
+  "readme_sha256": "6ce401dc01f0595c591898f6e5be494d67ff3279cd0e36f2e38789d0f2747e01",
+  "scope": "Worker-only combinational factoring; no cycles, features, registers, dock/video, constraints or clocks changed. No Quartus jobs by this component; actual8-frame replay and physical qualification tracked separately."
+}

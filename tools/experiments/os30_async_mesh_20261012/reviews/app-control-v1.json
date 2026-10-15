@@ -1,0 +1,27 @@
+{
+  "status": "SOURCE_REVIEW_AND_BUILD_PASS_NATIVE_VALIDATION_PENDING",
+  "implementation": {
+    "base": "Frozen mesh-integrated-v1/work-app-v4; retains proven topology/source arena/lazy-canonical fallbacks and old capability probes. AJ01 absence uses unchanged legacy renderer. New same-ELF pairing measures its control overhead.",
+    "admission": "Cached immutable own-slot VTX/TRI task, prepared eligible material, full uint16 UV origins, RNE/raw LOAD eligibility, cached 256-command VTX/TRI-only suffix proving all new slots overwritten before CPU reads. Every state/list/end/unknown command rejects. G_FOG alone is permitted when alpha resolves constant255.",
+    "jobs": "Changed context runs and one12-word JOB packet in existing ordered ingress; original CPU pointers stay immutable for repair. No synchronous raw/preflight/ARM waits. Normal ring threshold; waits publish all prior jobs before waiting for completion.",
+    "legacy": "Acquire once after all prior generated words reach common output; refresh shared context on new lease. Consecutive legacy LOADs and canonical readers reuse granted ticket. Next G_VTX copies survivors and drops overwritten rows; async admission releases lease only after that barrier. At frame end remaining lazy canonical rows are copied before release.",
+    "reset": "Consumer reset preserves granted legacy ticket/raw view. App invalidates async sequence/context cache, retains only matching lease, cancels repair when token or epoch changes; full fabric reset also resets app CPU state. Unexpected lost legacy ownership faults visibly.",
+    "repair": "Pure helper saves/restores FCSR, reads immutable job context/source or repair-owned raw view, emits only vertex/draw packets through separate head insertion. ACK precedes DATA/END. No renderer state restoration/reentrancy.",
+    "liveness": "Ring/DMA/fence wait hooks, raw polling, display-list entries, acquire/source drain and pre-kernel flip-fence waits service repair. Source drain compares completed async sequence only and does not wait for its own held idle legacy lease."
+  },
+  "structural_coverage": {
+    "prepared_dead_suffix_tasks_per_frame": 98,
+    "input_triangles": 772,
+    "consecutive_LOAD_runs": 21,
+    "maximum_consecutive_run": 20,
+    "scope": "Old frozen baseline trace; final shader exclusions and new app native outcomes may reduce coverage. No speed estimate."
+  },
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app/evidence/app-build-v1/build-result.json": "8a3788fc0611ea052b22d9940b627b4f52ef64a84f452103299e1b51c316eb77",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app/evidence/app-tests-v1/result.json": "6baef49ac69c5f461758cd469fbdda51a32422e09ede880e91b75d07cb08fb50",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/design/abi.json": "d8c933c03130aa64fa21d1867795cb5902bb673780363811948c341fb95856fe",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/analysis/dead-slots.json": "20ce49ca7b51b89290fbd66ca63248b5b3928256c46b2c9401097d33fd8aa95d"
+  },
+  "deployed": false,
+  "physical_build": false
+}

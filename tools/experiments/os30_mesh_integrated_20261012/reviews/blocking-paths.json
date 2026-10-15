@@ -1,0 +1,112 @@
+{
+  "status": "PASS_SOURCE_WAIT_AND_PUBLICATION_AUDIT",
+  "scope": "F18 MESH3, MTF2 ABI unchanged; source-only checks and extracted actual-C unit, full native replay pending",
+  "elf": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/.obj/sm64-mesh-integrated-v3-perfdiag/app.elf",
+  "elf_sha256": "691aefd7d76351a512fed71c3b79d55f1832b5d0b7d7b9c0e38a6d0b5e9d5c81",
+  "delta": [
+    "gfx_gpu_mesh_packet tail switches unconditional publish to SDK normal512-word advisory kick",
+    "gfx_gpu_mesh_wait_source initial status reads OWNER0/VALIDATED5/PUBLISHED7 and forces once only when0x21 under0xa1 mask, then retains existing owner poll",
+    "PERF label F18 MESH3"
+  ],
+  "safe_initial_check": [
+    "Successful caller order remains VALIDATE -> poll validated/owner -> ARM16 -> local serial/context marker staging -> later source wait. The CPU cannot append another ARM while it is blocked in that wait.",
+    "If already published/copying at entry, the complete packet reservation allows producer to finish without GPU draining; no force publication is needed.",
+    "If validated and unpublished, ARM may be awaiting credit held by older staged markers. The one forced flush publishes all staged commands in order, allowing those packets to drain.",
+    "A raw/preflight owner cannot become armed asynchronously: ARM is CPU-controlled. Therefore checking once before the loop is sufficient.",
+    "Fallback ACK may leave a briefly visible validated owner; an extra harmless flush is allowed, but no deferred publication remains a liveness dependency."
+  ],
+  "blocking_paths": [
+    {
+      "path": "Next eligible raw LOAD",
+      "source": "gfx_pc.c:1272",
+      "proof": "Uses gfx_gpu_mesh_wait_source before accessing new source/context or START."
+    },
+    {
+      "path": "Immutable mesh source resolution and pool recycling",
+      "source": "gfx_gpu.c:626,678",
+      "proof": "Both use same source wait before reuse; all current owner source bytes remain held until raw copy or ACK."
+    },
+    {
+      "path": "Ring space/staging buffer exhaustion",
+      "source": "of_gpu.h:810-841,903-910",
+      "proof": "_gpu_ring_ensure flushes staged commands before waiting for space; _gpu_stream_reserve_words flushes full staging before reserve. No staged marker can be stranded behind this wait."
+    },
+    {
+      "path": "of_gpu_finish/framebuffer access/texture fallback",
+      "source": "of_gpu.h:1170-1219; gfx_gpu.c:716,874,1100",
+      "proof": "of_gpu_finish stages a fence, marks sync and calls normal kick; sync overrides512 threshold before waiting."
+    },
+    {
+      "path": "Flip/presentation and kernel buffer acquire",
+      "source": "gfx_gpu.c:941-952,2725-2745; of_gpu.h:1161-1167",
+      "proof": "Flip sets unflushed_sync and ensuing kick forces full batch before later kernel acquire."
+    },
+    {
+      "path": "Mesh preflight/raw LOAD polling",
+      "source": "gfx_pc.c:1347-1348",
+      "proof": "Runs before ARM for current task. Sole FMA/raw engine is independent of GPU marker execution; previous raw owner was drained by source wait."
+    },
+    {
+      "path": "Packet validation polling",
+      "source": "gfx_pc.c:3309-3315",
+      "proof": "Validation scans held raw/list state before queue reservation/ARM. It does not wait for GPU progress or a marker."
+    },
+    {
+      "path": "Lazy canonical alias reads before next source wait",
+      "source": "phase10_load_alias.v view_block in frozen native-v7",
+      "proof": "Validated raw owner allows alias reads while unreserved; when ARM has a complete reservation, copying can complete independently. Existing accepted alias bursts drain before producer view acquisition."
+    },
+    {
+      "path": "Discard/fallback",
+      "source": "gfx_pc.c:1131-1134",
+      "proof": "ACK before source wait releases unarmed owner independently; no current marker was published."
+    }
+  ],
+  "focused_test": {
+    "pass": true,
+    "checks": 12308,
+    "status_combinations": 4096,
+    "command": [
+      "gcc",
+      "-std=c11",
+      "-O2",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-fsanitize=address,undefined",
+      "-fno-omit-frame-pointer",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/evidence/batching-liveness-v1/actual_wait_test.c",
+      "-o",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/evidence/batching-liveness-v1/actual_wait_test"
+    ],
+    "stderr": "",
+    "sanitizer_environment": {
+      "ASAN_OPTIONS": "detect_leaks=0"
+    },
+    "sanitizer_note": "LeakSanitizer cannot run under the execution harness ptrace; this test allocates no dynamic memory. AddressSanitizer and UBSan remain enabled.",
+    "limitation": "Actual C bodies and SDK threshold logic; mocked publication/credit progress. Full RTL/native liveness remains a separate validation.",
+    "input_sha256": {
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "36ff1e0e20da4c6eab7112e67fa4bf565aae69c9f41f41d1b5dfc8d3910c3b83",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/src/sdk/include/of_gpu.h": "7e4b105e444b7307b36010da87749eff445650b6983283eeab9223e6af3dc01d",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/evidence/app-build-v3/build-result.json": "0573249b3104faea60b31aed99ce9e4ed1cf4cb6f934626ebff9c8eda1f4f772",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/evidence/batching-liveness-v1/test_wait.py": "f9b80899caafb66382b15780be31b59a86a6d82deed5c20ddcc8800e838a239d",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/evidence/batching-liveness-v1/actual_wait_test.c": "f48014b492aad1e9b63a7fe81713ecd2897ef30c840ebc57d093bed6a9117678"
+    },
+    "extracted_wait_sha256": "93f046f9610b1a1db124a01d9dce1d675c5d1a485a25026d0132c8140ff0c00f"
+  },
+  "preserved": {
+    "v2_source_and_ELF_hashes_pass": true,
+    "v3_source_and_ELF_hashes_pass": true,
+    "source_cache_512_entries_16_probes": true,
+    "app_SDK_unchanged": true,
+    "ABI_MTF2_unchanged": true
+  },
+  "comment_caveat": "An inherited gfx_pc.c next-LOAD comment still describes earlier force-publication. Runtime guarantee is now provided conditionally by the called wait helper; no instruction/source changes beyond the isolated requested delta were made.",
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/evidence/app-build-v3/build-result.json": "0573249b3104faea60b31aed99ce9e4ed1cf4cb6f934626ebff9c8eda1f4f772",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/evidence/app-build-v3/app-v2-to-v3.patch": "afd62395b366b0f1bcb6e60bec5be933854ef127a3ff8c2c0612785d2ddbbf42",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/evidence/batching-liveness-v1/result.json": "227e2570157d12c920e8b872f4b56514b6567f5e957d864b5681a59752f0131e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/abi-v2.json": "76ae0f8bb5b14d9b7f0ccfd8bdae8c759cf556a8e0cd35e3b184f2bd7d27363e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/phase10_load_alias.v": "322bea9ab96131f84d13edf6448f490e7190519b38a2dfa1ba027fa31fae116d"
+  }
+}

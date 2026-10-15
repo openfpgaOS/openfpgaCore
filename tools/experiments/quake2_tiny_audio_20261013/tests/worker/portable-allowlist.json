@@ -1,0 +1,40 @@
+{
+  "entrypoint": "python3 run_portable.py --core STAGED_CORE --output NEW_OUTPUT",
+  "expected_worker_sha256": "e0f4ffbd20f2a20ab416543a0e9d830d7ec6b4d8d55df094479428b67f933fbb",
+  "files": {
+    "run_portable.py": "2b7f6fcdf9112bfa5d86fe2af3494707b3b96018a6666a69f7266610ae1221d6",
+    "README.txt": "6a04f3d44a5e1e8ebab2a8d8e4a07257458aecbd734f4a688b8b7d3e1eca550e",
+    "source-pins.json": "7953326e1cdb213eac52b675dd82c4aef09a83ad0edd1a8ff79ab996bce41bfe",
+    "relative-to-divisor-preload.patch": "e08c38fbd011c055ddf3fd908d505da038003d3470a2badc253eedf4bce0c1db",
+    "structural-and-parent-equivalence.json": "08acdb586eec1e2de903804bab55c1b10f381ecddb7eaa099377a31e4ff49a13",
+    "qualification.json": "374612b65033746470445b60baf9a04716c6a1df83a4778c614de4516c60df37",
+    "lockstep-gates/receipt.json": "f84df800717a277fbd199c6b63aff347c31abf8678fece74bd75f545947b8db0",
+    "width-proof/receipt.json": "2183eb18845a6a3c716eaad01789940b818da9a71f2c91060604eda6229e3bff",
+    "full-gpu-v1/receipt.json": "8727259965e7a1b5e8089de4bb8c77d0473aac096c19ae35beb4b6989cf64053",
+    "portable-proof-final-ring/receipt.json": "c57924ef2efd026e58d879907834c51befb539c5ccab510a0e083d5d5b8cdef2",
+    "lockstep-fixtures-v2/geometry_worker_tb.v": "cebfda5c40ec7bb684810d754478368bad70739e84a565ac8703e633cb61a1ed",
+    "lockstep-fixtures-v2/geometry_worker.cpp": "bcfa7d6991bb5063b1e5b2f05e01f96cee1842a172aa04b2b5e50d538b7bee7f",
+    "lockstep-fixtures-v2/gpu_geometry_worker_reference.v": "80f2e11d90d9e8a223f2128e13b335aa404bd9213e981ed3ade08ceeafca1143",
+    "lockstep-fixtures-v2/source-pins.json": "d7816f4395bc1620d3cc5cd2e5fcc00c7b3f3a8c0cd0b965e16392d70b8ade76",
+    "width-proof/width_proof.v": "398006d007b23ebd963dd80e59d1f998c4c3d5ec4d767f2dcea52424d237b9b9",
+    "width-proof/main.cpp": "b9529fc3375fcb634e88b6628a2eebd88cf9f58337881267d91a308de51b1574",
+    "width-proof/configurations.json": "3fbff52724baaca0e043abb0f0f3948ce4d549a4c096da00c52f789289685403",
+    "width-proof/result.txt": "e32924134d8bf5361759fb0899f300b7c9efeb6089c835903352c0d02dfe78ea",
+    "portable-proof-final-ring/native1-particles1/result.txt": "b30bfa97587d9142f38409115bf4d3b578db5ad161ebb99ce93351d689cd8d99",
+    "portable-proof-final-ring/native1-particles1/build-command.json": "ce1e26fd6ae83e2373e5382b815b383332bbd51497d6fcc05c77f2b419b3cd97",
+    "portable-proof-final-ring/native1-particles0/result.txt": "7c610fcffc13239abc7bfffe177a5c573e7a62e3bbf9b4041a7480694f5812bd",
+    "portable-proof-final-ring/native1-particles0/build-command.json": "1a990d73eefd22dbdbb2a720e99764e7005d14cfb4953239bb2e66b6a560531f",
+    "portable-proof-final-ring/native0-particles1/result.txt": "f2fcdd450d8a3a9566d58b7b25207a97474800dfe7092fcc9bdf7b9f8a93bee9",
+    "portable-proof-final-ring/native0-particles1/build-command.json": "b80b3034eac91d5e4e7663d3b6a647935f005ec4e4358e7baade5f47b26e9a6d",
+    "portable-proof-final-ring/native0-particles0/result.txt": "5e5ec9855f8c92b5d4bc432fac4de16e5691a0f22eaaa2671008833e074ab321",
+    "portable-proof-final-ring/native0-particles0/build-command.json": "55a56bac1940ab3651150c2348825c793ecb191f63271b818c03f584cdc3de4c",
+    "portable-proof-final-ring/width-proof/result.txt": "e32924134d8bf5361759fb0899f300b7c9efeb6089c835903352c0d02dfe78ea",
+    "portable-proof-final-ring/width-proof/build-command.json": "26d22cb95a3a1aa405454404745beaf17d08a39210dc0847ece50fdb60b329b6"
+  },
+  "notes": [
+    "Preserve relative paths beneath this directory.",
+    "No object trees, captured GPU vectors, proprietary models or Quartus installation files.",
+    "The old native6 worker is included only as a renamed reference module for paired behavioral simulation.",
+    "The eight full-GPU replay receipt references existing native6 captures; they are not part of this compact portable proof."
+  ]
+}

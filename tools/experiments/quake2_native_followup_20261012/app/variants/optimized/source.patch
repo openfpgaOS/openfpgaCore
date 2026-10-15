@@ -1,0 +1,1038 @@
+--- a/src/quake2/Makefile
++++ b/src/quake2/Makefile
+@@ -150,6 +150,7 @@
+ 
+ OPENFPGA_SRCS := \
+ 	openfpga/glimp_of.c \
++	openfpga/trig_of.c \
+ 	openfpga/snd_of.c \
+ 	openfpga/hunk_of.c \
+ 	openfpga/input_of.c \
+--- a/src/quake2/openfpga/of_gl1.c
++++ b/src/quake2/openfpga/of_gl1.c
+@@ -83,6 +83,7 @@
+ static int ofgl_gpu_ok = 0;		/* OFQ2 up + a truecolor 3D path present */
+ static int ofgl_obj_dirty = 1;		/* projection constants must be rebuilt */
+ static unsigned ofgl_world_epoch = 1;
++static unsigned ofgl_world_prepared;
+ static float ofgl_draw_center[3], ofgl_draw_extent[3];
+ static int ofgl_draw_bounds_valid, ofgl_batch_inside;
+ static int ofgl_world_draw_valid, ofgl_batch_world;
+@@ -255,7 +256,8 @@
+ /* Copy an RGBA8888 sub-rect of a lightmap page in as RGB565. Used for both the
+  * full upload and gl1's per-frame dynamic-light sub-updates. */
+ static void
+-ofgl_lm_store(int block, int x0, int y0, int w, int h, const uint32_t *src)
++ofgl_lm_store_stride(int block, int x0, int y0, int w, int h,
++	const uint32_t *src, int source_stride)
+ {
+ 	uint16_t *page = ofgl_lm_page(block);
+ 
+@@ -267,7 +269,8 @@
+ 	ofgl_lm_version[block] = ++ofgl_lm_serial;
+ 	/* Clip once, retaining the original source row stride. Test disjoint
+ 	 * rectangles before negating an origin, including INT_MIN origins. */
+-	if (w <= 0 || h <= 0 || x0 >= OFGL_LM_DIM || y0 >= OFGL_LM_DIM ||
++	if (w <= 0 || h <= 0 || source_stride < w ||
++		x0 >= OFGL_LM_DIM || y0 >= OFGL_LM_DIM ||
+ 		x0 <= -w || y0 <= -h)
+ 	{
+ 		return;
+@@ -280,13 +283,45 @@
+ 	if (rows > OFGL_LM_DIM - dy) rows = OFGL_LM_DIM - dy;
+ 	for (int row = 0; row < rows; row++)
+ 	{
+-		const uint32_t *in = src + (size_t)(first_row + row) * w + first_col;
++		const uint32_t *in = src + (size_t)(first_row + row) * source_stride + first_col;
+ 		uint16_t *out = page + (dy + row) * OFGL_LM_DIM + dx;
+ 		for (int col = 0; col < columns; col++)
+ 		{
+ 			/* Black is a valid modulation colour, not a transparent key. */
+ 			out[col] = ofgl_rgba_to_565(in[col]);
+ 		}
++	}
++}
++
++static void
++ofgl_lm_store(int block, int x0, int y0, int w, int h, const uint32_t *src)
++{
++	ofgl_lm_store_stride(block, x0, y0, w, h, src, w);
++}
++
++void
++OFGL_UpdateLightmapRect(int texnum, int x, int y, int w, int h,
++	const uint32_t *src, int source_stride)
++{
++	int block = ofgl_lm_index(texnum);
++	if (block >= 0)
++		ofgl_lm_store_stride(block, x, y, w, h, src, source_stride);
++}
++
++void
++OFGL_UpdateLightmapSamples(int texnum, const uint32_t *rgba_page,
++	const uint16_t *indices, int count)
++{
++	int block = ofgl_lm_index(texnum);
++	if (block < 0 || !rgba_page || !indices || count <= 0) return;
++	uint16_t *page = ofgl_lm_page(block);
++	if (!page) return;
++	ofgl_lm_version[block] = ++ofgl_lm_serial;
++	for (int k = 0; k < count; k++)
++	{
++		unsigned index = indices[k];
++		if (index < OFGL_LM_DIM * OFGL_LM_DIM)
++			page[index] = ofgl_rgba_to_565(rgba_page[index]);
+ 	}
+ }
+ 
+@@ -1344,6 +1379,41 @@
+ 		(bottom + out->z < 0.0f ? 8 : 0);
+ }
+ 
++/* Adjacent BSP surfaces repeat positions with independent UVs/light colours.
++ * Share only the position transform/classification and original-vertex
++ * projection, keyed by all coordinate bits and the current matrix epoch.
++ * No model pointers survive here, and no sampled attributes are reused. */
++typedef struct {
++	uint32_t xyz[3], epoch;
++	ofgl_cvert_t position;
++} ofgl_world_position_t;
++static ofgl_world_position_t ofgl_world_positions[128];
++
++static void
++ofgl_world_position(int index, ofgl_cvert_t *out)
++{
++	int stride = ofgl_va_vertex.stride ? ofgl_va_vertex.stride :
++		ofgl_va_vertex.size * (int)sizeof(float);
++	const float *v = (const float *)(ofgl_va_vertex.ptr + (size_t)index * stride);
++	uint32_t xyz[3];
++	memcpy(xyz, v, sizeof(xyz));
++	uint32_t hash = xyz[0] * 0x9e3779b1u;
++	hash = (hash ^ xyz[1]) * 0x85ebca6bu;
++	hash = (hash ^ xyz[2]) * 0xc2b2ae35u;
++	hash ^= hash >> 16;
++	ofgl_world_position_t *entry = &ofgl_world_positions[hash & 127u];
++	if (entry->epoch != ofgl_world_epoch || entry->xyz[0] != xyz[0] ||
++		entry->xyz[1] != xyz[1] || entry->xyz[2] != xyz[2])
++	{
++		ofgl_fetch_position(index, &entry->position);
++		ofgl_world_project_original(v, &entry->position);
++		ofgl_classify_cvert(&entry->position);
++		memcpy(entry->xyz, xyz, sizeof(xyz));
++		entry->epoch = ofgl_world_epoch;
++	}
++	*out = entry->position;
++}
++
+ static inline __attribute__((always_inline)) void
+ ofgl_fetch_cvert(int i, ofgl_cvert_t *out)
+ {
+@@ -1489,12 +1559,16 @@
+ 	{
+ 		return &ofgl_vmemo[slot];
+ 	}
+-	const float *v = ofgl_fetch_position(i, &ofgl_vmemo[slot]);
+-	if (ofgl_batch_world) ofgl_world_project_original(v, &ofgl_vmemo[slot]);
+-	if (ofgl_batch_inside)
+-		ofgl_vmemo[slot].clipcode = ofgl_vmemo[slot].viewcode = 0;
++	if (ofgl_batch_world)
++		ofgl_world_position(i, &ofgl_vmemo[slot]);
+ 	else
+-		ofgl_classify_cvert(&ofgl_vmemo[slot]);
++	{
++		ofgl_fetch_position(i, &ofgl_vmemo[slot]);
++		if (ofgl_batch_inside)
++			ofgl_vmemo[slot].clipcode = ofgl_vmemo[slot].viewcode = 0;
++		else
++			ofgl_classify_cvert(&ofgl_vmemo[slot]);
++	}
+ 	ofgl_vmemo_idx[slot] = i;
+ 	ofgl_vmemo_tag[slot] = ofgl_vmemo_cur;
+ 	return &ofgl_vmemo[slot];
+@@ -1969,7 +2043,14 @@
+ 			ofgl_pc_near = 4.0f;
+ 		}
+ 		ofgl_build_clip_planes();
+-		ofgl_world_epoch++;
++		if (++ofgl_world_epoch == 0)
++		{
++			/* Epoch zero means unused. Clear ancient position tags before
++			 * reusing epoch one, including across long-running sessions. */
++			memset(ofgl_world_positions, 0, sizeof(ofgl_world_positions));
++			ofgl_world_epoch = 1;
++			ofgl_world_prepared = 0;
++		}
+ 		ofgl_obj_dirty = 0;
+ 	}
+ 	ofgl_batch_inside = bounds && ofgl_draw_bounds_inside();
+@@ -2207,7 +2288,6 @@
+ 
+ static ofgl_plane_t ofgl_world_planes[5];
+ static float ofgl_world_abs[5][3];
+-static unsigned ofgl_world_prepared;
+ static ofq2_object_state_t ofgl_world_object;
+ static int ofgl_world_raw_matrix;
+ 
+@@ -2531,12 +2611,15 @@
+ 	ofgl_cvert_t verts[OFGL_WORLD_VERTS];
+ 	for (int i = 0; i < p->count; i++)
+ 	{
+-		const float *v = ofgl_fetch_position(i, &verts[i]);
+-		if (ofgl_batch_world) ofgl_world_project_original(v, &verts[i]);
+-		/* The inflated surface bounds already prove every vertex lies
+-		 * inside all clip planes. Reuse that result on CPU-only cores. */
+-		if (inside) verts[i].clipcode = verts[i].viewcode = 0;
+-		else ofgl_classify_cvert(&verts[i]);
++		if (ofgl_batch_world)
++			ofgl_world_position(i, &verts[i]);
++		else
++		{
++			ofgl_fetch_position(i, &verts[i]);
++			/* The inflated surface bounds prove every vertex is inside. */
++			if (inside) verts[i].clipcode = verts[i].viewcode = 0;
++			else ofgl_classify_cvert(&verts[i]);
++		}
+ 		verts[i].s = p->verts[i * 7 + 3] * tw;
+ 		verts[i].t = p->verts[i * 7 + 4] * th;
+ 		verts[i].rgb = p->words[i * 5 + 2] >> 16;
+@@ -2818,6 +2901,65 @@
+ 	ofgl_va_vertex = saved;
+ }
+ 
++int
++OFGL_DrawParticleBillboards(const float *origins, const int *colours,
++	const float *alphas, size_t stride, int count, const float up[3],
++	const float right[3], const float view_origin[3], const float forward[3],
++	const uint32_t palette[256], const uint8_t gamma[256])
++{
++	if (!origins || !colours || !alphas || count < 1 ||
++		!ofgl_draw_enabled(OFGL_DRAW_ARRAYS) || !ofgl_tex2d_enabled ||
++		ofgl_tex2d_on[1] || ofgl_texenv_mode(0) != GL_MODULATE) return 0;
++	ofgl_array_t saved = ofgl_va_vertex;
++	float positions[3][3];
++	ofgl_va_vertex.ptr = (const byte *)positions;
++	ofgl_va_vertex.size = 3;
++	ofgl_va_vertex.stride = sizeof(positions[0]);
++	const ofq2_texture_t *tex;
++	float tw, th;
++	if (!ofgl_begin3d(&tex, &tw, &th))
++	{
++		ofgl_va_vertex = saved;
++		return 0;
++	}
++	const float s[3] = {0.0625f * tw, 1.0625f * tw, 0.0625f * tw};
++	const float t[3] = {0.0625f * th, 0.0625f * th, 1.0625f * th};
++	for (int i = 0; i < count; ++i)
++	{
++		const float *origin = (const float *)((const byte *)origins + (size_t)i * stride);
++		int colour = *(const int *)((const byte *)colours + (size_t)i * stride);
++		float alpha = *(const float *)((const byte *)alphas + (size_t)i * stride);
++		float scale = (origin[0] - view_origin[0]) * forward[0] +
++			(origin[1] - view_origin[1]) * forward[1] +
++			(origin[2] - view_origin[2]) * forward[2];
++		scale = scale < 20.0f ? 1.0f : 1.0f + scale * 0.004f;
++		for (int k = 0; k < 3; ++k)
++		{
++			positions[0][k] = origin[k];
++			positions[1][k] = origin[k] + up[k] * scale;
++			positions[2][k] = origin[k] + right[k] * scale;
++		}
++		uint32_t c = palette[colour];
++		uint16_t rgb = ofgl_rgba_to_565(gamma[c & 255u] |
++			((uint32_t)gamma[(c >> 8) & 255u] << 8) |
++			((uint32_t)gamma[(c >> 16) & 255u] << 16));
++		uint8_t a = (uint8_t)(alpha * 255.0f);
++		ofgl_cvert_t vertices[3];
++		for (int k = 0; k < 3; ++k)
++		{
++			ofgl_fetch_position(k, &vertices[k]);
++			ofgl_classify_cvert(&vertices[k]);
++			vertices[k].s = s[k]; vertices[k].t = t[k];
++			vertices[k].rgb = rgb; vertices[k].a = a;
++			vertices[k].attrs_valid = 1;
++		}
++		ofgl_cached_tri(0, 1, 2, vertices, vertices + 1, vertices + 2, tw, th);
++	}
++	ofgl_va_vertex = saved;
++	ofgl_end3d();
++	return 1;
++}
++
+ /* Non-indexed 3D draw (glDrawArrays with a 3-component vertex array): sky box
+  * faces, particles, beams and the null-model box all arrive this way. The old
+  * code required size == 2 and silently dropped every one of them. */
+--- a/src/quake2/openfpga/of_world.h
++++ b/src/quake2/openfpga/of_world.h
+@@ -14,6 +14,13 @@
+ int OFGL_WorldPolysEnabled(void);
+ void OFGL_DrawWorldPolys(ofgl_world_poly_t *const *polys, int count);
+ 
++/* CPU lightmap pages share all GL copy IDs. Update only the changed rectangle;
++ * source_stride is the original RGBA row width in pixels, including padding. */
++void OFGL_UpdateLightmapRect(int texnum, int x, int y, int w, int h,
++    const uint32_t *src, int source_stride);
++void OFGL_UpdateLightmapSamples(int texnum, const uint32_t *rgba_page,
++    const uint16_t *indices, int count);
++
+ /* Mark one actual generic submission as BSP world geometry so raw GPU surfaces
+  * and their CPU neighbours use identical original-vertex screen/depth values.
+  * Begin3d consumes the hint even if drawing fails. Clear after submission too. */
+@@ -23,6 +30,13 @@
+  * the values; NULL,NULL disables the hint. Call only after buffer construction
+  * (which can flush earlier draws), then disable immediately after drawing. */
+ void OFGL_SetDrawBounds(const float mins[3], const float maxs[3]);
++
++/* Strided particle fields are consumed synchronously. Preserve the existing
++ * world-space billboard construction without staging three GL arrays. */
++int OFGL_DrawParticleBillboards(const float *origins, const int *colours,
++    const float *alphas, size_t stride, int count, const float up[3],
++    const float right[3], const float view_origin[3], const float forward[3],
++    const uint32_t palette[256], const uint8_t gamma[256]);
+ 
+ /* Source indices identify tightly packed XYZW interpolation entries; UV and
+  * color arrays keep their seam indices. Only standalone immediate alias draws
+--- /dev/null
++++ b/src/quake2/openfpga/trig_of.c
+@@ -0,0 +1,49 @@
++/* Exact-value trig memo for the single-threaded application. Musl's float
++ * trig internally uses software double; static entity angles and repeated
++ * renderer transforms otherwise recalculate those results many times. */
++#include <math.h>
++#include <stdint.h>
++#include <string.h>
++#undef sinf
++#undef cosf
++#undef tanf
++
++typedef struct {
++	uint32_t argument, valid;
++	float value[3];
++} of_trig_entry_t;
++static of_trig_entry_t of_trig_cache[128];
++
++static inline of_trig_entry_t *of_trig_entry(float x, uint32_t *bits)
++{
++	memcpy(bits, &x, sizeof(*bits));
++	/* Fold every exponent/sign bit before multiplication: opposite-sign
++	 * cull/draw angles and powers of two must not all collide. */
++	uint32_t hash = (*bits ^ (*bits >> 16)) * 0x9e3779b1u;
++	unsigned slot = hash >> 25;
++	of_trig_entry_t *entry = &of_trig_cache[slot];
++	if (entry->argument != *bits)
++	{
++		entry->argument = *bits;
++		entry->valid = 0;
++	}
++	return entry;
++}
++
++#define OF_TRIG_FUNCTION(name, index) \
++float of_cached_##name(float x) \
++{ \
++	uint32_t bits; \
++	of_trig_entry_t *entry = of_trig_entry(x, &bits); \
++	/* Nonfinite calls retain libm's exceptional-value behavior. */ \
++	if ((bits & 0x7f800000u) == 0x7f800000u) return name(x); \
++	if (!(entry->valid & (1u << index))) \
++	{ \
++		entry->value[index] = name(x); \
++		entry->valid |= 1u << index; \
++	} \
++	return entry->value[index]; \
++}
++OF_TRIG_FUNCTION(sinf, 0)
++OF_TRIG_FUNCTION(cosf, 1)
++OF_TRIG_FUNCTION(tanf, 2)
+--- a/src/quake2/src/client/refresh/gl1/gl1_light.c
++++ b/src/quake2/src/client/refresh/gl1/gl1_light.c
+@@ -683,3 +683,115 @@
+ 	}
+ }
+ 
++
++#ifdef YQ2_OPENFPGA
++/* This backend reads lightmaps at original BSP vertices, then interpolates
++ * their RGB565 colours during clipping/rasterization. Rebuild exactly those
++ * texels; the general/full lightmap path remains available for other callers.
++ * Collect every polygon before writing so unsupported inputs fall back cleanly. */
++int
++R_BuildVertexLightMap(msurface_t *surf, byte *dest, int stride, uint16_t *indices)
++{
++	int sx[64], sy[64], count = 0, visits = 0;
++	float values[64][3];
++	int smax = (surf->extents[0] >> 4) + 1;
++	int tmax = (surf->extents[1] >> 4) + 1;
++	int size = smax * tmax;
++	if (!surf->polys || smax <= 0 || tmax <= 0 ||
++		size > (sizeof(s_blocklights) >> 4) ||
++		(surf->texinfo->flags & (SURF_SKY | SURF_TRANS33 | SURF_TRANS66 | SURF_WARP)))
++		return false;
++	for (glpoly_t *p = surf->polys; p; p = p->next)
++	{
++		if (p->numverts <= 0 || p->numverts > 256 - visits) return false;
++		visits += p->numverts;
++		for (int v = 0; v < p->numverts; v++)
++		{
++			float u = p->verts[v][5] * BLOCK_WIDTH;
++			float vcoord = p->verts[v][6] * BLOCK_HEIGHT;
++			/* Also rejects NaNs before float-to-integer conversion. */
++			if (!(u >= 0 && u < BLOCK_WIDTH && vcoord >= 0 && vcoord < BLOCK_HEIGHT))
++				return false;
++			int x = (int)u - surf->light_s, y = (int)vcoord - surf->light_t;
++			if (x < 0 || x >= smax || y < 0 || y >= tmax) return false;
++			int k;
++			for (k = 0; k < count; k++) if (sx[k] == x && sy[k] == y) break;
++			if (k < count) continue;
++			if (count == 64) return false;
++			sx[count] = x; sy[count] = y; count++;
++		}
++	}
++	if (!count) return false;
++
++	int nummaps = 0;
++	while (nummaps < MAXLIGHTMAPS && surf->styles[nummaps] != 255) nummaps++;
++	for (int k = 0; k < count; k++)
++		for (int c = 0; c < 3; c++) values[k][c] = surf->samples ? 0 : 255;
++	if (surf->samples)
++	{
++		for (int map = 0; map < nummaps; map++)
++		{
++			float scale[3];
++			for (int c = 0; c < 3; c++)
++				scale[c] = r_modulate->value * r_newrefdef.lightstyles[surf->styles[map]].rgb[c];
++			int unity = scale[0] == 1.0f && scale[1] == 1.0f && scale[2] == 1.0f;
++			for (int k = 0; k < count; k++)
++			{
++				const byte *in = surf->samples + (map * size + sy[k] * smax + sx[k]) * 3;
++				for (int c = 0; c < 3; c++)
++				{
++					float value = unity ? in[c] : in[c] * scale[c];
++					if (nummaps == 1) values[k][c] = value;
++					else values[k][c] += value;
++				}
++			}
++		}
++		/* Preserve light order and the original truncation of axis distances. */
++		if (surf->dlightframe == r_framecount)
++		for (int lnum = 0; lnum < r_newrefdef.num_dlights; lnum++)
++		{
++			if (!(surf->dlightbits & (1u << lnum))) continue;
++			dlight_t *dl = &r_newrefdef.dlights[lnum];
++			float fdist = DotProduct(dl->origin, surf->plane->normal) - surf->plane->dist;
++			float frad = dl->intensity;
++			frad -= fabs(fdist);
++			if (frad < DLIGHT_CUTOFF) continue;
++			float fminlight = frad - DLIGHT_CUTOFF;
++			vec3_t impact;
++			for (int c = 0; c < 3; c++) impact[c] = dl->origin[c] - surf->plane->normal[c] * fdist;
++			float ls = DotProduct(impact, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3] - surf->texturemins[0];
++			float lt = DotProduct(impact, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3] - surf->texturemins[1];
++			for (int k = 0; k < count; k++)
++			{
++				int sd = Q_ftol(ls - (float)(sx[k] * 16));
++				int td = lt - (float)(sy[k] * 16);
++				if (sd < 0) sd = -sd;
++				if (td < 0) td = -td;
++				fdist = sd > td ? sd + (td >> 1) : td + (sd >> 1);
++				if (fdist < fminlight)
++					for (int c = 0; c < 3; c++) values[k][c] += (frad - fdist) * dl->color[c];
++			}
++		}
++	}
++	for (int k = 0; k < count; k++)
++	{
++		int r = Q_ftol(values[k][0]), g = Q_ftol(values[k][1]), b = Q_ftol(values[k][2]);
++		if (r < 0) r = 0;
++		if (g < 0) g = 0;
++		if (b < 0) b = 0;
++		int max = r > g ? r : g;
++		if (b > max) max = b;
++		int a = max;
++		if (max > 255)
++		{
++			float t = 255.0f / max;
++			r = r * t; g = g * t; b = b * t; a = a * t;
++		}
++		if (gl_state.minlight_set) { r = minlight[r]; g = minlight[g]; b = minlight[b]; }
++		byte *out = dest + sy[k] * stride + sx[k] * 4;
++		out[0] = gammatable[r]; out[1] = gammatable[g]; out[2] = gammatable[b]; out[3] = a;
++		if (indices) indices[k] = (surf->light_t + sy[k]) * BLOCK_WIDTH + surf->light_s + sx[k];
++	}
++	return count;
++}
++#endif
+--- a/src/quake2/src/client/refresh/gl1/gl1_main.c
++++ b/src/quake2/src/client/refresh/gl1/gl1_main.c
+@@ -419,6 +419,29 @@
+ R_DrawParticles2(int num_particles, const particle_t particles[],
+ 		const unsigned *colortable)
+ {
++#ifdef YQ2_OPENFPGA
++	vec3_t direct_up, direct_right;
++	VectorScale(vup, 1.5, direct_up);
++	VectorScale(vright, 1.5, direct_right);
++	R_Bind(r_particletexture->texnum);
++	glDepthMask(GL_FALSE);
++	glEnable(GL_BLEND);
++	R_TexEnv(GL_MODULATE);
++	int handled = OFGL_DrawParticleBillboards(particles[0].origin,
++		&particles[0].color, &particles[0].alpha, sizeof(*particles),
++		num_particles, direct_up, direct_right, r_origin, vpn, colortable, gammatable);
++	if (handled)
++	{
++		glDisableClientState(GL_VERTEX_ARRAY);
++		glDisableClientState(GL_TEXTURE_COORD_ARRAY);
++		glDisableClientState(GL_COLOR_ARRAY);
++		glDisable(GL_BLEND);
++		glColor4f(1, 1, 1, 1);
++		glDepthMask(GL_TRUE);
++		R_TexEnv(GL_REPLACE);
++		return;
++	}
++#endif
+ 	const particle_t *p;
+ 	int i;
+ 	vec3_t up, right;
+--- a/src/quake2/src/client/refresh/gl1/gl1_surf.c
++++ b/src/quake2/src/client/refresh/gl1/gl1_surf.c
+@@ -47,6 +47,9 @@
+ 
+ void R_SetCacheState(msurface_t *surf);
+ void R_BuildLightMap(msurface_t *surf, byte *dest, int stride);
++#ifdef YQ2_OPENFPGA
++int R_BuildVertexLightMap(msurface_t *surf, byte *dest, int stride, uint16_t *indices);
++#endif
+ 
+ static void
+ R_DrawGLPoly(msurface_t *fa)
+@@ -682,7 +685,20 @@
+ 			base = gl_lms.lightmap_buffer[i];
+ 			base += (current.top * BLOCK_WIDTH + current.left) * LIGHTMAP_BYTES;
+ 
+-			R_BuildLightMap(surf, base, BLOCK_WIDTH * LIGHTMAP_BYTES);
++			/* Update exactly the original-vertex samples the backend consumes.
++			 * The full rectangle remains the fallback for unsupported polygons. */
++#ifdef YQ2_OPENFPGA
++			uint16_t indices[64];
++			int count = R_BuildVertexLightMap(surf, base, BLOCK_WIDTH * LIGHTMAP_BYTES, indices);
++			if (count)
++				OFGL_UpdateLightmapSamples(gl_state.lightmap_textures + i + lmtex,
++					(const uint32_t *)gl_lms.lightmap_buffer[i], indices, count);
++			else
++#endif
++			{
++				R_BuildLightMap(surf, base, BLOCK_WIDTH * LIGHTMAP_BYTES);
++				R_JoinAreas(&current, &best);
++			}
+ 
+ 			surf->dirty_lightmap = (surf->dlightframe == r_framecount);
+ 			if (!surf->dirty_lightmap || gl_config.lightmapcopies)
+@@ -696,17 +712,22 @@
+ 					}
+ 				}
+ 			}
+-			R_JoinAreas(&current, &best);
+ 		}
+ 
+ #ifdef YQ2_OPENFPGA
+ 		/* The OpenFPGA backend folds every texture copy onto the same
+ 		 * synchronous CPU RGB565 page. Previous frames' changed rows are
+ 		 * already current there; replaying them only repeats conversion and
+-		 * invalidates cached vertex lighting. Keep this frame's full-width
+-		 * upload and the existing lightstyle/cache decisions above. */
++		 * invalidates cached vertex lighting. Keep this frame's changed
++		 * rectangle and the existing lightstyle/cache decisions above. */
+ 		if (!affected_lightmap)
+ 		{
++			continue;
++		}
++		if (best.right <= best.left)
++		{
++			/* Match upload binding state even when only scattered samples changed. */
++			R_Bind(gl_state.lightmap_textures + i + lmtex);
+ 			continue;
+ 		}
+ #else
+@@ -755,7 +776,13 @@
+ 		// upload changes
+ 		base = gl_lms.lightmap_buffer[i];
+ 
+-#ifdef YQ2_GL1_GLES
++#ifdef YQ2_OPENFPGA
++		base += (best.top * BLOCK_WIDTH + best.left) * LIGHTMAP_BYTES;
++		R_Bind(gl_state.lightmap_textures + i + lmtex);
++		OFGL_UpdateLightmapRect(gl_state.lightmap_textures + i + lmtex,
++			best.left, best.top, best.right - best.left, best.bottom - best.top,
++			(const uint32_t *)base, BLOCK_WIDTH);
++#elif defined(YQ2_GL1_GLES)
+ 		base += (best.top * BLOCK_WIDTH) * LIGHTMAP_BYTES;
+ 
+ 		R_Bind(gl_state.lightmap_textures + i + lmtex);
+--- a/src/quake2/src/common/header/of_mathf.h
++++ b/src/quake2/src/common/header/of_mathf.h
+@@ -41,6 +41,15 @@
+ #ifdef YQ2_OPENFPGA
+ 
+ #include <math.h>
++
++/* Preserve libm's exact float result for repeated arguments. The cache uses
++ * all argument bits, never angle quantization or an approximate polynomial. */
++float of_cached_sinf(float x);
++float of_cached_cosf(float x);
++float of_cached_tanf(float x);
++#define sinf(x) of_cached_sinf(x)
++#define cosf(x) of_cached_cosf(x)
++#define tanf(x) of_cached_tanf(x)
+ 
+ /* #undef first: musl may already define some of these as builtin macros
+  * (e.g. fabs). Re-pointing them at the *f variant is exactly what we want
+--- a/tools/check_quake2_renderer.py
++++ b/tools/check_quake2_renderer.py
+@@ -20,7 +20,9 @@
+     env = dict(os.environ, ASAN_OPTIONS="detect_leaks=0", UBSAN_OPTIONS="halt_on_error=1")
+     for name, extra in (
+         ("renderer", []),
++        ("particledirect", []),
+         ("worldgeometry", []),
++        ("worldposition", []),
+         ("worldpackets", []),
+         ("aliascache", []),
+         ("nativemesh", []),
+@@ -28,12 +30,14 @@
+         ("aliasmesh", [str(GAME / "src/common/shared/shared.c")]),
+         ("light", []),
+         ("lightmap_history", [str(ROOT / "tools/tests/quake2_lightmap_bridge.c")]),
++        ("vertexlight", [str(ROOT / "tools/tests/quake2_lightmap_bridge.c")]),
+         ("image", []),
+         ("models", [str(GAME / "src/client/refresh/files/models.c"),
+                     "-Werror=frame-larger-than=32768"]),
+         ("warp", [str(GAME / "src/client/refresh/gl1/gl1_warp.c")]),
+         ("sound", []),
+         ("soundbackend", []),
++        ("trigcache", []),
+         ("network", []),
+         ("videomenu", []),
+         ("input", []),
+--- a/tools/tests/quake2_lightmap_bridge.c
++++ b/tools/tests/quake2_lightmap_bridge.c
+@@ -1,7 +1,11 @@
+ /* Use the actual backend copy aliasing and RGB565 conversion in the
+  * lightmap history regression; keep the unused mini-GL sections discarded. */
+ #include <assert.h>
++#define OFGL_UpdateLightmapRect TestRendererUpdateLightmapRect
++#define OFGL_UpdateLightmapSamples TestRendererUpdateLightmapSamples
+ #include "../../src/quake2/openfpga/of_gl1.c"
++#undef OFGL_UpdateLightmapRect
++#undef OFGL_UpdateLightmapSamples
+ 
+ void TestLightmapUpload(int texnum, int x, int y, int w, int h,
+     const void *pixels, uint16_t pages[][128 * 128])
+@@ -11,3 +15,21 @@
+     ofgl_lm[block] = pages[block-1];
+     ofgl_lm_store(block,x,y,w,h,pixels);
+ }
++
++void TestLightmapUploadStride(int texnum, int x, int y, int w, int h,
++    const uint32_t *pixels, int stride, uint16_t pages[][128 * 128])
++{
++    int block = ofgl_lm_index(texnum);
++    assert(block >= 1 && block <= 3);
++    ofgl_lm[block] = pages[block-1];
++    TestRendererUpdateLightmapRect(texnum,x,y,w,h,pixels,stride);
++}
++
++void TestLightmapUploadSamples(int texnum, const uint32_t *pixels,
++    const uint16_t *indices, int count, uint16_t pages[][128 * 128])
++{
++    int block = ofgl_lm_index(texnum);
++    assert(block >= 1 && block <= 3);
++    ofgl_lm[block] = pages[block-1];
++    TestRendererUpdateLightmapSamples(texnum,pixels,indices,count);
++}
+--- a/tools/tests/quake2_lightmap_history_test.c
++++ b/tools/tests/quake2_lightmap_history_test.c
+@@ -19,6 +19,9 @@
+ static uint16_t packed[2][PAGES][BLOCK_WIDTH * BLOCK_HEIGHT];
+ static msurface_t surfaces[2][SURFACES];
+ static mtexinfo_t textures[SURFACES];
++#ifdef TEST_VERTEX_LIGHTMAP
++static glpoly_t polygons[SURFACES][2];
++#endif
+ static cplane_t planes[SURFACES];
+ static byte samples[SURFACES][4 * 17 * 17 * 3];
+ static int context, bound_page, bound_texture, copy_index[2];
+@@ -26,6 +29,28 @@
+ 
+ void TestLightmapUpload(int texnum, int x, int y, int w, int h,
+     const void *pixels, uint16_t pages[][BLOCK_WIDTH * BLOCK_HEIGHT]);
++void TestLightmapUploadStride(int texnum, int x, int y, int w, int h,
++    const uint32_t *pixels, int stride, uint16_t pages[][BLOCK_WIDTH * BLOCK_HEIGHT]);
++void OFGL_UpdateLightmapRect(int texnum, int x, int y, int w, int h,
++    const uint32_t *pixels, int stride)
++{
++    assert(texnum == bound_texture);
++    assert(x >= 0 && y >= 0 && w > 0 && h > 0);
++    assert(x+w <= BLOCK_WIDTH && y+h <= BLOCK_HEIGHT && stride == BLOCK_WIDTH);
++    upload_calls[context]++;
++    upload_pixels[context] += w*h;
++    TestLightmapUploadStride(texnum,x,y,w,h,pixels,stride,packed[context]);
++}
++void TestLightmapUploadSamples(int texnum, const uint32_t *pixels,
++    const uint16_t *indices, int count, uint16_t pages[][BLOCK_WIDTH * BLOCK_HEIGHT]);
++void OFGL_UpdateLightmapSamples(int texnum, const uint32_t *pixels,
++    const uint16_t *indices, int count)
++{
++    assert(count > 0 && count <= 64);
++    for (int k=0;k<count;k++) assert(indices[k]<BLOCK_WIDTH*BLOCK_HEIGHT);
++    upload_pixels[context] += count;
++    TestLightmapUploadSamples(texnum,pixels,indices,count,packed[context]);
++}
+ void Com_Printf(const char *fmt, ...) { (void)fmt; }
+ 
+ void Com_Error(int code, const char *fmt, ...)
+@@ -267,6 +292,21 @@
+             s->extents[0]=(1+i%17)*16; s->extents[1]=(1+(i*3)%17)*16;
+             s->styles[0]=0; s->styles[1]=i%3 ? 255 : (i%2 ? 1 : 32);
+             s->styles[2]=s->styles[3]=255;
++#ifdef TEST_VERTEX_LIGHTMAP
++            s->polys = &polygons[i][0];
++            for (int n=0;n<2;n++)
++            {
++                glpoly_t *p=&polygons[i][n];
++                p->numverts=4; p->next=n==0 ? &polygons[i][1] : NULL;
++                for (int v=0;v<4;v++)
++                {
++                    int x=(n==0 ? ((v&1) ? s->extents[0]>>4 : 0) : (v*3) % ((s->extents[0]>>4)+1));
++                    int y=(n==0 ? ((v&2) ? s->extents[1]>>4 : 0) : (v*2) % ((s->extents[1]>>4)+1));
++                    p->verts[v][5]=(s->light_s+x+0.5f)/BLOCK_WIDTH;
++                    p->verts[v][6]=(s->light_t+y+0.5f)/BLOCK_HEIGHT;
++                }
++            }
++#endif
+         }
+     }
+     for (int frame=1;frame<=3000;frame++)
+@@ -296,6 +336,11 @@
+             {
+                 surfaces[c][i].dlightframe=lit ? frame : -1;
+                 surfaces[c][i].dlightbits=1u<<((frame+i)%4);
++#ifdef TEST_VERTEX_LIGHTMAP
++                /* Mix sparse and full builders on the same atlas page and
++                 * transition both ways without relying on stale interiors. */
++                surfaces[c][i].polys=((frame/31+i)%7==0) ? NULL : &polygons[i][0];
++#endif
+             }
+         }
+         for (context=0;context<2;context++)
+@@ -314,8 +359,21 @@
+             copy_index[context]=cur_lm_copy;
+         }
+         assert(copy_index[0]==copy_index[1]);
++#ifdef TEST_VERTEX_LIGHTMAP
++        for (int i=0;i<SURFACES;i++)
++        for (glpoly_t *p=&polygons[i][0];p;p=p->next)
++        for (int v=0;v<p->numverts;v++)
++        {
++            int x=(int)(p->verts[v][5]*BLOCK_WIDTH);
++            int y=(int)(p->verts[v][6]*BLOCK_HEIGHT);
++            int page=surfaces[1][i].lightmaptexturenum-1;
++            assert(rgba[0][page][y*BLOCK_WIDTH+x]==rgba[1][page][y*BLOCK_WIDTH+x]);
++            assert(packed[0][page][y*BLOCK_WIDTH+x]==packed[1][page][y*BLOCK_WIDTH+x]);
++        }
++#else
+         assert(!memcmp(rgba[0],rgba[1],sizeof(rgba[0])));
+         assert(!memcmp(packed[0],packed[1],sizeof(packed[0])));
++#endif
+         for (int i=0;i<SURFACES;i++)
+         {
+             assert(surfaces[0][i].dirty_lightmap==surfaces[1][i].dirty_lightmap);
+@@ -325,7 +383,11 @@
+     }
+     assert(upload_calls[1]<upload_calls[0]);
+     assert(upload_pixels[1]<upload_pixels[0]);
++#ifdef TEST_VERTEX_LIGHTMAP
++    printf("PASS: 3000 frames, exact sampled RGBA/RGB565 across polygon chains and style cache; "
++#else
+     printf("PASS: 3000 frames, exact full RGBA/RGB565 pages and style cache; "
++#endif
+            "uploads %llu -> %llu, pixels %llu -> %llu\n",
+            (unsigned long long)upload_calls[0],(unsigned long long)upload_calls[1],
+            (unsigned long long)upload_pixels[0],(unsigned long long)upload_pixels[1]);
+--- /dev/null
++++ b/tools/tests/quake2_particledirect_test.c
+@@ -0,0 +1,75 @@
++#define main renderer_existing_main
++#include "quake2_renderer_test.c"
++#undef main
++
++typedef struct { float origin[3]; int colour; float alpha; } particle_input_t;
++static uint32_t random_state = 713821u;
++static uint32_t random_value(void)
++{
++    random_state = random_state * 1664525u + 1013904223u;
++    return random_state;
++}
++int main(void)
++{
++    assert(RI_InitContext(NULL));
++    uint32_t palette[256]; uint8_t gamma[256];
++    for (unsigned i = 0; i < 256; ++i) {
++        palette[i] = random_value(); gamma[i] = (i * 199u) & 255u;
++    }
++    for (unsigned iteration = 0; iteration < 10000; ++iteration) {
++        particle_input_t particles[4];
++        float vtx[12][3], uv[12][2]; uint8_t rgba[12][4];
++        float up[3] = {0,1.5f,0}, right[3] = {1.5f,0,0};
++        float eye[3] = {0,0,0}, forward[3] = {0,0,-1};
++        for (unsigned i = 0; i < 4; ++i) {
++            particle_input_t *p = particles + i;
++            for (unsigned k = 0; k < 2; ++k)
++                p->origin[k] = ((int)(random_value() % 100001u) - 50000) * .001f;
++            p->origin[2] = -(random_value() % 100001u) * .001f;
++            p->colour = random_value() & 255u;
++            p->alpha = iteration % 9 == 0 ? 0 : iteration % 7 == 0 ? 1 :
++                (random_value() & 255u) * (1.0f / 255.0f);
++            float scale = -p->origin[2];
++            scale = scale < 20 ? 1 : 1 + scale * .004f;
++            uint32_t c = palette[p->colour];
++            for (unsigned j = 0; j < 3; ++j) {
++                for (unsigned k = 0; k < 3; ++k)
++                    vtx[i*3+j][k] = p->origin[k] + (j == 0 ? 0 :
++                        (j == 1 ? up[k] : right[k]) * scale);
++                uv[i*3+j][0] = j == 1 ? 1.0625f : .0625f;
++                uv[i*3+j][1] = j == 2 ? 1.0625f : .0625f;
++                rgba[i*3+j][0] = gamma[c & 255u];
++                rgba[i*3+j][1] = gamma[(c >> 8) & 255u];
++                rgba[i*3+j][2] = gamma[(c >> 16) & 255u];
++                rgba[i*3+j][3] = p->alpha * 255;
++            }
++        }
++        setup_world_arrays(vtx[0]);
++        ofgl_tex2d_on[1] = 0;
++        ofgl_TexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
++        ofgl_Enable(GL_BLEND); ofgl_DepthMask(GL_FALSE);
++        ofgl_Rotatef((iteration % 31u) * .13f, 0, 1, 0);
++        ofgl_EnableClientState(GL_COLOR_ARRAY);
++        ofgl_VertexPointer(3, GL_FLOAT, 0, vtx);
++        ofgl_TexCoordPointer(2, GL_FLOAT, 0, uv);
++        ofgl_ColorPointer(4, GL_UNSIGNED_BYTE, 0, rgba);
++        reset_geometry_recording();
++        ofgl_DrawArrays(GL_TRIANGLES, 0, 12);
++        int expected_count = draws;
++        cpu_triangle_t expected[32]; unsigned expected_alpha[32];
++        for (int i = 0; i < draws; ++i) {
++            expected[i] = recorded_cpu_triangle(i); expected_alpha[i] = alpha_seen[i];
++        }
++        reset_geometry_recording();
++        assert(OFGL_DrawParticleBillboards(particles[0].origin, &particles[0].colour,
++            &particles[0].alpha, sizeof(*particles), 4, up, right, eye, forward, palette, gamma));
++        assert(draws == expected_count);
++        for (int i = 0; i < draws; ++i) {
++            check_cpu_triangle(i, expected+i);
++            assert(alpha_seen[i] == expected_alpha[i]);
++        }
++    }
++    RI_ShutdownContext();
++    puts("PASS: 40000 direct particle billboards exactly match staged geometry, UVs, RGB, alpha, clipping and ordering");
++    return 0;
++}
+--- /dev/null
++++ b/tools/tests/quake2_trigcache_test.c
+@@ -0,0 +1,32 @@
++#include <assert.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++#include "../../src/quake2/openfpga/trig_of.c"
++
++static void check(float x)
++{
++	float expected[3] = {sinf(x), cosf(x), tanf(x)};
++	for (unsigned repeat = 0; repeat < 3; ++repeat)
++	{
++		float actual[3] = {of_cached_sinf(x), of_cached_cosf(x), of_cached_tanf(x)};
++		assert(memcmp(actual, expected, sizeof(actual)) == 0);
++	}
++}
++int main(void)
++{
++	uint32_t state = 0x638191u;
++	for (unsigned i = 0; i < 100000; ++i)
++	{
++		state = state * 1664525u + 1013904223u;
++		uint32_t bits = state;
++		if ((bits & 0x7f800000u) == 0x7f800000u) continue;
++		float x;
++		memcpy(&x, &bits, sizeof(x));
++		check(x);
++		check(0.0f); check(-0.0f);
++		check((float)(int)(state % 721u) * 0.017453292519943295f);
++	}
++	puts("PASS: exact trig results, signed zero, arbitrary finite arguments, repeats and collisions");
++	return 0;
++}
+--- /dev/null
++++ b/tools/tests/quake2_vertexlight_test.c
+@@ -0,0 +1,83 @@
++#define TEST_VERTEX_LIGHTMAP 1
++#define main HistoryMain
++#include "quake2_lightmap_history_test.c"
++#undef main
++
++int main(void)
++{
++    HistoryMain();
++    lightstyle_t styles[256] = {0};
++    dlight_t lights[4] = {0};
++    r_newrefdef.lightstyles = styles;
++    r_newrefdef.dlights = lights;
++    r_newrefdef.num_dlights = 4;
++    r_framecount = 100;
++    mtexinfo_t tex = {0};
++    cplane_t plane = {0};
++    msurface_t s = {0};
++    uint32_t expected[128*128], actual[128*128];
++    byte data[4*17*17*3], used[17*17];
++    glpoly_t *p = calloc(1, sizeof(glpoly_t) + 64*VERTEXSIZE*sizeof(float));
++    assert(p);
++    s.polys=p; s.texinfo=&tex; s.plane=&plane;
++    s.light_s=31; s.light_t=23;
++    tex.vecs[0][0]=tex.vecs[1][1]=1;
++    plane.normal[2]=1;
++    for (int trial=0;trial<4000;trial++)
++    {
++        int width=2+Random()%16, height=2+Random()%16;
++        int maps=trial%5;
++        s.extents[0]=(width-1)*16; s.extents[1]=(height-1)*16;
++        s.samples=trial%7 ? data : NULL;
++        s.dlightframe=trial%2 ? r_framecount : -1;
++        s.dlightbits=Random()&15;
++        s.texturemins[0]=(int)(Random()%100)-50;
++        s.texturemins[1]=(int)(Random()%100)-50;
++        for (int k=0;k<4;k++)
++        {
++            s.styles[k]=k<maps ? k : 255;
++            for (int c=0;c<3;c++) styles[k].rgb[c]=trial%9 ? RandomFloat(-0.1f,3.0f) : 1;
++            lights[k].intensity=RandomFloat(0,850);
++            for (int c=0;c<3;c++)
++            {
++                lights[k].origin[c]=RandomFloat(-50,300);
++                lights[k].color[c]=RandomFloat(-0.5f,2);
++            }
++        }
++        modulate.value=trial%9 ? RandomFloat(0.2f,2) : 1;
++        gl_state.minlight_set=trial%2;
++        for (unsigned k=0;k<sizeof(data);k++) data[k]=(byte)Random();
++        memset(used,0,sizeof(used));
++        p->numverts=1+Random()%32;
++        for (int v=0;v<p->numverts;v++)
++        {
++            int x=Random()%width, y=Random()%height;
++            used[y*width+x]=1;
++            /* Pixel boundaries as well as interior nearest samples. */
++            p->verts[v][5]=(s.light_s+x+(trial%2 ? 0 : 0.5f))/128.0f;
++            p->verts[v][6]=(s.light_t+y+(trial%2 ? 0 : 0.5f))/128.0f;
++        }
++        memset(expected,0x55,sizeof(expected)); memset(actual,0x55,sizeof(actual));
++        R_BuildLightMap(&s,(byte *)expected,128*4);
++        assert(R_BuildVertexLightMap(&s,(byte *)actual,128*4,NULL));
++        for (int y=0;y<128;y++) for(int x=0;x<128;x++)
++            assert(actual[y*128+x] ==
++                (x<width && y<height && used[y*width+x] ? expected[y*128+x] : 0x55555555u));
++        /* Failure must be atomic, leaving the full builder an untouched page. */
++        p->verts[p->numverts-1][5]=-1;
++        memset(actual,0x55,sizeof(actual));
++        assert(!R_BuildVertexLightMap(&s,(byte *)actual,128*4,NULL));
++        for (int k=0;k<128*128;k++) assert(actual[k]==0x55555555u);
++    }
++    s.extents[0]=s.extents[1]=16*16;
++    p->numverts=65;
++    for (int v=0;v<65;v++)
++    {
++        p->verts[v][5]=(s.light_s+v%17+0.5f)/128.0f;
++        p->verts[v][6]=(s.light_t+v/17+0.5f)/128.0f;
++    }
++    assert(!R_BuildVertexLightMap(&s,(byte *)actual,128*4,NULL));
++    free(p);
++    puts("PASS: 4000 exact sparse/full comparisons, 0-4 styles, missing samples, negative lights, gamma/minlight, UV edges and atomic fallback");
++    return 0;
++}
+--- /dev/null
++++ b/tools/tests/quake2_worldposition_test.c
+@@ -0,0 +1,76 @@
++#define main renderer_existing_main
++#include "quake2_renderer_test.c"
++#undef main
++#include <limits.h>
++
++static void check_position(int index)
++{
++    ofgl_cvert_t expected = {0}, actual;
++    const float *xyz = ofgl_fetch_position(index, &expected);
++    ofgl_world_project_original(xyz, &expected);
++    ofgl_classify_cvert(&expected);
++    ofgl_world_position(index, &actual);
++    assert(actual.x == expected.x && actual.y == expected.y && actual.z == expected.z);
++    assert(actual.clipcode == expected.clipcode && actual.viewcode == expected.viewcode);
++    assert(actual.attrs_valid == 0 && actual.projected_valid == expected.projected_valid);
++    if (actual.projected_valid == 1) {
++        assert(actual.px == expected.px && actual.py == expected.py);
++        assert(actual.depth == expected.depth && actual.iw == expected.iw);
++        assert(actual.sx == expected.sx && actual.sy == expected.sy);
++    }
++    /* The caller can modify its attributes without contaminating the cache. */
++    actual.s = 123; actual.t = -456; actual.rgb = 12345; actual.attrs_valid = 1;
++    ofgl_world_position(index, &actual);
++    assert(actual.attrs_valid == 0);
++}
++
++static void begin_world(void)
++{
++    const ofq2_texture_t *tex;
++    float tw, th;
++    OFGL_SetWorldDraw(1);
++    assert(ofgl_begin3d(&tex, &tw, &th));
++    assert(ofgl_batch_world);
++}
++
++int main(void)
++{
++    assert(RI_InitContext(NULL));
++    float v[4][7] = {{-4,-4,-32,0,0,0,0}, {4,-4,-32,1,0,0,0},
++        {4,4,-32,1,1,0,0}, {-4,4,-32,0,1,0,0}};
++    gpu_geometry = 1;
++    setup_world_arrays(v[0]);
++    begin_world();
++    for (int i = 0; i < 4; ++i) { check_position(i); check_position(i); }
++    ofgl_end3d();
++
++    /* Reusing the array pointer with new coordinates cannot hit stale data. */
++    v[0][0] = 7.25f; v[0][2] = -45;
++    begin_world(); check_position(0); ofgl_end3d();
++
++    /* Force a complete tag wrap with ancient epoch-one entries. All of them
++     * must be discarded before epoch one is reused by the new transform. */
++    for (unsigned i = 0; i < 128; ++i) {
++        ofgl_world_positions[i].epoch = 1;
++        ofgl_world_positions[i].position.x = 1000000;
++    }
++    ofgl_world_prepared = 1;
++    ofgl_world_epoch = UINT_MAX;
++    ofgl_Translatef(1, 2, 3);
++    begin_world();
++    assert(ofgl_world_epoch == 1 && ofgl_world_prepared == 1);
++    for (unsigned i = 0; i < 128; ++i) assert(ofgl_world_positions[i].epoch == 0);
++    for (int i = 0; i < 4; ++i) check_position(i);
++    ofgl_end3d();
++
++    /* Both viewport and matrix changes invalidate all projected coordinates. */
++    ofgl_Viewport(17, 23, 240, 180);
++    ofgl_Rotatef(7, 0, 1, 0);
++    begin_world();
++    assert(ofgl_world_epoch == 2);
++    for (int i = 0; i < 4; ++i) check_position(i);
++    ofgl_end3d();
++    RI_ShutdownContext();
++    puts("PASS: world positions preserve fresh attributes and invalidate on XYZ, transform, viewport and epoch wrap");
++    return 0;
++}

@@ -1,0 +1,14 @@
+Quake2 renderer regressions passed
+PASS: 1044481 exact corrected reciprocals; 100000 shared world endpoints; precision gate boundaries and CPU fallback; flowing/alpha/oversized neighbours, scoped hint, safe bounds and near clipping
+PASS: cached alias topology, winding, UV seams, limits and release
+PASS: MD2 direct/cached/fallback parity; colour generation wrap; 32000 interpolation bounds and all shell combinations; 100000 conservative culling cases
+PASS: exact dynamic lightmaps, cutoff/truncation boundaries, wide surfaces
+PASS: 3000 frames, exact full RGBA/RGB565 pages and style cache; uploads 8598 -> 8199, pixels 59351680 -> 36680448
+PASS: image lookup collisions, reuse, restart and missing-image retry
+PASS: BSP node loading and stack budget
+PASS: exact water polygon hunk sizing
+PASS: sound RMS results and accumulator range
+PASS: local server never stalls rendering; dedicated pacing retained
+PASS: Pocket Video menu controls, staging, defaults and conditional restart
+PASS: pad binding migration/rebinding, menu release/suppression, no duplicate digital input, sensitivity/inversion/run and menu gating
+PASS: supported compact Options and pad labels fit 320x240; scoped reset preserves video/bindings; one save on menu exit

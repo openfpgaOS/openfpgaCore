@@ -1,0 +1,33 @@
+{
+  "status": "PASS",
+  "checks": 55993,
+  "random_source_pairs": 4096,
+  "route_combinations": 16,
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app-v2/evidence/test_source_cache.py": "e4a4c67fd9fd55bde91b719254fb90bff8a1d8b14d0a71b1acec7a6ff1539b40",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app-v2/src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "915bf2e8af3206bf67c263a8317a9826fae257590b72ab9eb047236f9be12b7b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app-v2/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "20d5461d5d587fff296433f755c169c8cf039fbcbba85a0119f2df5ce4ebb8d9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app-v2/evidence/source-cache-tests-v1/test.c": "abe0b9f8cc4271ad48537c24f061f1c5d2852eb4945c5f1d73735ce92c8823ee"
+  },
+  "scope": [
+    "Actual unchanged pool allocator/source API and new task memo/route functions are compiled together. Stub upload checks exact bytes/nonoverlap; owner drain is an API assumption, separately verified by native/RTL lifetime checks.",
+    "Tests include true allocator generation change between vertex/command allocations, full32-bit wrap, shape/key changes, throttled failure, immutable cache hits while a reader owns old sources, and exact route-counter preservation.",
+    "Static source assertion requires topology slot initialization to invalidate its parallel offset key. Full runtime caches/topology/native rendering require the paired replay."
+  ],
+  "commands": [
+    [
+      "cc",
+      "-std=c11",
+      "-O1",
+      "-g",
+      "-fsanitize=address,undefined",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app-v2/evidence/source-cache-tests-v1/test.c",
+      "-o",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app-v2/evidence/source-cache-tests-v1/test"
+    ],
+    [
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app-v2/evidence/source-cache-tests-v1/test"
+    ]
+  ],
+  "sanitizers": "ASan+UBSan; LSan disabled under ptrace"
+}

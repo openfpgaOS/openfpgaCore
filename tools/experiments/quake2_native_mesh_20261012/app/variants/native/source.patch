@@ -1,0 +1,1055 @@
+--- a/src/quake2/openfpga/of_emit_q2.c
++++ b/src/quake2/openfpga/of_emit_q2.c
+@@ -98,6 +98,17 @@
+ /* Fast-texture manager generation: OFQ2_TexReset bumps it so image_t handles
+  * built in an older generation are detected stale and lazily re-created. */
+ static uint32_t ofq2_tex_generation = 1;
++/* Textures grow upwards; immutable native assets grow downwards. Shrinking
++ * the texture manager's allocation ceiling keeps both owners disjoint. Its
++ * physical end is retained so map changes can reclaim only native storage. */
++static uint32_t ofq2_native_end;
++static uint32_t ofq2_native_generation = 1;
++
++static void
++ofq2_native_epoch(void)
++{
++	if (++ofq2_native_generation == 0) ofq2_native_generation = 1;
++}
+ 
+ /* ofq2_texture_t (of_emit_q2.h) is cast to of_texture_t (of_texture.h); the
+  * layouts must stay identical. Field order/types match by construction; guard
+@@ -246,6 +257,8 @@
+ 		/* Status bit 11 distinguishes the independent worker from the
+ 		 * inline geometry decoder, whose raw packet limit is three vertices. */
+ 		if (geometry_status & (1u << 11)) ofq2_caps |= OFQ2_CAP_GEOMETRY_WORKER;
++		if ((geometry_status & (3u << 11)) == (3u << 11))
++			ofq2_caps |= OFQ2_CAP_NATIVE_MESH;
+ 	}
+ 	/* full texel*C+D colour combiner (22-word 0x4E + control bit 30) */
+ 	if ((ofq2_caps & OFQ2_CAP_VCOLOR) && (hw & OF_HW_GPU_COMBINE))
+@@ -271,6 +284,8 @@
+ 	/* fast-texture manager: read tex_fast_size now that the GPU is up
+ 	 * (no-op / SDRAM-only when the target has no fast texture tier). */
+ 	of_texture_init();
++	ofq2_native_end = _of_tex_fast_size;
++	ofq2_native_epoch();
+ 	ofq2_texture_route_sdram();
+ 	ofq2_tex_generation = 1;
+ 
+@@ -289,6 +304,8 @@
+ 	/* Reinitialization invalidates all handles: finish their draws first. */
+ 	OFQ2_Finish();
+ 	of_texture_init();
++	ofq2_native_end = _of_tex_fast_size;
++	ofq2_native_epoch();
+ 	ofq2_texture_route_sdram();
+ 	ofq2_tex_generation = 1;
+ }
+@@ -300,6 +317,8 @@
+ 		return;
+ 	/* Drain before new uploads reuse offsets referenced by queued draws. */
+ 	OFQ2_Finish();
++	_of_tex_fast_size = ofq2_native_end;
++	ofq2_native_epoch();
+ 	of_texture_reset();
+ 	ofq2_tex_generation++;
+ }
+@@ -1038,6 +1057,68 @@
+ 		*w++ = (i << 5) | ((i + 1) << 10) | (cull << 15);
+ 	}
+ 	_gpu_ring_commit(words);
++	ofq2_pending = true;
++	return 1;
++}
++
++int
++OFQ2_NativeReserve(uint32_t bytes, uint32_t *address)
++{
++#ifndef OF_PC
++	if (!address || !bytes || bytes > 0x01000000u ||
++		ofq2_native_end > 0x01000000u || !OFQ2_Supports(OFQ2_CAP_NATIVE_MESH)) return 0;
++	uint32_t aligned = (bytes + 15u) & ~15u;
++	if (aligned > of_texture_budget_free() ||
++		aligned >= _of_tex_fast_size) return 0;
++	/* The upload port is load-time/GPU-idle. Generation resets already wait
++	 * for completion too, so old immutable asset copies cannot be overwritten
++	 * while a queued native draw still reads them. This is never a draw fence. */
++	OFQ2_Finish();
++	_of_tex_fast_size -= aligned;
++	*address = _of_tex_fast_size;
++	return 1;
++#else
++	(void)bytes; (void)address;
++	return 0;
++#endif
++}
++
++void
++OFQ2_NativeUpload(uint32_t address, const uint32_t *words, uint32_t count)
++{
++	if (!words || (address & 3u) || address < _of_tex_fast_size ||
++		address > ofq2_native_end || count > (ofq2_native_end - address) / 4u) return;
++	_of_gpu_fast_tex_upload(address, words, count);
++}
++
++uint32_t
++OFQ2_NativeGeneration(void)
++{
++	return ofq2_native_generation;
++}
++
++void
++OFQ2_NativeReset(void)
++{
++	if (!OFQ2_Supports(OFQ2_CAP_NATIVE_MESH)) return;
++	OFQ2_Finish();
++	_of_tex_fast_size = ofq2_native_end;
++	ofq2_native_epoch();
++}
++
++int
++OFQ2_DrawNativeMesh(const uint32_t words[OFQ2_NATIVE_WORDS])
++{
++	if (!words || !OFQ2_Supports(OFQ2_CAP_NATIVE_MESH) ||
++		!ofq2_tristate_valid || ofq2_tristate_dirty) return 0;
++	_gpu_stream_reserve_words(1u + OFQ2_NATIVE_WORDS);
++	uint32_t *out = _gpu_ring_claim();
++	*out++ = 0x60000000u | OFQ2_NATIVE_WORDS;
++	memcpy(out, words, OFQ2_NATIVE_WORDS * sizeof(*words));
++	_gpu_ring_commit(1u + OFQ2_NATIVE_WORDS);
++	/* Native jobs own their matrix/viewport. The next legacy object packet
++	 * must be emitted even if its CPU shadow equals the earlier world state. */
++	ofq2_objstate_valid = false;
+ 	ofq2_pending = true;
+ 	return 1;
+ }
+--- a/src/quake2/openfpga/of_emit_q2.h
++++ b/src/quake2/openfpga/of_emit_q2.h
+@@ -156,6 +156,18 @@
+ #define OFQ2_CAP_COMBINE          (1u << 16)	/* texel*C+D combiner (22-word 0x4E) */
+ #define OFQ2_CAP_GEOMETRY         (1u << 17)	/* packed raw geometry, 0x59 + 0x5B */
+ #define OFQ2_CAP_GEOMETRY_WORKER  (1u << 18)	/* independent worker: up to 32 raw vertices/packet */
++#define OFQ2_CAP_NATIVE_MESH      (1u << 19) /* 0x60 native MD2 mesh jobs, status bit 12 */
++
++#define OFQ2_NATIVE_WORDS 164u
++/* Reserve one immutable asset block from the shared texture allocator. Upload
++ * is load-time only; reserve drains previous work once, not once per draw. */
++int OFQ2_NativeReserve(uint32_t bytes, uint32_t *address);
++void OFQ2_NativeUpload(uint32_t address, const uint32_t *words, uint32_t count);
++int OFQ2_DrawNativeMesh(const uint32_t words[OFQ2_NATIVE_WORDS]);
++uint32_t OFQ2_NativeGeneration(void);
++/* Map registration only: finish old draws, reclaim native assets, retain every
++ * texture address and its uploaded contents. No per-model completion fence. */
++void OFQ2_NativeReset(void);
+ 
+ /* Up to 32 packed vertices, five words each: slot, signed XY, signed Z/RGB,
+  * S, T. Fan indices and culling are submitted in one ring reservation.
+--- a/src/quake2/openfpga/of_gl1.c
++++ b/src/quake2/openfpga/of_gl1.c
+@@ -2664,6 +2664,138 @@
+ 	return 1;
+ }
+ 
++int
++OFGL_NativeAvailable(void)
++{
++	return ofgl_gpu_ok && OFQ2_Supports(OFQ2_CAP_NATIVE_MESH);
++}
++
++void
++OFGL_NativeReset(void)
++{
++	if (OFGL_NativeAvailable()) OFQ2_NativeReset();
++}
++
++static int
++ofgl_native_upload(ofgl_native_mesh_t *mesh, unsigned width, unsigned height)
++{
++	uint32_t generation = OFQ2_NativeGeneration();
++	/* An alternate-size skin keeps the CPU path for this model until the next
++	 * map epoch. Never allocate/upload the complete animation again per draw. */
++	if (mesh->gpu_generation == generation)
++		return mesh->gpu_width == width && mesh->gpu_height == height;
++	uint64_t frame_bytes = (uint64_t)mesh->source_vertices * mesh->frame_count * 4u;
++	uint64_t bytes = frame_bytes + (uint64_t)mesh->block_words * 4u;
++	if (bytes > 0x01000000u) return 0;
++	uint32_t address;
++	if (!OFQ2_NativeReserve((uint32_t)bytes, &address)) return 0;
++	for (unsigned f = 0; f < mesh->frame_count; ++f)
++		OFQ2_NativeUpload(address + f * mesh->source_vertices * 4u,
++			(const uint32_t *)(mesh->frames + (size_t)f * mesh->frame_stride), mesh->source_vertices);
++	uint32_t mesh_address = address + (uint32_t)frame_bytes;
++	const uint32_t *src = mesh->blocks;
++	uint32_t offset = mesh_address;
++	for (unsigned block = 0; block < mesh->block_count; ++block)
++	{
++		unsigned nv = src[0] & 255u, nt = (src[0] >> 8) & 65535u;
++		uint32_t words[1 + 32 * 3 + 64];
++		words[0] = src[0];
++		for (unsigned v = 0; v < nv; ++v)
++		{
++			float s, t;
++			memcpy(&s, src + 2 + v * 3, 4);
++			memcpy(&t, src + 3 + v * 3, 4);
++			words[1 + v * 3] = src[1 + v * 3];
++			words[2 + v * 3] = (uint32_t)(int32_t)lrintf(s * (float)width * 65536.0f);
++			words[3 + v * 3] = (uint32_t)(int32_t)lrintf(t * (float)height * 65536.0f);
++		}
++		unsigned nwords = 1 + nv * 3 + nt;
++		memcpy(words + 1 + nv * 3, src + 1 + nv * 3, nt * 4);
++		OFQ2_NativeUpload(offset, words, nwords);
++		offset += nwords * 4;
++		src += nwords;
++	}
++	mesh->gpu_frames = address;
++	mesh->gpu_blocks = mesh_address;
++	mesh->gpu_end = offset;
++	mesh->gpu_width = width;
++	mesh->gpu_height = height;
++	mesh->gpu_generation = generation;
++	return 1;
++}
++
++int
++OFGL_DrawNativeAlias(const ofgl_native_draw_t *draw)
++{
++	if (!draw || !draw->mesh || !OFGL_NativeAvailable() ||
++		ofgl_blend_on || ofgl_depth_scale != 1.0f || !ofgl_tex2d_enabled ||
++		!ofgl_draw_enabled(OFGL_DRAW_INDEXED)) return 0;
++	ofgl_native_mesh_t *mesh = draw->mesh;
++	if (!mesh->block_count || draw->frame >= mesh->frame_count ||
++		draw->old_frame >= mesh->frame_count) return 0;
++	OFGL_SetDrawBounds(draw->mins, draw->maxs);
++	if (!ofgl_draw_bounds_valid) return 0;
++	ofgl_array_t saved = ofgl_va_vertex;
++	/* begin3d only resolves state; it never dereferences this placeholder. */
++	ofgl_va_vertex.ptr = (const byte *)draw;
++	const ofq2_texture_t *tex;
++	float tw, th;
++	int begin = ofgl_begin3d(&tex, &tw, &th);
++	ofgl_va_vertex = saved;
++	if (!begin || !ofgl_batch_inside) return 0;
++	float min_z, max_z;
++	ofgl_world_prepare();
++	if (ofgl_box_bounds(ofgl_draw_center, ofgl_draw_extent, &min_z, &max_z) != 1 ||
++		!ofgl_finite(min_z) || !ofgl_finite(max_z) || min_z < 16.0f || max_z > 4096.0f) return 0;
++	float maxst = fmaxf(1.0f, fmaxf(mesh->max_s * tw, mesh->max_t * th));
++	/* Same accepted fixed attribute precision envelope as raw BSP geometry.
++	 * Whole-model fallback prevents mixed projection conventions in a mesh. */
++	if (!ofgl_finite(maxst) || maxst > 32767.0f ||
++		(maxst + 1.0f) * (maxst + 1.0f) * max_z > 262144.0f * min_z) return 0;
++	uint32_t job[OFQ2_NATIVE_WORDS] = {0};
++	int32_t xc = (int32_t)floorf(ofgl_pc_xc);
++	int32_t yc = (int32_t)lrintf(ofgl_pc_yc * 16.0f);
++	float xb = (ofgl_pc_xc - (float)xc + 0.03125f) / 128.0f;
++	float yb = ((float)yc / 16.0f - ofgl_pc_yc + 0.03125f) / 128.0f;
++	const float *mv = OFGL_MV;
++	for (unsigned row = 0; row < 3; ++row)
++	{
++		float basis[4];
++		for (unsigned k = 0; k < 4; ++k)
++			basis[k] = row == 0 ? mv[k * 4] * (ofgl_pc_xs / 128.0f) - mv[k * 4 + 2] * xb :
++				row == 1 ? mv[k * 4 + 1] * (ofgl_pc_ys / 128.0f) - mv[k * 4 + 2] * yb :
++				-mv[k * 4 + 2];
++		for (unsigned k = 0; k < 6; ++k)
++		{
++			float scale = k < 3 ? draw->old_scale[k] : draw->scale[k - 3];
++			float coeff = basis[k % 3] * scale * 16777216.0f;
++			if (!ofgl_finite(coeff) || fabsf(coeff) > 2147483520.0f) return 0;
++			job[7 + row * 8 + k] = (uint32_t)(int32_t)lrintf(coeff);
++		}
++		float offset = (basis[3] + basis[0] * draw->move[0] +
++			basis[1] * draw->move[1] + basis[2] * draw->move[2]) * 256.0f;
++		if (!ofgl_finite(offset) || fabsf(offset) > 2147483520.0f) return 0;
++		job[7 + row * 8 + 6] = (uint32_t)(int32_t)lrintf(offset);
++	}
++	if (!ofgl_native_upload(mesh, tex->width, tex->height)) return 0;
++	job[0] = mesh->gpu_frames + draw->old_frame * mesh->source_vertices * 4u;
++	job[1] = mesh->gpu_frames + draw->frame * mesh->source_vertices * 4u;
++	job[2] = mesh->gpu_blocks;
++	job[3] = mesh->block_count;
++	job[4] = ofgl_cull_on ?
++		((ofgl_cull_face == GL_FRONT) == (ofgl_front_face == GL_CCW) ? 1u : 2u) : 0u;
++	job[5] = mesh->source_vertices;
++	job[6] = mesh->gpu_end;
++	job[31] = xc; job[32] = yc; job[33] = 128; job[34] = 2048;
++	job[35] = (uint32_t)(int32_t)ceilf(ofgl_pc_near * 256.0f);
++	memcpy(job + 36, draw->palette, sizeof(draw->palette));
++	if (!OFQ2_DrawNativeMesh(job)) return 0;
++	ofgl_end3d();
++	/* Keep the new producer asynchronous even for a small model. */
++	OFQ2_KickNow();
++	return 1;
++}
++
+ void
+ OFGL_DrawAliasElements(const int *source_indices, int index_stride,
+ 	const float *positions, const unsigned short *indices, int count)
+--- a/src/quake2/openfpga/of_world.h
++++ b/src/quake2/openfpga/of_world.h
+@@ -3,6 +3,7 @@
+ #define OPENFPGA_OF_WORLD_H
+ 
+ #include <stddef.h>
++#include <stdint.h>
+ 
+ typedef struct ofgl_world_poly_s ofgl_world_poly_t;
+ 
+@@ -30,4 +31,33 @@
+ void OFGL_DrawAliasElements(const int *source_indices, int index_stride,
+     const float *positions, const unsigned short *indices, int count);
+ 
++/* Native MD2 assets are immutable CPU model data until uploaded, then immutable
++ * fast-memory copies owned by the texture allocator generation. A job embeds
++ * all mutable draw state and colours in the command ring; it borrows no CPU
++ * interpolation, GL-buffer or palette storage after the call returns. */
++typedef struct ofgl_native_mesh_s {
++    size_t bytes;
++    uint32_t *blocks; /* nv|nt<<8, nv*(source-index,float S,float T), nt*indices */
++    uint32_t block_words, block_count, source_vertices, frame_count;
++    const uint8_t *frames;
++    uint32_t frame_stride;
++    uint8_t *bounds; /* per-frame minXYZ/maxXYZ of referenced native bytes */
++    uint32_t *normal_masks; /* eight words per frame, referenced normal indices */
++    float max_s, max_t;
++    uint32_t gpu_generation, gpu_frames, gpu_blocks, gpu_end;
++    unsigned gpu_width, gpu_height;
++} ofgl_native_mesh_t;
++
++typedef struct {
++    ofgl_native_mesh_t *mesh;
++    unsigned old_frame, frame;
++    float move[3], old_scale[3], scale[3];
++    float mins[3], maxs[3];
++    uint32_t palette[128]; /* two RGB565 values, normal 2n in low half */
++} ofgl_native_draw_t;
++
++int OFGL_NativeAvailable(void);
++void OFGL_NativeReset(void);
++int OFGL_DrawNativeAlias(const ofgl_native_draw_t *draw);
++
+ #endif
+--- a/src/quake2/openfpga/snd_of.c
++++ b/src/quake2/openfpga/snd_of.c
+@@ -738,6 +738,21 @@
+ SDL_BackendInit(void)
+ {
+ 	int i;
++	const struct of_capabilities *caps = of_get_caps();
++
++	/* The native-mesh experiment can trade the hardware mixer for GPU
++	 * space. Do not silently spend CPU time on the kernel's software
++	 * mixer in that configuration. Sound starts before OFQ2_Init, so
++	 * read the immutable hardware capability directly, without depending
++	 * on the renderer's initialized/cached capabilities. GPU_STATUS is
++	 * at byte offset 0x14; bit 12 advertises native mesh jobs. */
++	if (caps && !(caps->hw_features & OF_HW_MIXER_HW) && caps->gpu_base &&
++		(*(volatile uint32_t *)((uintptr_t)caps->gpu_base + 0x14u) & (1u << 12)))
++	{
++		snd_inited = false;
++		Com_Printf("Sound disabled: native-mesh core has no hardware mixer.\n");
++		return false;
++	}
+ 
+ 	of_audio_init();
+ 	of_mixer_init(OF_MIXER_MAX_VOICES, OF_MIXER_OUTPUT_RATE);
+--- a/src/quake2/src/client/refresh/gl1/gl1_aliascache.c
++++ b/src/quake2/src/client/refresh/gl1/gl1_aliascache.c
+@@ -7,6 +7,8 @@
+ #ifdef YQ2_OPENFPGA
+ #define ALIAS_MESH_BUDGET (512u * 1024u)
+ static size_t alias_mesh_bytes;
++#define ALIAS_NATIVE_BUDGET (2u * 1024u * 1024u)
++static size_t alias_native_bytes;
+ 
+ of_alias_mesh_t *
+ R_BuildAliasMesh(const dmdl_t *model)
+@@ -27,6 +29,7 @@
+ 	int *heads = links, *next = links + model->num_xyz;
+ 	for (int i = 0; i < model->num_xyz; i++) heads[i] = -1;
+ 	mesh->numverts = mesh->numindices = 0;
++	mesh->native = NULL;
+ 	unsigned short *indices = (unsigned short *)(mesh->vertices + capacity);
+ 	const int *cmd = (const int *)((const byte *)model + model->ofs_glcmds);
+ 	const int *end = cmd + model->num_glcmds;
+@@ -99,7 +102,129 @@
+ R_FreeAliasMesh(of_alias_mesh_t *mesh)
+ {
+ 	if (!mesh) return;
++	if (mesh->native)
++	{
++		alias_native_bytes -= mesh->native->bytes;
++		free(mesh->native);
++	}
+ 	alias_mesh_bytes -= mesh->bytes;
+ 	free(mesh);
+ }
++
++static uint32_t *
++R_NativeBlock(uint32_t *out, const of_alias_mesh_t *mesh,
++	const unsigned short slots[32], unsigned nv, const uint32_t tris[64], unsigned nt)
++{
++	*out++ = nv | (nt << 8);
++	for (unsigned i = 0; i < nv; ++i)
++	{
++		const of_alias_vertex_t *v = &mesh->vertices[slots[i]];
++		*out++ = (uint32_t)v->xyz;
++		memcpy(out, &v->s, 2 * sizeof(float));
++		out += 2;
++	}
++	memcpy(out, tris, nt * sizeof(*out));
++	return out + nt;
++}
++
++/* Compile ordered meshlets once. UVs remain float bits in the CPU asset until
++ * upload, when the actual power-of-two skin size determines their Q16 values.
++ * Neither frames nor indices are re-read by the CPU in the native draw loop. */
++void
++R_BuildAliasNative(of_alias_mesh_t *mesh, const dmdl_t *model)
++{
++	if (!mesh || mesh->native || !model || model->num_frames < 1 ||
++		model->num_frames > MAX_FRAMES || model->num_xyz < 1 ||
++		model->num_xyz > MAX_VERTS || model->ofs_frames < 0 || model->ofs_end < 0 ||
++		model->framesize < (int)offsetof(daliasframe_t, verts) + model->num_xyz * 4 ||
++		(uint64_t)(unsigned)model->ofs_frames +
++		(uint64_t)(unsigned)model->framesize * (unsigned)model->num_frames > (unsigned)model->ofs_end ||
++		mesh->numindices < 3 || mesh->numindices % 3) return;
++	unsigned ntri = (unsigned)mesh->numindices / 3;
++	/* Every triangle has at most three new vertices and one block header. */
++	uint32_t *scratch = malloc((size_t)ntri * 11 * sizeof(uint32_t));
++	if (!scratch) return;
++	const unsigned short *indices = (const unsigned short *)(mesh->vertices + mesh->numverts);
++	unsigned short slots[32];
++	uint32_t tris[64], *out = scratch;
++	unsigned nv = 0, nt = 0, blocks = 0;
++	for (unsigned t = 0; t < ntri; ++t)
++	{
++		unsigned ids[3], additional = 0;
++		for (unsigned k = 0; k < 3; ++k)
++		{
++			unsigned id = indices[3 * t + k];
++			if (id >= (unsigned)mesh->numverts) goto fail;
++			unsigned j;
++			for (j = 0; j < nv && slots[j] != id; ++j) { }
++			if (j == nv)
++			{
++				unsigned prior;
++				for (prior = 0; prior < k && indices[3 * t + prior] != id; ++prior) { }
++				if (prior == k) ++additional;
++			}
++		}
++		if (nt && (nv + additional > 32 || nt == 64))
++		{
++			out = R_NativeBlock(out, mesh, slots, nv, tris, nt);
++			++blocks; nv = nt = 0;
++		}
++		for (unsigned k = 0; k < 3; ++k)
++		{
++			unsigned id = indices[3 * t + k], j;
++			for (j = 0; j < nv && slots[j] != id; ++j) { }
++			if (j == nv) slots[nv++] = id;
++			ids[k] = j;
++		}
++		tris[nt++] = ids[0] | (ids[1] << 5) | (ids[2] << 10);
++	}
++	if (nt) { out = R_NativeBlock(out, mesh, slots, nv, tris, nt); ++blocks; }
++	size_t words = (size_t)(out - scratch);
++	size_t bytes = sizeof(ofgl_native_mesh_t) + words * 4 + (size_t)model->num_frames * 38;
++	if (bytes > ALIAS_NATIVE_BUDGET - alias_native_bytes) goto fail;
++	ofgl_native_mesh_t *native = calloc(1, bytes);
++	if (!native) goto fail;
++	native->bytes = bytes;
++	native->blocks = (uint32_t *)(native + 1);
++	native->block_words = words;
++	native->block_count = blocks;
++	native->source_vertices = model->num_xyz;
++	native->frame_count = model->num_frames;
++	native->frame_stride = model->framesize;
++	native->frames = (const byte *)model + model->ofs_frames + offsetof(daliasframe_t, verts);
++	native->normal_masks = native->blocks + words;
++	native->bounds = (uint8_t *)(native->normal_masks + model->num_frames * 8);
++	memcpy(native->blocks, scratch, words * 4);
++	for (int v = 0; v < mesh->numverts; ++v)
++	{
++		uint32_t s, t;
++		memcpy(&s, &mesh->vertices[v].s, 4);
++		memcpy(&t, &mesh->vertices[v].t, 4);
++		if ((s & 0x7f800000u) == 0x7f800000u || (t & 0x7f800000u) == 0x7f800000u ||
++			mesh->vertices[v].xyz < 0 || mesh->vertices[v].xyz >= model->num_xyz)
++		{ free(native); goto fail; }
++		float as = fabsf(mesh->vertices[v].s), at = fabsf(mesh->vertices[v].t);
++		if (as > native->max_s) native->max_s = as;
++		if (at > native->max_t) native->max_t = at;
++	}
++	for (int f = 0; f < model->num_frames; ++f)
++	{
++		uint8_t *bound = native->bounds + f * 6;
++		bound[0] = bound[1] = bound[2] = 255;
++		for (int i = 0; i < mesh->numverts; ++i)
++		{
++			const uint8_t *v = native->frames + (size_t)f * native->frame_stride + mesh->vertices[i].xyz * 4;
++			for (unsigned k = 0; k < 3; ++k)
++			{
++				if (v[k] < bound[k]) bound[k] = v[k];
++				if (v[k] > bound[k + 3]) bound[k + 3] = v[k];
++			}
++			native->normal_masks[f * 8 + (v[3] >> 5)] |= 1u << (v[3] & 31);
++		}
++	}
++	alias_native_bytes += bytes;
++	mesh->native = native;
++fail:
++	free(scratch);
++}
+ #endif
+--- a/src/quake2/src/client/refresh/gl1/gl1_buffer.c
++++ b/src/quake2/src/client/refresh/gl1/gl1_buffer.c
+@@ -74,6 +74,23 @@
+ 	if (!alias_direct || !OFGL_AliasPositionsEnabled()) return 0;
+ 	alias_positions = positions;
+ 	return positions != NULL;
++}
++
++int
++R_DrawNativeAlias(const ofgl_native_draw_t *draw)
++{
++	/* The native path only accepts a standalone ordinary opaque alias draw.
++	 * Existing buffered draws must keep their original state and order. */
++	if (!OFGL_NativeAvailable() || gl_buf.type != buf_alias ||
++		world_count || vtx_ptr || idx_ptr || alias_direct) return 0;
++	R_EnableMultitexture(false);
++	R_Bind(gl_buf.texture[0]);
++	glShadeModel(GL_SMOOTH);
++	R_TexEnv(GL_MODULATE);
++	int accepted = OFGL_DrawNativeAlias(draw);
++	R_TexEnv(GL_REPLACE);
++	glShadeModel(GL_FLAT);
++	return accepted;
+ }
+ 
+ void
+--- a/src/quake2/src/client/refresh/gl1/gl1_mesh.c
++++ b/src/quake2/src/client/refresh/gl1/gl1_mesh.c
+@@ -203,6 +203,57 @@
+ 		backv[i] = backlerp * oldframe->scale[i];
+ 	}
+ 
++#ifdef YQ2_OPENFPGA
++	if (model->of_alias && model->of_alias->native && OFGL_NativeAvailable() &&
++		!(currententity->flags & (RF_TRANSLUCENT | RF_WEAPONMODEL | RF_DEPTHHACK |
++		RF_SHELL_RED | RF_SHELL_GREEN | RF_SHELL_BLUE | RF_SHELL_DOUBLE | RF_SHELL_HALF_DAM)) &&
++		(!gl_shadows->value || (currententity->flags & RF_NOSHADOW)))
++	{
++		ofgl_native_draw_t draw = {0};
++		ofgl_native_mesh_t *native = model->of_alias->native;
++		draw.mesh = native;
++		draw.frame = currententity->frame;
++		draw.old_frame = currententity->oldframe;
++		const uint8_t *bound = native->bounds + draw.frame * 6;
++		const uint8_t *oldbound = native->bounds + draw.old_frame * 6;
++		for (i = 0; i < 3; ++i)
++		{
++			draw.move[i] = move[i];
++			draw.scale[i] = frontv[i];
++			draw.old_scale[i] = backv[i];
++			float a = frontv[i] * bound[i], b = frontv[i] * bound[i + 3];
++			float c = backv[i] * oldbound[i], d = backv[i] * oldbound[i + 3];
++			float margin = 0.125f + (fabsf(move[i]) + fabsf(a) + fabsf(b) + fabsf(c) + fabsf(d)) * 0.00001f;
++			draw.mins[i] = move[i] + fminf(a, b) + fminf(c, d) - margin;
++			draw.maxs[i] = move[i] + fmaxf(a, b) + fmaxf(c, d) + margin;
++		}
++		/* Match the existing normal-light/gamma/minlight calculation exactly,
++		 * once per referenced normal instead of writing a colour for each seam.
++		 * The palette is copied into the job before this stack frame returns. */
++		for (unsigned group = 0; group < 8; ++group)
++		{
++			uint32_t mask = native->normal_masks[draw.frame * 8 + group];
++			while (mask)
++			{
++				unsigned normal = group * 32 + (unsigned)__builtin_ctz(mask);
++				mask &= mask - 1;
++				int idx[3];
++				float dot = shadedots[normal];
++				for (unsigned k = 0; k < 3; ++k)
++				{
++					idx[k] = dot * shadelight[k] * 255;
++					idx[k] = Q_clamp(idx[k], 0, 255);
++					if (gl_state.minlight_set) idx[k] = minlight[idx[k]];
++				}
++				uint32_t rgb = ((gammatable[idx[0]] & 0xf8u) << 8) |
++					((gammatable[idx[1]] & 0xfcu) << 3) | (gammatable[idx[2]] >> 3);
++				draw.palette[normal >> 1] |= rgb << ((normal & 1u) * 16u);
++			}
++		}
++		if (R_DrawNativeAlias(&draw)) return;
++	}
++#endif
++
+ 	lerp = s_lerped[0];
+ 
+ 	R_LerpVerts(currententity, paliashdr->num_xyz, v, ov, verts, lerp, move, frontv, backv);
+--- a/src/quake2/src/client/refresh/gl1/gl1_model.c
++++ b/src/quake2/src/client/refresh/gl1/gl1_model.c
+@@ -222,6 +222,7 @@
+ 				}
+ #ifdef YQ2_OPENFPGA
+ 				mod->of_alias = R_BuildAliasMesh(mod->extradata);
++				if (OFGL_NativeAvailable()) R_BuildAliasNative(mod->of_alias, mod->extradata);
+ #endif
+ 			};
+ 			break;
+@@ -776,6 +777,11 @@
+ {
+ 	char fullname[MAX_QPATH];
+ 	cvar_t *flushmap;
++#ifdef YQ2_OPENFPGA
++	/* Native geometry owns the high end of fast memory, independently of the
++	 * retained texture cache. Fence old jobs before recycling this map's assets. */
++	OFGL_NativeReset();
++#endif
+ 
+ 	registration_sequence++;
+ 	r_oldviewcluster = -1; /* force markleafs */
+--- a/src/quake2/src/client/refresh/gl1/header/local.h
++++ b/src/quake2/src/client/refresh/gl1/header/local.h
+@@ -341,6 +341,8 @@
+ int R_BufferAliasPositions(const float *positions);
+ of_alias_mesh_t *R_BuildAliasMesh(const dmdl_t *model);
+ void R_FreeAliasMesh(of_alias_mesh_t *mesh);
++void R_BuildAliasNative(of_alias_mesh_t *mesh, const dmdl_t *model);
++int R_DrawNativeAlias(const ofgl_native_draw_t *draw);
+ #endif
+ void R_UpdateGLBuffer(buffered_draw_t type, int colortex, int lighttex, int flags, float alpha);
+ void R_Buffer2DQuad(GLfloat ul_vx, GLfloat ul_vy, GLfloat dr_vx, GLfloat dr_vy,
+--- a/src/quake2/src/client/refresh/gl1/header/model.h
++++ b/src/quake2/src/client/refresh/gl1/header/model.h
+@@ -54,6 +54,7 @@
+ {
+ 	size_t bytes;
+ 	int numverts, numindices;
++	struct ofgl_native_mesh_s *native;
+ 	of_alias_vertex_t vertices[]; /* followed by numindices unsigned shorts */
+ } of_alias_mesh_t;
+ #endif
+--- a/tools/check_quake2_geometry.py
++++ b/tools/check_quake2_geometry.py
+@@ -10,9 +10,11 @@
+ source = (ROOT / 'src/quake2/openfpga/of_emit_q2.c').read_text()
+ with tempfile.TemporaryDirectory(prefix='quake2-geometry-') as temp:
+     work = Path(temp)
+-    texture_names = ['ofq2_texture_route_sdram', 'OFQ2_Init', 'OFQ2_TexInit',
++    texture_names = ['ofq2_native_epoch', 'ofq2_texture_route_sdram', 'OFQ2_Init', 'OFQ2_TexInit',
+                      'OFQ2_TexReset', 'OFQ2_TexCreate', 'OFQ2_TexBindDomain', 'OFQ2_Shutdown']
+-    geometry_names = ['OFQ2_Supports', 'OFQ2_DrawGeometryFan', 'OFQ2_DrawGeometryPackets', 'OFQ2_DrawClipIndexed']
++    geometry_names = ['OFQ2_Supports', 'OFQ2_DrawGeometryFan', 'OFQ2_DrawGeometryPackets', 'OFQ2_DrawClipIndexed',
++                      'OFQ2_NativeReserve', 'OFQ2_NativeUpload', 'OFQ2_DrawNativeMesh',
++                      'OFQ2_NativeReset', 'OFQ2_NativeGeneration']
+     for name, functions in [('texture', texture_names), ('geometry', geometry_names)]:
+         (work / ('extracted_' + name + '_functions.inc')).write_text(
+             '\n'.join(function(source, name) for name in functions))
+--- a/tools/check_quake2_renderer.py
++++ b/tools/check_quake2_renderer.py
+@@ -23,6 +23,8 @@
+         ("worldgeometry", []),
+         ("worldpackets", []),
+         ("aliascache", []),
++        ("nativemesh", []),
++        ("nativeupload", []),
+         ("aliasmesh", [str(GAME / "src/common/shared/shared.c")]),
+         ("light", []),
+         ("lightmap_history", [str(ROOT / "tools/tests/quake2_lightmap_bridge.c")]),
+@@ -31,6 +33,7 @@
+                     "-Werror=frame-larger-than=32768"]),
+         ("warp", [str(GAME / "src/client/refresh/gl1/gl1_warp.c")]),
+         ("sound", []),
++        ("soundbackend", []),
+         ("network", []),
+         ("videomenu", []),
+         ("input", []),
+--- a/tools/check_quake2_textures.py
++++ b/tools/check_quake2_textures.py
+@@ -13,7 +13,7 @@
+ 
+ 
+ def function(text, name):
+-    match = re.search(r"(?m)^(?:static )?(?:void|int)\n" + re.escape(name) + r"\([^;]*?\)\n\{", text)
++    match = re.search(r"(?m)^(?:static )?(?:void|int|uint32_t)\n" + re.escape(name) + r"\([^;]*?\)\n\{", text)
+     if not match:
+         raise ValueError("Function not found: " + name)
+     # Mask comments/string literals without altering offsets before brace scan.
+@@ -36,7 +36,7 @@
+     root = args.candidate_root.resolve()
+     emit_path = root / "src/quake2/openfpga/of_emit_q2.c"
+     source = emit_path.read_text()
+-    names = ["ofq2_texture_route_sdram", "OFQ2_Init", "OFQ2_TexInit", "OFQ2_TexReset",
++    names = ["ofq2_native_epoch", "ofq2_texture_route_sdram", "OFQ2_Init", "OFQ2_TexInit", "OFQ2_TexReset",
+              "OFQ2_TexCreate", "OFQ2_TexBindDomain", "OFQ2_Shutdown"]
+     extracted = "\n".join(function(source, name) for name in names)
+     with tempfile.TemporaryDirectory(prefix="quake2-texture-") as temp:
+--- a/tools/tests/quake2_aliasmesh_test.c
++++ b/tools/tests/quake2_aliasmesh_test.c
+@@ -11,6 +11,10 @@
+ unsigned char gammatable[256], minlight[256];
+ static cvar_t showbbox;
+ cvar_t *gl_showbbox = &showbbox;
++static cvar_t shadows;
++cvar_t *gl_shadows = &shadows;
++int OFGL_NativeAvailable(void) { return 0; }
++int R_DrawNativeAlias(const ofgl_native_draw_t *draw) { (void)draw; assert(0); return 0; }
+ static int vertices, indices;
+ static int direct_enabled, source_positions_enabled;
+ static const float *direct_positions;
+--- a/tools/tests/quake2_geometry_test.c
++++ b/tools/tests/quake2_geometry_test.c
+@@ -31,7 +31,7 @@
+ static void test_capabilities(void)
+ {
+     for (unsigned dependencies = 0; dependencies < 8; dependencies++)
+-    for (unsigned status = 0; status < 4; status++)
++    for (unsigned status = 0; status < 8; status++)
+     {
+         setup(0, 4);
+         caps.hw_features = OF_HW_GPU_SPAN |
+@@ -43,10 +43,95 @@
+         assert(!!OFQ2_Supports(OFQ2_CAP_GEOMETRY) ==
+             (dependencies == 7 && !!(status & 1)));
+         assert(!!OFQ2_Supports(OFQ2_CAP_GEOMETRY_WORKER) ==
+-            (dependencies == 7 && status == 3));
++            (dependencies == 7 && (status & 3) == 3));
++        assert(!!OFQ2_Supports(OFQ2_CAP_NATIVE_MESH) ==
++            (dependencies == 7 && status == 7));
+         OFQ2_Shutdown();
+         assert(!OFQ2_Supports(OFQ2_CAP_GEOMETRY_WORKER));
+     }
++}
++
++static void test_native_packets(void)
++{
++    setup(4096, 4);
++    ofq2_caps = OFQ2_CAP_NATIVE_MESH;
++    ofq2_tristate_valid = ofq2_objstate_valid = true;
++    ofq2_tristate_dirty = false;
++    uint32_t addr, second, job[OFQ2_NATIVE_WORDS];
++    unsigned before = finish_count;
++    assert(OFQ2_NativeReserve(77, &addr) && addr == 4016 && _of_tex_fast_size == 4016 && _of_tex_fast_top == 0);
++    assert(finish_count == before + 1);
++    for (unsigned i = 0; i < OFQ2_NATIVE_WORDS; ++i) job[i] = 0x12345678u + 337u * i;
++    OFQ2_NativeUpload(addr, job, 19);
++    assert(!memcmp(fast_bytes + addr, job, 76));
++    assert(OFQ2_NativeReserve(96, &second) && second == 3920 && _of_tex_fast_size == 3920);
++    unsigned uploads = upload_count;
++    OFQ2_NativeUpload(3916, job, 1); OFQ2_NativeUpload(4096, job, 1);
++    assert(upload_count == uploads);
++    before = finish_count;
++    assert(!OFQ2_NativeReserve(4096, &addr));
++    assert(!OFQ2_NativeReserve(0, &addr));
++    assert(!OFQ2_NativeReserve(0xfffffff0u, &addr));
++    assert(!OFQ2_NativeReserve(16, NULL));
++    assert(_of_tex_fast_top == 0 && _of_tex_fast_size == 3920 && finish_count == before);
++    for (unsigned n = 0; n < 17; ++n) {
++        reset_ring(); ofq2_objstate_valid = true;
++        assert(OFQ2_DrawNativeMesh(job));
++        assert(reservations == 1 && commits == 1 && committed_words == 165);
++        assert(ring_words[0] == 0x600000a4u && !memcmp(ring_words + 1, job, sizeof(job)));
++        assert(!ofq2_objstate_valid && ofq2_pending);
++        assert(finish_count == before); /* no per-model wait */
++    }
++    reset_ring(); assert(!OFQ2_DrawNativeMesh(NULL));
++    ofq2_tristate_dirty = true; assert(!OFQ2_DrawNativeMesh(job));
++    ofq2_tristate_dirty = false; ofq2_tristate_valid = false;
++    assert(!OFQ2_DrawNativeMesh(job));
++    ofq2_tristate_valid = true; ofq2_caps = OFQ2_CAP_GEOMETRY_WORKER;
++    assert(!OFQ2_DrawNativeMesh(job)); assert(!OFQ2_NativeReserve(16, &addr));
++    assert(!reservations && !commits);
++    puts("PASS: native status dependency, atomic shared allocation, bounds, exact 164-word snapshot, legacy object invalidation and no per-model fence");
++}
++
++static void test_native_map_lifecycle(void)
++{
++    setup(4096, 4); ofq2_caps = OFQ2_CAP_NATIVE_MESH;
++    uint32_t a[16], b[32], geometry[128];
++    for (unsigned i = 0; i < 16; ++i) a[i] = 0x10001u * i;
++    for (unsigned i = 0; i < 32; ++i) b[i] = 0x330055u * i;
++    memset(geometry, 0x93, sizeof(geometry));
++    ofq2_texture_t ta, tb;
++    OFQ2_TexCreate(&ta, a, 8, 4, sizeof(a));
++    uint32_t addr; assert(OFQ2_NativeReserve(256, &addr) && addr == 3840);
++    OFQ2_NativeUpload(addr, geometry, 64);
++    OFQ2_TexCreate(&tb, b, 8, 8, sizeof(b));
++    assert(ta.addr == 0 && tb.addr == 64 && _of_tex_fast_top == 192);
++    unsigned texture_generation = ofq2_tex_generation, epoch = OFQ2_NativeGeneration();
++    unsigned before = finish_count;
++    expected_live_top = _of_tex_fast_top; pending = 1;
++    OFQ2_NativeReset();
++    assert(!pending && finish_count == before + 1 && OFQ2_NativeGeneration() != epoch);
++    assert(ofq2_tex_generation == texture_generation && _of_tex_fast_top == 192 && _of_tex_fast_size == 4096);
++    assert(!memcmp(fast_bytes + ta.addr, a, sizeof(a)) && !memcmp(fast_bytes + tb.addr, b, sizeof(b)));
++    unsigned uploads = upload_count;
++    OFQ2_NativeUpload(addr, geometry, 64); /* retired map's old allocation */
++    assert(upload_count == uploads);
++    assert(OFQ2_NativeReserve(512, &addr) && addr == 3584);
++    OFQ2_NativeUpload(addr, geometry, 128);
++    assert(!memcmp(fast_bytes + ta.addr, a, sizeof(a)) && !memcmp(fast_bytes + tb.addr, b, sizeof(b)));
++    epoch = OFQ2_NativeGeneration(); OFQ2_TexReset();
++    assert(_of_tex_fast_top == 0 && _of_tex_fast_size == 4096 && OFQ2_NativeGeneration() != epoch);
++    assert(ofq2_tex_generation == texture_generation + 1);
++    ofq2_native_generation = UINT32_MAX; OFQ2_NativeReset();
++    assert(OFQ2_NativeGeneration() == 1);
++    ofq2_caps = OFQ2_CAP_GEOMETRY_WORKER; before = finish_count; epoch = OFQ2_NativeGeneration();
++    OFQ2_NativeReset(); assert(finish_count == before && OFQ2_NativeGeneration() == epoch);
++    setup(16, 4); ofq2_caps = OFQ2_CAP_NATIVE_MESH;
++    assert(!OFQ2_NativeReserve(16, &addr) && of_texture_has_fast_mem());
++    setup(64, 4); ofq2_caps = OFQ2_CAP_NATIVE_MESH;
++    assert(OFQ2_NativeReserve(48, &addr) && addr == 16 && of_texture_has_fast_mem());
++    epoch = OFQ2_NativeGeneration(); OFQ2_TexInit();
++    assert(_of_tex_fast_size == 64 && _of_tex_fast_top == 0 && OFQ2_NativeGeneration() != epoch);
++    puts("PASS: top-down native/low texture isolation, fenced map recycling, native-only generation, retained texture bytes/handles, reset/init, wrap and nonzero fast-tier routing");
+ }
+ 
+ static void test_fan_packets(void)
+@@ -171,6 +256,8 @@
+     test_fan_packets();
+     test_clip_packets_unchanged();
+     test_cached_packet_batches();
++    test_native_packets();
++    test_native_map_lifecycle();
+     puts("PASS: real geometry capability dependencies; worker 3..32-vertex packet batching; inline three-vertex limit; fan ordering/culling/payloads; invalid state; unchanged clip uploads");
+     return 0;
+ }
+--- /dev/null
++++ b/tools/tests/quake2_nativemesh_test.c
+@@ -0,0 +1,92 @@
++/* Native meshlet order/seams, capacity, actual animation bounds and ownership. */
++#include <assert.h>
++#include "../../src/quake2/src/client/refresh/gl1/gl1_aliascache.c"
++
++static void check(unsigned vertices, unsigned frames)
++{
++	unsigned xyz = vertices > 40 ? vertices - 7 : vertices;
++	unsigned commands = 3 * vertices + 2;
++	size_t size = sizeof(dmdl_t) + frames * (40 + xyz * 4) + commands * 4;
++	dmdl_t *h = calloc(1, size);
++	assert(h);
++	h->num_xyz = xyz; h->num_frames = frames; h->num_glcmds = commands;
++	h->framesize = 40 + xyz * 4; h->ofs_frames = sizeof(*h);
++	h->ofs_glcmds = h->ofs_frames + frames * h->framesize; h->ofs_end = size;
++	int *cmd = (int *)((byte *)h + h->ofs_glcmds);
++	cmd[0] = vertices;
++	for (unsigned v = 0; v < vertices; ++v)
++	{
++		float s = (float)(v % 17) / 16, t = (float)(v / 17) / 16;
++		memcpy(cmd + 1 + v * 3, &s, 4); memcpy(cmd + 2 + v * 3, &t, 4);
++		cmd[3 + v * 3] = v % xyz;
++	}
++	for (unsigned f = 0; f < frames; ++f)
++	{
++		daliasframe_t *frame = (daliasframe_t *)((byte *)h + h->ofs_frames + f * h->framesize);
++		for (unsigned v = 0; v < xyz; ++v)
++		{
++			frame->verts[v].v[0] = 17 + (v % 61);
++			frame->verts[v].v[1] = 43 + ((v + f) % 89);
++			frame->verts[v].v[2] = 71 + ((v * 3 + f) % 67);
++			frame->verts[v].lightnormalindex = (v * 17 + f) & 255;
++		}
++	}
++	of_alias_mesh_t *mesh = R_BuildAliasMesh(h);
++	assert(mesh && !mesh->native);
++	R_BuildAliasNative(mesh, h);
++	ofgl_native_mesh_t *n = mesh->native;
++	assert(n && n->frame_count == frames && n->source_vertices == xyz);
++	assert(n->gpu_generation == 0 && n->bytes == alias_native_bytes);
++	const unsigned short *idx = (const unsigned short *)(mesh->vertices + mesh->numverts);
++	uint32_t *word = n->blocks;
++	unsigned tri = 0;
++	for (unsigned b = 0; b < n->block_count; ++b)
++	{
++		unsigned nv = *word & 255, nt = (*word++ >> 8) & 65535;
++		assert(nv && nv <= 32 && nt && nt <= 64);
++		uint32_t *verts = word; word += nv * 3;
++		for (unsigned t = 0; t < nt; ++t, ++tri)
++		{
++			uint32_t packed = *word++;
++			assert(!(packed & ~32767u));
++			for (unsigned k = 0; k < 3; ++k)
++			{
++				unsigned local = (packed >> (k * 5)) & 31;
++				const of_alias_vertex_t *expected = &mesh->vertices[idx[tri * 3 + k]];
++				assert(local < nv && verts[local * 3] == (unsigned)expected->xyz);
++				assert(!memcmp(verts + local * 3 + 1, &expected->s, 8));
++			}
++		}
++	}
++	assert(tri * 3 == (unsigned)mesh->numindices && word == n->blocks + n->block_words);
++	for (unsigned f = 0; f < frames; ++f)
++	{
++		unsigned lo[3] = {255,255,255}, hi[3] = {0}, mask[8] = {0};
++		const uint8_t *frame = n->frames + f * n->frame_stride;
++		for (int i = 0; i < mesh->numverts; ++i)
++		{
++			const uint8_t *v = frame + mesh->vertices[i].xyz * 4;
++			for (unsigned k = 0; k < 3; ++k)
++			{
++				if (v[k] < lo[k]) lo[k] = v[k];
++				if (v[k] > hi[k]) hi[k] = v[k];
++			}
++			mask[v[3] >> 5] |= 1u << (v[3] & 31);
++		}
++		for (unsigned k = 0; k < 3; ++k)
++			assert(n->bounds[f * 6 + k] == lo[k] && n->bounds[f * 6 + k + 3] == hi[k]);
++		assert(!memcmp(mask, n->normal_masks + f * 8, sizeof(mask)));
++	}
++	R_BuildAliasNative(mesh, h); assert(mesh->native == n); /* immutable cache */
++	R_FreeAliasMesh(mesh); assert(!alias_mesh_bytes && !alias_native_bytes);
++	mesh = R_BuildAliasMesh(h); assert(mesh);
++	h->ofs_end = h->ofs_frames + frames * h->framesize - 1;
++	R_BuildAliasNative(mesh, h); assert(!mesh->native);
++	R_FreeAliasMesh(mesh); free(h);
++}
++
++int main(void)
++{
++	check(3, 1); check(31, 2); check(80, 7); check(257, 32);
++	puts("PASS: native MD2 meshlets preserve ordered triangles/UV seams, 32-vertex bounds, native frames, exact bounds/normal masks, invalid extents and release");
++}
+--- /dev/null
++++ b/tools/tests/quake2_nativeupload_test.c
+@@ -0,0 +1,55 @@
++/* Reuse the real GL renderer; isolate native immutable asset upload/lifetime. */
++#define main renderer_existing_main
++#include "quake2_renderer_test.c"
++#undef main
++
++static uint32_t epoch = 23, memory[256], next_address = 0x8000;
++static unsigned reserves, uploads, allow_reserve = 1;
++uint32_t OFQ2_NativeGeneration(void) { return epoch; }
++int OFQ2_NativeReserve(uint32_t bytes, uint32_t *address)
++{
++	++reserves;
++	if (!allow_reserve) return 0;
++	assert(bytes == (6 + 11) * 4);
++	*address = next_address;
++	return 1;
++}
++void OFQ2_NativeUpload(uint32_t address, const uint32_t *words, uint32_t count)
++{
++	assert(address >= next_address && (address - next_address) / 4 + count <= 256);
++	memcpy(memory + (address - next_address) / 4, words, count * 4);
++	++uploads;
++}
++
++int main(void)
++{
++	uint32_t frames[6] = {0x01433221, 0x02554411, 0x03552266,
++		0x04654321, 0x05fedcba, 0x06123456};
++	uint32_t blocks[11] = {3 | (1 << 8), 0,0,0, 1,0,0, 2,0,0, 0 | (1 << 5) | (2 << 10)};
++	float uv[6] = {.25f,.5f, .75f,1, -.5f,1.25f};
++	for (unsigned v = 0; v < 3; ++v) memcpy(blocks + 2 + v * 3, uv + v * 2, 8);
++	ofgl_native_mesh_t mesh = {.blocks = blocks, .block_words = 11, .block_count = 1,
++		.source_vertices = 3, .frame_count = 2, .frames = (uint8_t *)frames, .frame_stride = 12};
++	assert(ofgl_native_upload(&mesh, 64, 32));
++	assert(reserves == 1 && uploads == 3 && mesh.gpu_generation == epoch);
++	assert(mesh.gpu_frames == next_address && mesh.gpu_blocks == next_address + 24 && mesh.gpu_end == next_address + 68);
++	assert(!memcmp(memory, frames, sizeof(frames)));
++	for (unsigned v = 0; v < 3; ++v) {
++		assert(memory[6 + 1 + v * 3] == v);
++		assert((int32_t)memory[6 + 2 + v * 3] == (int32_t)lrintf(uv[v * 2] * 64 * 65536));
++		assert((int32_t)memory[6 + 3 + v * 3] == (int32_t)lrintf(uv[v * 2 + 1] * 32 * 65536));
++	}
++	for (unsigned n = 0; n < 100; ++n) {
++		assert(ofgl_native_upload(&mesh, 64, 32));
++		assert(!ofgl_native_upload(&mesh, 128, 64));
++		assert(!ofgl_native_upload(&mesh, 64, 64));
++	}
++	assert(reserves == 1 && uploads == 3); /* no alternation upload/fence */
++	++epoch; next_address = 0x9000; allow_reserve = 0;
++	assert(!ofgl_native_upload(&mesh, 128, 64) && mesh.gpu_generation != epoch);
++	assert(reserves == 2 && uploads == 3);
++	allow_reserve = 1;
++	assert(ofgl_native_upload(&mesh, 128, 64));
++	assert(reserves == 3 && uploads == 6 && mesh.gpu_generation == epoch && mesh.gpu_width == 128 && mesh.gpu_height == 64);
++	puts("PASS: immutable native frame/UV upload, repeated/alternating skin dimensions, zero resident waits, generation refresh and allocation fallback");
++}
+--- /dev/null
++++ b/tools/tests/quake2_soundbackend_test.c
+@@ -0,0 +1,71 @@
++/* Exercise the real sound startup before any renderer initialization. */
++#include "of.h"
++#include <assert.h>
++#include <sys/mman.h>
++
++static unsigned audio_inits, mixer_inits;
++static void test_audio_init(void) { ++audio_inits; }
++static void test_mixer_init(int voices, int rate)
++{
++	assert(voices == OF_MIXER_MAX_VOICES);
++	assert(rate == OF_MIXER_OUTPUT_RATE);
++	++mixer_inits;
++}
++#define of_audio_init test_audio_init
++#define of_mixer_init test_mixer_init
++#include "../../src/quake2/openfpga/snd_of.c"
++#undef of_audio_init
++#undef of_mixer_init
++
++sound_t sound;
++int s_numchannels;
++cvar_t *s_volume;
++static struct of_capabilities test_caps;
++static const struct of_capabilities *current_caps = &test_caps;
++const struct of_capabilities *of_get_caps(void) { return current_caps; }
++void Com_Printf(const char *format, ...) { (void)format; }
++
++static void check_start(uint32_t features, uint32_t gpu_base, int expected)
++{
++	test_caps.hw_features = features;
++	test_caps.gpu_base = gpu_base;
++	audio_inits = mixer_inits = 0;
++	snd_inited = false;
++	assert(SDL_BackendInit() == expected);
++	assert(snd_inited == expected);
++	assert(audio_inits == (unsigned)expected);
++	assert(mixer_inits == (unsigned)expected);
++	if (expected)
++	{
++		assert(sound.speed == 22050 && sound.channels == 2);
++		assert(sound.buffer == NULL && s_numchannels == MAX_CHANNELS);
++		for (unsigned i = 0; i < MAX_CHANNELS; ++i)
++			assert(snd_handle[i] == OF_MIXER_HANDLE_INVALID);
++	}
++}
++
++int main(void)
++{
++	/* caps carries 32-bit target addresses. A low-address mapping lets
++	 * this host fixture exercise the real volatile MMIO load unchanged. */
++	void *registers = mmap((void *)(uintptr_t)0x10000000u, 4096,
++		PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
++	assert(registers != MAP_FAILED && (uintptr_t)registers <= UINT32_MAX - 4096);
++	volatile uint32_t *status = (volatile uint32_t *)((char *)registers + 0x14);
++	uint32_t gpu_base = (uint32_t)(uintptr_t)registers;
++	*status = 1u << 12;
++	check_start(OF_HW_MIXER_HW, gpu_base, true);
++	/* Hardware mixer present must not even touch the GPU MMIO window. */
++	check_start(OF_HW_MIXER_HW, 1, true);
++	check_start(0, gpu_base, false);
++	*status = 0;
++	check_start(0, gpu_base, true); /* previous cores retain their behavior */
++	*status = 3u << 10;
++	check_start(0, gpu_base, true); /* older geometry worker is not native */
++	check_start(0, 0, true);
++	current_caps = NULL;
++	check_start(0, 0, true);
++	assert(munmap(registers, 4096) == 0);
++	puts("PASS: native mixer-less startup stays silent; hardware mixer startup unchanged");
++	return 0;
++}
+--- a/tools/tests/quake2_texture_test.c
++++ b/tools/tests/quake2_texture_test.c
+@@ -44,6 +44,7 @@
+ #include "of_texture.h"
+ 
+ static uint32_t ofq2_caps, ofq2_tex_generation;
++static uint32_t ofq2_native_end, ofq2_native_generation = 1;
+ static bool ofq2_ready, ofq2_pending;
+ static uint8_t *ofq2_bound_fb;
+ static int ofq2_bound_stride;

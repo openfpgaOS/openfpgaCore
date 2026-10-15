@@ -1,0 +1,50 @@
+{
+  "status": "PASS",
+  "inputs": [
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/rtl/geometry_mesh_task_ctrl.v",
+      "sha256": "b2efc5506e55bec2bc3fd2c99532e33b88f6e1270cc55ffc3d28370d21da980d"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/test_controller.cpp",
+      "sha256": "b564184deac54829da8bc43892f695babf3e3cf12ff37ef84f1d85630ee533c4"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/run_controller.py",
+      "sha256": "c0b9ae731378ea378fa231f806b0fc43f51267142ed7564baf7e31c742e5f327"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/task-vectors-frame360.json",
+      "sha256": "0d262a8ad8f763554f14be15a62f3cafda0ff20fcf5a6754016ad58c321ff542"
+    }
+  ],
+  "build_command": [
+    "verilator",
+    "--cc",
+    "--exe",
+    "--build",
+    "-j",
+    "4",
+    "-Wno-fatal",
+    "--top-module",
+    "geometry_mesh_task_ctrl",
+    "--Mdir",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/controller-v3/obj",
+    "-CFLAGS",
+    "-std=c++17 -O1 -fsanitize=address,undefined -fno-omit-frame-pointer",
+    "-LDFLAGS",
+    "-fsanitize=address,undefined",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/rtl/geometry_mesh_task_ctrl.v",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/test_controller.cpp"
+  ],
+  "result": {
+    "status": "PASS",
+    "tasks": 319,
+    "triangles": 2459,
+    "checks": 11111,
+    "cycles": 57395,
+    "LOAD_launches": 325,
+    "cull_requests": 2589
+  },
+  "scope": "Actual task controller with actual original frame360 command bytes and independent CPU-decoded index oracle. LOAD/cull responses modeled with random legal delay; actual arithmetic separately tested."
+}

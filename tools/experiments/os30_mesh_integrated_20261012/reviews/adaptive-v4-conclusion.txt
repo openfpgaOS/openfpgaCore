@@ -1,0 +1,26 @@
+Mesh integration: final measured publication-policy decision
+
+Retain the qualified baseline. No physical fit or deployment is justified by this direct-output-queue design.
+All rows below are complete native frame intervals with the GPU drained at both boundaries; positive change means slower.
+
+Policy / private words | cold candidate | warm candidate | total candidate | total same-ELF control | cycle change
+forced_appv2_512 | 4,293,880 | 4,561,537 | 8,855,417 | 8,438,043 | +4.946%
+batched_appv3_512 | 4,308,244 | 4,570,541 | 8,878,785 | 8,486,239 | +4.626%
+adaptive128_appv4_512 | 4,313,050 | 4,588,457 | 8,901,507 | 8,531,290 | +4.340%
+capacity_ceiling_appv2_16384 | 3,887,424 | 4,181,382 | 8,068,806 | 8,438,043 | -4.376%
+
+Prior qualified app/core: 3,980,965 cold + 4,366,717 warm = 8,347,682 cycles.
+Different-ELF comparisons include driver/code-layout overhead and are practical comparisons, not isolated hardware A/B tests.
+Adaptive128 totals 46,090 more cycles than forced appv2 and 22,722 more than batched appv3 on the same 512-word hardware.
+
+Why direct BRAM transport did not produce the expected gain:
+1. The small packet queue makes the next raw LOAD wait behind earlier raster work. Adaptive128 has 550,944 exact warm credit-blocked cycles; 525,251 coincide with the GPU fragment stage. Its CPU source-wait function is charged 552,085 cycles versus 3,738 in the control. These measurements overlap and must not be summed.
+2. Geometry offload does remove substantial CPU work. In the zero-credit diagnostic, warm indexed preparation falls 581,381 to 153,169 charged cycles, vertex-cache packet batching 189,914 to 38,814, and canonical readback 192,831 to 80,033.
+3. The remaining synchronous task handoffs are costly: LOAD/preflight is charged 472,290 warm cycles versus 283,505 control; task finish adds 98,307 and source bookkeeping 81,001. Display-list traversal is still 322,968, with CPU clipping 144,096 and fallback projection/direct draws still present. These are per-PC retirement-gap attributions, not guaranteed removable self-times.
+4. Numeric validation itself takes only 26,652 hardware cycles in that warm interval. Removing it alone cannot explain or repair the much larger overhead. Material preparation and fallback ordering still constrain when the CPU can advance.
+5. The 16,384-word diagnostic removes every measured capacity stall and improves these two intervals by 4.376% against its same-ELF control, or 3.341% against the prior qualified app. This is the measured capacity ceiling of this implementation on this trace; it is not a universal accelerator limit. That diagnostic exceeds physical memory resources as built and has no fit/timing qualification.
+
+The next architecture, if investigated separately, should target synchronous per-task input/context setup and fallback software. A coarse asynchronous job design would need its own full-frame proof; these results do not establish that it will succeed.
+Queue residence and CPU/GPU busy counters overlap. GPU idle after rendering includes game/audio work. No projected FPS or gain is obtained by subtracting these counters.
+
+Strict functional, ordered draw, lifetime and source checks pass for the bound candidate/control runs. Sources, ELF, fixtures and exact receipts are bound by adaptive-v4-conclusion.json and its paired analysis inputs.

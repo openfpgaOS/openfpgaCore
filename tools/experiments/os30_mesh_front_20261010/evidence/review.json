@@ -1,0 +1,104 @@
+{
+  "status": "PASS_FINAL_STREAM_COMPONENT_REVIEW_WITH_REAL_APP_AND_PHYSICAL_INTEGRATION_OPEN",
+  "supersedes": "final-review-v1.json remains immutable historical evidence. Its unconnected command-fetch/packet-owner integration requirements are now resolved in the tested geometry_mesh_stream component; they are no longer outstanding component defects.",
+  "verification": {
+    "fresh_tests_run_by_reviewer": false,
+    "source_receipt_binding_checks": 76,
+    "independent_receipt_source_input_output_checks": 135,
+    "task_cost_rows_independently_recomputed": 638,
+    "disjoint_prefix_calls": 1385,
+    "stream_control": {
+      "status": "PASS",
+      "cases": 6,
+      "checks": 594,
+      "cycles": 1529,
+      "AXI_bursts": 20,
+      "AXI_beats": 125
+    },
+    "actual_scene_stream": {
+      "status": "PASS",
+      "tasks": 638,
+      "accepted_geometry_tasks": 488,
+      "fallback_tasks": 150,
+      "triangles": 4918,
+      "kept_triangles": 1511,
+      "raw_words_compared": 64544,
+      "packet_words_compared": 26377,
+      "checks": 237402,
+      "cycles": 878404
+    }
+  },
+  "resolved_combined_owner_requirements": [
+    "One physical AXI master switches to command prefetch after raw LOAD completion; no accepted raw read is abandoned.",
+    "Fallback visibility and task ACK wait for command prefetch to drain. Wrong serial cannot release the task.",
+    "Accepted packet launch automatically owns raw/list ports. External inspection cannot corrupt packet validation or emission.",
+    "Cancel wins against simultaneous first packet launch. Once launch is accepted ordinary cancel is ignored; held/repeated starts cannot duplicate publication.",
+    "Packet completion is required before success ACK. Packet prevalidation errors emit zero words and remain explicit repair outcomes.",
+    "Reset contract explicitly requires coupled AXI responder and packet consumer reset; standalone producer reset after partial publication is unsupported."
+  ],
+  "producer_review": [
+    "The host producer enforces hardware count/index limits, immutable task/context keys, bounded credits, ordered completion and drain-before-generation recycle.",
+    "Host allocations and detached source bytes do not prove hardware DMA leases, RV32 submission cost or a running application path.",
+    "Sequence/handle exhaustion and actual PSRAM address/cache/publication binding remain integration obligations."
+  ],
+  "geometry_accounting": {
+    "tasks": 638,
+    "raw_words_compared": 64544,
+    "triangles": 4918,
+    "fallback_tasks": 150,
+    "accepted_geometry_tasks": 488,
+    "kept_triangles": 1511,
+    "packet_words_compared": 26377
+  },
+  "warm_work_table": [
+    {
+      "material_memo_group": "warm_material_nonzero_memo",
+      "tasks": 152,
+      "input_triangles": 1182,
+      "focused_charged_cycles": 609377,
+      "retired_instructions": 404056,
+      "raw_service_cycles_reported_separately": 102022
+    },
+    {
+      "material_memo_group": "cold_or_ineligible_material",
+      "tasks": 92,
+      "input_triangles": 826,
+      "focused_charged_cycles": 256297,
+      "retired_instructions": 170471,
+      "raw_service_cycles_reported_separately": 58572
+    }
+  ],
+  "work_interpretation": "The 244 geometry-accepted warm tasks contain 2,008 input triangles. Material-ready/nonzero memo is only a proxy for renderer eligibility. The 609,377 plus 256,297 focused cycles are 19.82% of the 4,366,717-cycle interval as charged CPU work, not a predicted frame-time saving. Raw service remains necessary and overlaps some older pending submission. PC retirement gaps include memory/FIFO waits; task interval does not prove logical packet ownership.",
+  "remaining_integration_requirements": [
+    "Integrate coarse task publication into the real app before synchronous raw LOAD, canonical readback and per-triangle CPU admission; measure actual RV32 preparation and queue submission costs.",
+    "Capture immutable material, viewport and raster state in draw order. Preserve cold/deferred material behavior and alpha/LOD/texture side effects; current scene packets use controlled material flags.",
+    "Implement ordered task-local clipping/equal-W/arithmetic/material repair without restoring stale global renderer state. Packet error must take its zero-output repair path.",
+    "Bind the real PSRAM offset window, command/source cache maintenance, source/context leases and pool drain. Preserve raw slots required by partial-load or later CPU consumers; handle sequence/generation exhaustion.",
+    "Connect bounded descriptor/output queues and actual GPU ingress. Demonstrate paired full-frame correctness and net performance under real contention, fallback and output pressure.",
+    "Only a useful integrated gain justifies a fresh Quartus fit/timing run. Final ALM/M10K use and achievable clock remain unproven."
+  ],
+  "package_review": [
+    "The five portable recipes are synthetic packet, fetch, engine, chain and stream-control tests; their tested RTL/C++ inputs are hash-checked before copying.",
+    "Scene, current-CPU oracle and producer evidence retain external source-bound receipts. Reproducer scripts require private captured inputs; they are not portable fixture-free tests.",
+    "Source package claims no app deployment, bitstream, new full-frame gain or physical fit. Final package construction and manifest verification are performed separately by the root agent."
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/final-review-v1.json": "c16155c42217667f813c20b0547252690c15f42317c729cc8e3cd80cebfba4ab",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/producer-scene-audit-v1.json": "548d90318bc9715d2f6ce75ddd2a1aa3a1ffd44347e11dce5984901807a4951c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/verify_producer_scene_v1.py": "b5405e7bb77a0b4970051c02acb423519ed06f843f0e6b005994dc87cecde34d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native-task-v3/passivity.json": "9eb7f01aae829ab5e77ac30f51b6cbe7d43a0711cd3b7659254a6c9fc6bb2f1c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/architecture-v2.json": "cbbdc2d376d92e1821fd8654620c505476c41c2daf89eca824f4c0023c001d54",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/source-manifest.json": "850b97a041c2b94693f0e017596f3bb5ba1cc1b415056962b846434ac6fb10df",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/source-manifest.json": "9abf1247004b9869712692dc53b3bae514d4ef7badb72eb2c188ec78bcaab9a2",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/exact-geometry-ledger.json": "dddced4bbe92f1779582b3bc8245b9d710dd8c3561045da238b259669ac171e0",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/stream-control-v3/manifest.json": "a3f3e19b2fdfecf6d2d0f3ef75bb43180091b5710177f8689f95e0d9f9b25224",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/scene-stream-v2/manifest.json": "6cd54b0bef07f7af91bb557840a947fd3f99cc2cae1200153a044a2b9d18a8c1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/rtl/geometry_mesh_stream.v": "3305e56087a718d675c0141f8c723ab61e7ad3df81d246ec5db6913ab8ef17c3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/geometry_mesh_packet.v": "7514026cf2b23e8f219aa193e24c922bacac05e04079bd6f3edd772cbb97e493",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/geometry_mesh_command_fetch.v": "a740d2c2d961bcbe3421e7de594ca842b3c3caf2a38dff7de89ff067c9b93cf8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/producer-v1/task_producer.hpp": "0c56f89b71a53b8e055ad1ce51215a037afc884d08f1d2226a19539488ddb698",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/build_source_package.py": "51c89a0e684b0381ecbaea2e61d04af2dd10c398a773da91e37b95926a9be0e9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/package_runner.py": "ef1070773acb72ea080e9e8933cbdf47d710852fda9f6ff017fda54b84518ac9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/package_verify.py": "0f2891bee8d9975b348a54c9bde7cbb6c6ad68a3be5e591a79ad82e0f9bfbb15"
+  }
+}

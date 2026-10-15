@@ -1,0 +1,190 @@
+{
+  "frame": 20,
+  "stride": 640,
+  "step": 2,
+  "cpu_cycles": 2861919,
+  "batches": [
+    {
+      "words": 4,
+      "first_write": 697,
+      "publish": 784
+    },
+    {
+      "words": 578,
+      "first_write": 929927,
+      "publish": 934216
+    },
+    {
+      "words": 578,
+      "first_write": 968221,
+      "publish": 972491
+    },
+    {
+      "words": 785,
+      "first_write": 1026741,
+      "publish": 1032683
+    },
+    {
+      "words": 129,
+      "first_write": 1045359,
+      "publish": 1046424
+    },
+    {
+      "words": 1139,
+      "first_write": 1159743,
+      "publish": 1169081
+    },
+    {
+      "words": 1179,
+      "first_write": 1285954,
+      "publish": 1294657
+    },
+    {
+      "words": 760,
+      "first_write": 1362125,
+      "publish": 1367793
+    },
+    {
+      "words": 601,
+      "first_write": 1422923,
+      "publish": 1427362
+    },
+    {
+      "words": 411,
+      "first_write": 1478844,
+      "publish": 1481972
+    },
+    {
+      "words": 675,
+      "first_write": 1546559,
+      "publish": 1551529
+    },
+    {
+      "words": 602,
+      "first_write": 1628480,
+      "publish": 1633132
+    },
+    {
+      "words": 671,
+      "first_write": 1680827,
+      "publish": 1685799
+    },
+    {
+      "words": 326,
+      "first_write": 1769906,
+      "publish": 1772695
+    },
+    {
+      "words": 183,
+      "first_write": 1799316,
+      "publish": 1800713
+    },
+    {
+      "words": 183,
+      "first_write": 1826796,
+      "publish": 1828181
+    },
+    {
+      "words": 183,
+      "first_write": 1852383,
+      "publish": 1853752
+    },
+    {
+      "words": 183,
+      "first_write": 1877718,
+      "publish": 1879087
+    },
+    {
+      "words": 165,
+      "first_write": 1900564,
+      "publish": 1901810
+    },
+    {
+      "words": 183,
+      "first_write": 1921226,
+      "publish": 1922595
+    },
+    {
+      "words": 165,
+      "first_write": 1936773,
+      "publish": 1938019
+    },
+    {
+      "words": 183,
+      "first_write": 1952628,
+      "publish": 1953997
+    },
+    {
+      "words": 255,
+      "first_write": 1991039,
+      "publish": 1992988
+    },
+    {
+      "words": 165,
+      "first_write": 2004466,
+      "publish": 2005712
+    },
+    {
+      "words": 165,
+      "first_write": 2016258,
+      "publish": 2017504
+    },
+    {
+      "words": 183,
+      "first_write": 2044523,
+      "publish": 2045912
+    },
+    {
+      "words": 165,
+      "first_write": 2059063,
+      "publish": 2060309
+    },
+    {
+      "words": 165,
+      "first_write": 2072699,
+      "publish": 2073931
+    },
+    {
+      "words": 183,
+      "first_write": 2089653,
+      "publish": 2091036
+    },
+    {
+      "words": 165,
+      "first_write": 2104255,
+      "publish": 2105487
+    },
+    {
+      "words": 1962,
+      "first_write": 2318714,
+      "publish": 2333395
+    },
+    {
+      "words": 806,
+      "first_write": 2435664,
+      "publish": 2441707
+    },
+    {
+      "words": 3422,
+      "first_write": 2639685,
+      "publish": 2664877
+    },
+    {
+      "words": 2,
+      "first_write": 2677027,
+      "publish": 2677112
+    }
+  ],
+  "raw_vector_sha256": "b4b89e3b9e126b4a4a4d0a9361489923b44f722147f9bf85e17b81155101db2e",
+  "vector_sha256": "d8429a4e1d682ec59ca9872665cbddfee2887692267daf036307d513d368c976",
+  "paced_vector_sha256": "41de0857d9780bdd6fce42575a7234d5c54d1e5a90a3ec0ecbd368bc94102545",
+  "removed_next_frame_clear": [
+    285212675,
+    1342177280,
+    41943280,
+    41943040
+  ],
+  "timeline_sha256": "12e3a97592728a027344ccfc2c337ddb109933d1fcfc79f321898ea6c3a8b337",
+  "recovered_frame_start_clear": null,
+  "limits": "Attach observed CPU work and fence points to immutable GPU command batches.\n\nEach captured MMIO command batch is published at its observed CPU work offset.\nThe real RTL ring reservation and fences add elapsed time without erasing CPU\nwork. Word writes may be packed at the end of a batch's CPU submission interval:\nthe GPU cannot consume unpublished words, so publication timing is preserved.\nCPU framebuffer writes are excluded by the established independent raster gate;\nthis is a producer/backpressure model, not a complete CPU memory-coherency model.\n"
+}

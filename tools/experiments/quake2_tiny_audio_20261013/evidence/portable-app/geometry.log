@@ -1,0 +1,3 @@
+PASS: native status dependency, atomic shared allocation, bounds, exact 164-word snapshot, legacy object invalidation and no per-model fence
+PASS: top-down native/low texture isolation, fenced map recycling, native-only generation, retained texture bytes/handles, reset/init, wrap and nonzero fast-tier routing
+PASS: real geometry capability dependencies; worker 3..32-vertex packet batching; inline three-vertex limit; fan ordering/culling/payloads; invalid state; unchanged clip uploads

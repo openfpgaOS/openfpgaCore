@@ -1,0 +1,20 @@
+{
+  "status": "FUNCTIONAL_PASS_PHYSICAL_PENDING",
+  "worker_sha256": "9096979f637f1e5947d8b9ed6bc280255dc73b3c68bc968e19edad80d722f20f",
+  "parent_sha256": "f535bc90a271228196358413120cdc4badda2094d2ffe8e8d4d95e78fd2aa7fa",
+  "reference_sha256": "9ccab1394587789566e07367ac55667e62762e703420f0ce1687b41a466159c0",
+  "reference_is_exact_parent_except_module_name": true,
+  "module_scope_register_declarations_including_attributes_identical": true,
+  "module_scope_register_declaration_count": 61,
+  "full_transcripts_identical_to_parent": {
+    "native1-particles1": "b30bfa97587d9142f38409115bf4d3b578db5ad161ebb99ce93351d689cd8d99",
+    "native1-particles0": "7c610fcffc13239abc7bfffe177a5c573e7a62e3bbf9b4041a7480694f5812bd",
+    "native0-particles1": "f2fcdd450d8a3a9566d58b7b25207a97474800dfe7092fcc9bdf7b9f8a93bee9",
+    "native0-particles0": "5e5ec9855f8c92b5d4bc432fac4de16e5691a0f22eaaa2671008833e074ab321"
+  },
+  "total_lockstep_cycles": 27163742,
+  "gate_receipt_sha256": "dfcdcc8b24248f5b11927a322d00c185d2647063556b69ab3c507bec456bffc9",
+  "patch_sha256": "ed7b6ccd12013c7a92f56c64ffaeacb62bdbba9dce0c9be6fb83ccbeea3c3e62",
+  "readme_sha256": "4f702d3ef8659ab4727fb88a6c81b42e956ae9dabbb30ba0d7f796985ae7b3e5",
+  "scope": "Only enabled COPY-state condition reduced; no cycles, registers, dock/video or source-tree edits elsewhere. No Quartus jobs; physical qualification remains pending."
+}

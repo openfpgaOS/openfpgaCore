@@ -1,0 +1,49 @@
+{
+  "name": "QGF1",
+  "capability": "0x51474631",
+  "macro": "INCLUDE_GPU_QUEUED_FRONT",
+  "scope": "os30 private native experiment; reuse BIM2 snapshots; TFP1 disabled; ordinary GPU semantics retained",
+  "metadata": {
+    "0x01a": "capability",
+    "0x01b": "importable slots: successful LOAD, clip zero, positive normal W<32767",
+    "0x01c..0x01f": "four W fingerprint bitplanes: XOR all eight nibbles of exact W bits; bits indexed raw local slot"
+  },
+  "gpu_run_opcode": "0x60",
+  "gpu_run_payload": [
+    "BIM2 generation token",
+    "first_global[4:0], cull_mode[6:5], reserved7=0, alpha[15:8], triangle_count[22:16] 1..64, reserved31:23=0",
+    "uoffset signed32",
+    "voffset signed32",
+    "same flags+RGB565 as BIM2 context",
+    "triangle_count words: raw-local indices [4:0],[9:5],[14:10], others zero"
+  ],
+  "gpu_release_opcode": "0x61, payload one word BIM2 token; release ordered at producer generation end, after last run; run itself drops read ownership but retains bank",
+  "admission": "RNE, supported opaque material, current successful raw generation, every index importable, every triangle has W fingerprints not all equal. No clipping/equal-W fallback can remain; only cull arithmetic repair.",
+  "repair": {
+    "0x020": "read: busy bit0, pending bit1, sticky protocol error bit2",
+    "0x021": "read repair serial token, distinct from snapshot generation; increment per repair",
+    "0x022": "read packed local indices",
+    "0x023": "read cull mode low2, job index bits[13:8]",
+    "0x024": "write operand selection 0..8",
+    "0x025": "read synchronous operand: vertex0 X,Y,invW, then vertex1, then vertex2; index write precedes data read",
+    "0x02e": "write repair serial token to acknowledge",
+    "0x02d": "write bit0 valid, bit1 keep; accepted only pending with matching token and full strobe"
+  },
+  "ordering": "Preflight every triangle before any output; repair unsupported arithmetic using immutable snapshot exact CPU nine-op sequence; retain keep mask; emit ordinary 0x56 loads then 0x54 draws into independent 512-word FIFO. CPU can continue enqueueing state/runs while worker processes. Reuse ingress ring for job RAM.",
+  "snapshot_lifetime": "CLAIM once per generation reused by multiple runs; explicit 0x61 ends lifetime after all payload values copied into output FIFO. CPU emits release before replacing raw generation or frame end. Fallback legacy BIM2 importer disabled on QGF-capable core.",
+  "reset": "GPU reset cancels queued work and snapshots but cannot abandon accepted raw DMA. Shared FMA owner drains any in-flight operation before granting raw LOAD after consumer reset.",
+  "ports": {
+    "math_req": "GPU->wrapper request exclusive shared FMA+scratch",
+    "math_grant": "wrapper->GPU ownership; remains asserted until math_release",
+    "math_release": "GPU->wrapper one-cycle pulse after final cull result, no requests outstanding",
+    "math_fma_valid/a/b/c/multiply": "GPU->wrapper",
+    "math_fma_result_valid/result/unsupported": "wrapper->GPU",
+    "math_scratch_read/write": "GPU->wrapper",
+    "math_scratch_read_addr/write_addr": "GPU->wrapper 3-bit indices 0..5",
+    "math_scratch_data": "wrapper->GPU32",
+    "math_scratch_write_data": "GPU->wrapper32",
+    "queue_reg_wr/addr/wdata/wstrb": "wrapper->GPU original GEO MMIO; addr10bit",
+    "queue_reg_rdata": "GPU->wrapper32 only 0x020..0x02f"
+  },
+  "worker_reset_contract": "math_release asserted/drained safely on consumer reset by wrapper (track outstanding FMA latency); worker receives GPU reset; wrapper must never use GPU reset for raw DMA reset"
+}

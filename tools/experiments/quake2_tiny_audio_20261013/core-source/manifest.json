@@ -1,0 +1,570 @@
+{
+  "format": 1,
+  "component": "core-source",
+  "archive": "source.tar.gz",
+  "source": {
+    "parent-preparation-receipt.json": {
+      "sha256": "97cb4713b96dbb83a7cf5cd25339d34984fb55237cebb5c666fcbe01b273101e",
+      "mode": 420
+    },
+    "src/fpga/common/audio_mixer.v": {
+      "sha256": "b530d3c7bba3c1e0e809008131bdaade03af8f2ecf9b5375822d6bb273d779f3",
+      "mode": 420
+    },
+    "src/fpga/common/axi_periph_slave.v": {
+      "sha256": "03269e468c2e1a025897c846e513435cadd6d60267efbacf5dfe52946477b087",
+      "mode": 420
+    },
+    "src/fpga/common/axi_register_slice.v": {
+      "sha256": "e9a408b3d558e099f42d669ea4c052350d4cc5dc0099046cb2c8b2bab67f2666",
+      "mode": 420
+    },
+    "src/fpga/common/axi_sdram_arbiter.v": {
+      "sha256": "5e9e06dca5ccf978a89f0aaacba05aa295ed7706636d8abed85ef2601ee037f1",
+      "mode": 420
+    },
+    "src/fpga/common/axi_sdram_clock_bridge.v": {
+      "sha256": "09a7418a0a04c40b5afa2ee96acdeec323a097bc74ac83f17a9ecb2b0299e9f6",
+      "mode": 420
+    },
+    "src/fpga/common/axi_sdram_slave.v": {
+      "sha256": "8a0e120d569812f176f83908bb18d9cf1459403999faf7be0d2853c591cfaa4e",
+      "mode": 420
+    },
+    "src/fpga/common/cpu_system.v": {
+      "sha256": "2960fe6b493b0de3de53b04f841a6667205c5141ce86a05b1b228cda9ab86833",
+      "mode": 420
+    },
+    "src/fpga/common/cpu_target_port.v": {
+      "sha256": "92017b80d7414766b12b9b09994a785998a803b55d82a14f2e9a1aacd048bc78",
+      "mode": 420
+    },
+    "src/fpga/common/cpu_target_port_per.v": {
+      "sha256": "119c0f1f6baa76448e483a6f7782ae19119478bca91bebbc2e9206922ec3339d",
+      "mode": 420
+    },
+    "src/fpga/common/gpu_color_depth_cache.sv": {
+      "sha256": "9adadb874d65365ab57de606992b69013fe239721a0b63bc8cbba18ca85b46f8",
+      "mode": 420
+    },
+    "src/fpga/common/gpu_core.v": {
+      "sha256": "2aec324292a0deebb8f3d728dfe7fea29b486e4024fc8f43ea29dafd4da3df5b",
+      "mode": 420
+    },
+    "src/fpga/common/gpu_edge_walker.v": {
+      "sha256": "69ef2238babab6716ddc9e7c004943982190d179547895081a9e69a94259e5d3",
+      "mode": 420
+    },
+    "src/fpga/common/gpu_geometry_worker.v": {
+      "sha256": "e0f4ffbd20f2a20ab416543a0e9d830d7ec6b4d8d55df094479428b67f933fbb",
+      "mode": 420
+    },
+    "src/fpga/common/gpu_tex_cache.v": {
+      "sha256": "3999efcfd3c233e4b866c8462dfa211c25ae9ac2e0f4e7ca4929b64efc6b3fef",
+      "mode": 420
+    },
+    "src/fpga/common/os30/GeometryFmaProbe.v": {
+      "sha256": "348d11609de14326dc9408c11e39a385a85a4e0678eaaf5d69f39d6cfba38088",
+      "mode": 420
+    },
+    "src/fpga/common/os30/audio_mixer.v": {
+      "sha256": "c6d2517af662f356b44617230c27aa880c449928282e738c374a2db86663f73a",
+      "mode": 420
+    },
+    "src/fpga/common/os30/audio_sample_cache.v": {
+      "sha256": "ac018efd17a7e1012d1456f12375575a4c4f57784ab6a03c2132bb00795c111d",
+      "mode": 420
+    },
+    "src/fpga/common/os30/axi_periph_slave.v": {
+      "sha256": "2ad87cc989af89b56492fa898d3f51dea55029fe6b8947c7e385e0859a100444",
+      "mode": 420
+    },
+    "src/fpga/common/os30/cpu_system.v": {
+      "sha256": "64ee4a7a7c646f49c7cef1d5b90cd17f1ca37be6bff0589a0eb3e58213caf1f0",
+      "mode": 420
+    },
+    "src/fpga/common/os30/geometry_color_rtz.v": {
+      "sha256": "27025e32c4c8f42168db8e49149d9ee7cd2255d606ddb7ed0f5c932bedd1a335",
+      "mode": 420
+    },
+    "src/fpga/common/os30/geometry_float_batch_recip.v": {
+      "sha256": "c3cc22d4aa4559d0cfe087c6556361eec22e363fbff79072bb65a1028c3dfd9b",
+      "mode": 420
+    },
+    "src/fpga/common/os30/geometry_lighting_batch.v": {
+      "sha256": "1d2c50748b04ab7dec19d8b6127191ff9cbeae486344571dc76663cf8fd00821",
+      "mode": 420
+    },
+    "src/fpga/common/os30/geometry_raw_load.v": {
+      "sha256": "ade3041bfd27ab6200c5d6356775adac778a34eb0d81c1f253ff83367627c144",
+      "mode": 420
+    },
+    "src/fpga/common/os30/geometry_transform_light.v": {
+      "sha256": "6987e27771c84173b31eb53e9f3bce4e7337437414548ef089f3adfe430c810f",
+      "mode": 420
+    },
+    "src/fpga/common/os30/gpu_color_depth_cache.sv": {
+      "sha256": "ab1f1aeeb135cd2f80e44adb39616c35f28f1e164ab639b2f5645fbb447000ae",
+      "mode": 420
+    },
+    "src/fpga/common/os30/gpu_core.v": {
+      "sha256": "452b36860161c1d3c73c7cdaaf2d1d3d5006096027169f101273a297d3e2ab43",
+      "mode": 420
+    },
+    "src/fpga/common/os30/gpu_core.v.orig": {
+      "sha256": "5e9dd586e64034ba7b9f2bb97d9f4b8cba20c772da21d263f38ad74049269e5a",
+      "mode": 420
+    },
+    "src/fpga/common/os30/gpu_tex_cache.v": {
+      "sha256": "c3fdc0adfe5ed583c37bf09ad3dbbbecb1e3c6ae1f5714cab5064eacc328e51c",
+      "mode": 420
+    },
+    "src/fpga/common/os30/phase10_bram_alias.v": {
+      "sha256": "b265bab9aeb93c5ae2444f652579b0fdc13cdab90e06b63d2c3fbcaf49b802d9",
+      "mode": 420
+    },
+    "src/fpga/common/os30/phase10_cram1_read_arbiter.v": {
+      "sha256": "b82f0725555682a14006e90a6a8546d320e822c71f34c25d057942aaf653c303",
+      "mode": 420
+    },
+    "src/fpga/common/os30/phase10_float_recip2.v": {
+      "sha256": "d68bc3fcdcb750f88cebf9aa8ed890a499d12210cbd50fe9d3a049c168bea5cc",
+      "mode": 420
+    },
+    "src/fpga/common/os30/phase10_load_alias.v": {
+      "sha256": "298dc6470719159e9b85aa90a6879ea41d78b32fae2fdb7dea580cd4980cec6a",
+      "mode": 420
+    },
+    "src/fpga/common/os30/phase10_raw_vtx_dma.v": {
+      "sha256": "ce51296a880ef212cacffbe4bb4c1728fc1bc9976d3504dd91883882d4316f81",
+      "mode": 420
+    },
+    "src/fpga/common/skid_buffer.v": {
+      "sha256": "f13c26d8d7cd89cb0259af5b299fbee722cbf2a106f2bee25df9d444dd1e81b8",
+      "mode": 420
+    },
+    "src/fpga/common/sync_fifo.v": {
+      "sha256": "66545eaee0463d5e25e862cb5fbccb357b2d34948f93a9f8a706c04c536aa28c",
+      "mode": 420
+    },
+    "src/fpga/common/video_CRT_scanout_indexed_BRAM.v": {
+      "sha256": "e93c6acc58e3e335fc5c9f3f90e410e168a9b6a7201b97c5edd60363391197cf",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/._ap_core.qsf": {
+      "sha256": "83256e07819c30785643f4fe3cf90cd145998e36404ea5ff3570ef83bfae1ee1",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/Makefile": {
+      "sha256": "3a4c09293b485d479e62430300c1339182b361d2c817204a6eead2a79b5d6852",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/about.txt": {
+      "sha256": "b087b021b912788a4902fa00089f290d486e23d912fbeb0ad8aca219bfb28986",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/ap_core.qpf": {
+      "sha256": "c81d392b3e32615e566ebcf6c2a43532459605b2dd08419ff512d2b57d7cb9d0",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/ap_core.qsf": {
+      "sha256": "351431b8158de34a5a18361c8ae8a9d5d94a81b714c3853dfa3d315a47c1f1d1",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/ap_core_assignment_defaults.qdf": {
+      "sha256": "34eaceabdf642fbd9040b8fc4fc11b1faf032c05081a4c3465acf8ce19abccee",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/apf/apf.qip": {
+      "sha256": "94af53185dde4d51ef30e75bb1ec8df672126742af36399bd62f4efb3a84b26a",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/apf/apf_constraints.sdc": {
+      "sha256": "71dca7fe3d90df657dd0f1dfd87c273c78675d4d9ef63d8c5aa666725d308069",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/apf/apf_top.v": {
+      "sha256": "7bb67bcd94ae4fd5224b8bf37d7110cdf9e2bc7c5c805997bfd7cdc7b506920d",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/apf/build_id.mif": {
+      "sha256": "00b59c7c91bccef55e9b7ef360bbccd7dc8bdb73338953e722b64a1b4c12a700",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/apf/build_id_gen.tcl": {
+      "sha256": "6279533fec80081e3c91884e1cc5df853b2a716df0b573636147f3420aace996",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/apf/common.v": {
+      "sha256": "26aa1637c4eaaef2fb6acaa38475826fdf9420c86d06a262eaa104422a32c4a8",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/apf/io_bridge_peripheral.v": {
+      "sha256": "8073a9f7d81d8dc00d8fb8bb67a02f55d913f9f2aa79ce947bd69074d9762b98",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/apf/io_pad_controller.v": {
+      "sha256": "70cda74af63d3baa53f87473e1d9e2d524ea305b299a3f832d6c1292771a305e",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/apf/mf_datatable.qip": {
+      "sha256": "6702b31dc8f86541e9c3eac266440c27243fc7b56d712d6bbbfe7138601ce887",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/apf/mf_datatable.v": {
+      "sha256": "ee3ff252ca7c454fa5e3492b719690a5e5a48ad95554fd77cf2882221999eb25",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/apf/mf_ddio_bidir_12.ppf": {
+      "sha256": "70e683493ee94bfd8ccd350fb2b8717a0116e6e0c30071abff32e148ae7c3b8f",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/apf/mf_ddio_bidir_12.qip": {
+      "sha256": "0c9880349656415cdb4fc7c2b6f42709fdafcca353577b2c47f11670cac3a248",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/apf/mf_ddio_bidir_12.v": {
+      "sha256": "46b49eb24886b306b4a637cfa03286ed706ecef789a90ac804fc6e707040a838",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/audio_output.v": {
+      "sha256": "833ce95e4adce5b647130cffd0de3cbd84b7a9fc6ff05a8668dee584cee8fef9",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/c5_pin_model_dump.txt": {
+      "sha256": "9f3cfcc3738fb0106996c8858287d31592511bf95f3f7e0eabbdacb79f56b4e8",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/chip32/Makefile": {
+      "sha256": "49fdf41d4c8e772f7b97a285ef5f472fccc426cd49d7511028ff1456fef0929f",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/chip32/architectures/chip32.vm.arch": {
+      "sha256": "bdd5f401c44a32edb7259172a8576d2b941192df6436b4f62985377c4ab98f06",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/chip32/loader.asm": {
+      "sha256": "a85ef65310d818639532aca892361b9c71329613809933f1025bb30f45d98632",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/chip32/loader.bin": {
+      "sha256": "fc1f8d37eb0fb322006b4428f0b59d2801c9b74978bd3f24103f5f9bbfca3c99",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/core_bridge_cmd.v": {
+      "sha256": "a4f1f4afa7be9f5695068e19ddfc71b1a5e2daba9bec3be3a8498a24a3035cd0",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/core_constraints.sdc": {
+      "sha256": "a41b3643ac62e699f3aa05a1a558e66b7f71868d5ccc0bcc8956fe8276290a29",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/core_top.v": {
+      "sha256": "572df8b92b09a1484579a4d79f5255a6d24762bb4569697328ee16fc44c84646",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/cram0_cdc.v": {
+      "sha256": "0f8873291b1b0a70af4f0f03585d1db9a3a68a329d7546d00afbf722f105ec61",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/cram0_controller.v": {
+      "sha256": "5cea541c267053569f2576c6be05beac3c4e8b8c6769995b740aa1934b6313f3",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/cram1_controller.v": {
+      "sha256": "b494189e1fe1b2eb084ab225246c4efb861f5af9e5023feb759be5c5e44528fc",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/cram1_phy.sv": {
+      "sha256": "f78292e36aaba83aa3fc96f9b5a057ce615535c0bb3a3a4b3d003bfa76ca9c53",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/firmware.mif": {
+      "sha256": "e505071d970e68bb7672be27db82ff304e37d9cb3a9d04180c0f9cf61992b031",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/frac_cen.v": {
+      "sha256": "bb7fa3505a5c1eff03bdd10446a0d79058d333265ce18844d5b5bcde90634abd",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/gpu_cram1_tex_adapter.v": {
+      "sha256": "5f36cf1ae1e4d7e986a8b9175e83bfd05f1bdd7f3e8a11cca32fb0fd2a8a814f",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/io_sdram.v": {
+      "sha256": "9fc8b56180ca8db88d17683cdd7da2e18c54ec8a080c98bcbcde25f52228282a",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/link_lite.v": {
+      "sha256": "6da77f7ac8b35f2bfb67b96fc1f34fd70d5b8146a1a4ca05178e21cb18b0ef24",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/megafunctions/mf_pllbase/mf_pllbase_0002.qip": {
+      "sha256": "eb47247cb283d3bd21d865ef0152993978eeaaec4b72c66a39746c0375f25815",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/megafunctions/mf_pllbase/mf_pllbase_0002.v": {
+      "sha256": "4f57b2b686119dc09a08df1b65d3d992f5778ef63da977e2210d641f54ed3258",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/megafunctions/mf_pllbase.cmp": {
+      "sha256": "78fe704bf3f8271f9e1197801260881c43ab0141dee22baa536cd3bbbb672295",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/megafunctions/mf_pllbase.ppf": {
+      "sha256": "115a937de51d4f60d201353151d850f92b0220b5f069dbf6404fa0afb436e368",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/megafunctions/mf_pllbase.qip": {
+      "sha256": "f9eca468d0303e6b7323d388e8d65719cc7845dc72000b76bf0cb02af6e41bb4",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/megafunctions/mf_pllbase.v": {
+      "sha256": "d244ed0476d9a5fc494400a858d4a0040d7726ed4ca039d798e1e4ebce281a1d",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/megafunctions/mf_pllbase.xml": {
+      "sha256": "77011dfe081e6731f8448880aab733b49bfcfc52b830c27cccedb4249eb7b2df",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/megafunctions/mf_pllram_133.v": {
+      "sha256": "a1937ee962322c05bb212a16d9cd85007f2d1e1841df64e48016bd75307311b3",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/megafunctions/mf_pllram_166.v": {
+      "sha256": "77cb3c2c1fd520011bb176d95b2e7723a747af9ed94704d2797ba10192aa69e3",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/megafunctions/mf_pllram_90.v": {
+      "sha256": "e111e749a5e72ea313825d9cade44d5fa7165d08b4da7d53c4079cb2a5adabea",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/megafunctions/mf_pllram_96.v": {
+      "sha256": "4aa86146891915b29c8d3bb1d5c3929b396c00bb54c5a81a14e074582d7347bb",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/os30/core_top.v": {
+      "sha256": "bc1846e6f148496d5fb41c329fc4c34fe3fd312c65b9316f36ac5a36336a60e5",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/os30/io_sdram.v": {
+      "sha256": "402fbc16b1b6957001f13b5c0ba957ce4e2253d586ddb3b965464e5c017ac2fc",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/os30_failing_paths.txt": {
+      "sha256": "01fae758c2efce2bb50287817df0007d144082eb04f6e3a4a4b3f45791461b70",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/os30_worst30_detail.txt": {
+      "sha256": "7adaa9fde8a2dc6a386171086a186e8754516b9e09c412566830a89096064ddc",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/sdk-runtime.sh": {
+      "sha256": "e36081545eb71d5fba4666bcaa80fd70eaf88502c98a42ada4128811c9d8a42a",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/seed_sweep_results.txt": {
+      "sha256": "14667d5e9f62fd9d1a64300336db3640a9ac3e3e586292728f682490757689fa",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/seeds/os20.seed": {
+      "sha256": "90d7ec0f0acef104d8b6252794295f661a0149634868d02a1ae0c358099638f5",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/seeds/os20.seed.src": {
+      "sha256": "8211ce0e28fe2a4a563ec5ebed5f2f99b55bf8d939f0afe8c58305d6cde9c5f0",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/seeds/os25.seed": {
+      "sha256": "5378796307535df3ec8d8b15a2e2dc5641419c3d3060cfe32238c0fa973f7aa3",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/seeds/os25.seed.src": {
+      "sha256": "781f93450d220d81eda9ce1fa13224e340c8c82c827f90f608a28cf2c7a33892",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/seeds/os30.seed": {
+      "sha256": "53c234e5e8472b6ac51c1ae1cab3fe06fad053beb8ebfd8977b010655bfdd3c3",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/seeds/os30.seed.src": {
+      "sha256": "e32e4dfdff0e8aada04f4bdcc5b8b4695251eecf31bb6c7d9ba8d0c72c45e3c8",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/snac_shifter.v": {
+      "sha256": "4a3953a9729af3c001101e85d67cdd73e4334bc76ef0ad984c55b8c66f42eebf",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/sram_controller.v": {
+      "sha256": "302dff0f86dc5016407ddfa50d3894f0a5cd0377325f04a93097d86c5801b79b",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/third_party/analogizer/analogizer.qip": {
+      "sha256": "e4de027da1f8690382014234e914a10e6973c74c3fd9273524e601048a4ed7e5",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/third_party/analogizer/analogizer_psx.sv": {
+      "sha256": "6563d7db73e3e98bd10d2676fe778a3caa3b70294c8994961fb2e72d72eba729",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/third_party/analogizer/clock_divider_fract.v": {
+      "sha256": "46b9ad71aa3c60796fe5594e98b5b5b346c6db075f0aa634086c0118ada5b8fb",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/third_party/analogizer/csync.v": {
+      "sha256": "1f4a21fe9632625637fe6709de59b792302c6a7155479d3b9457dc6c11fa7d8d",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/third_party/analogizer/dualshock_controller.v": {
+      "sha256": "593ee87e7b5e0de1dee8ebf8f19c147697e816e3cb1c2e580483f843b5d27b5b",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/third_party/analogizer/hq2x.sv": {
+      "sha256": "2146b69cf63c26a4b41407e9ac1b4462db4d7e3ea6d8a99f31ba12712d68f975",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/third_party/analogizer/openFPGA_Pocket_Analogizer.v": {
+      "sha256": "62d54892fe7f9574b62beda77fa7211212e7045d61b6521061964fa9421d7b3c",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/third_party/analogizer/rgb2YPbPr.v": {
+      "sha256": "25113aa95cc209181183010199b8732382796d2c7ad55e90401509aad94cca09",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/third_party/analogizer/scandoubler.v": {
+      "sha256": "c8e79c99e320227def38f46a65db939985a00de511eae602cb44e6295852d05e",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/third_party/analogizer/scandoubler_2.v": {
+      "sha256": "e10b57d988940b6408c453e9706a229652e5fb79ec53e1e1c3d884c57f434b08",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/third_party/analogizer/scanlines.v": {
+      "sha256": "a1df24e4f5112754372937a9776e335e6ae14d904b6fe4161d5612b8231d8d46",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/third_party/analogizer/scanlines_analogizer.v": {
+      "sha256": "417d81989691e0424f35cdbf3267e9dde6aec2374184586ebacda5b21f0ab70c",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/third_party/analogizer/sync_fix.v": {
+      "sha256": "c86e0ff7b7ecd643cc39d9a71ab2f321b4cd148be5664d743724befdc9836454",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/third_party/analogizer/vga_out_sw.v": {
+      "sha256": "0eba3403335da3b9a2101a5d5de55416a270960a33dff571092a96116e386fe2",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/third_party/analogizer/yc_out.sv": {
+      "sha256": "d2d92c25f572f79c85cc4d0ce13315bab7cc76355afd6859ef3648669a62504b",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/third_party/cram0_phy.sv": {
+      "sha256": "a4c2ee32a9026eaf50ef53bcb0f6a1fb8032af4acd76eda41e2d0351de22ea51",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/third_party/openrtl_sdram/NOTICE": {
+      "sha256": "f06116f0d4ea431f83394ae1ed8212b2a133cbc95ba291e9edf56f4c4736f760",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/tools/capture_ocr.sh": {
+      "sha256": "d2f32c9a6cf5acadddc8a3c18bd418110df08cf56f734ecdaf603f606e68c30b",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/uart_rx.v": {
+      "sha256": "56eafb059b8a2915619fde9b6645ec4d35b3accf279371fc156def42e001ca32",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/uart_tx.v": {
+      "sha256": "36700e6365accd444838f3db70550b51524898da262c81bbc695a8d78c4009bb",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/variants/os20.mk": {
+      "sha256": "9e5ff3e2f9ab38c460171e919d993eb7ebc59529e5363526758fd8dcc9130d13",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/variants/os20.qsf": {
+      "sha256": "5b1813a63b69f2907686b8346b529f73140da4b358df1bb4bce2d5292916bdc0",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/variants/os20.sdc": {
+      "sha256": "e4f5c0589457385a1cdd5fbba4bc393fbb2addf88fff05773b8655313f3049ce",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/variants/os25.mk": {
+      "sha256": "e1637e2071aeb7c969d6a4b124e09b50ba94ed0414508d32931e15de01e00538",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/variants/os30.mk": {
+      "sha256": "f1ae917100e35b74bed4096369979518d1932b411284724aefc00a62dd6d775e",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/variants/os30.qsf": {
+      "sha256": "a4b926b392962466f57584c3f7449366c3504d77f671fcc74d1c497151f921aa",
+      "mode": 420
+    },
+    "src/fpga/targets/pocket/variants/os30.sources": {
+      "sha256": "e979c7767b909b90153041652bd96d18e8769e2c5460bba1d0b0dc5de74519d2",
+      "mode": 420
+    },
+    "src/fpga/vendor/vexriscv/VexiiRiscv/VexiiRiscv_os30.v": {
+      "sha256": "6f50382aa82e6684551756e6c2473492d0bd915a0c94b2aeae9ac4a47e62dec4",
+      "mode": 420
+    },
+    "tools/report_core_timing.tcl": {
+      "sha256": "80a456b4aaa9fe62e050339d9ce0c4ec405e025a4617cd3b2687c2b7ee1ae8e2",
+      "mode": 420
+    }
+  },
+  "selected_seed": null,
+  "qualified": false,
+  "configured_mhz": 100,
+  "synthesis_settings": {
+    "global_setting": {
+      "effective": "AREA",
+      "assignments": [
+        "SPEED",
+        "AREA",
+        "SPEED",
+        "AREA"
+      ]
+    },
+    "instance_assignments": [
+      "set_instance_assignment -name OPTIMIZATION_TECHNIQUE SPEED -to ic|cpu|cpu"
+    ],
+    "physical_synthesis": {
+      "PHYSICAL_SYNTHESIS_COMBO_LOGIC": {
+        "effective": "OFF",
+        "assignments": [
+          "OFF",
+          "ON",
+          "OFF"
+        ]
+      },
+      "PHYSICAL_SYNTHESIS_EFFORT": {
+        "effective": "NORMAL",
+        "assignments": [
+          "NORMAL",
+          "FAST",
+          "NORMAL"
+        ]
+      }
+    },
+    "cpu_combo_scope": {
+      "present": true,
+      "target": "ic|cpu|cpu",
+      "effective": "ON",
+      "assignments": [
+        {
+          "target": "ic|cpu|cpu",
+          "value": "ON"
+        }
+      ]
+    }
+  },
+  "timing_closed_at_configured_100_mhz": false,
+  "reason": "No seed meets the unchanged strict >90 MHz and all other timing/resource gates.",
+  "files": {
+    "source.tar.gz": "1b991d1aeb3809a5af9e5099522d3a8798e4f7b459fe6c1471dc56dbc9765daa"
+  }
+}

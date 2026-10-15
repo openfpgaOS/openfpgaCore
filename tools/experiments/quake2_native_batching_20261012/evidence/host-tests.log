@@ -1,0 +1,27 @@
+Quake2 renderer regressions passed
+PASS: 4000 sparse texture-chain histories; image order, chains, registration and slot reuse exact
+PASS: 12000 compact topology vs original PVS marking, all stamps and state exact
+PASS: 40000 direct particle billboards exactly match staged geometry, UVs, RGB, alpha, clipping and ordering
+PASS: 1044481 exact corrected reciprocals; 100000 shared world endpoints; precision gate boundaries and CPU fallback; flowing/alpha/oversized neighbours, scoped hint, safe bounds and near clipping
+PASS: world positions preserve fresh attributes and invalidate on XYZ, transform, viewport and epoch wrap
+PASS: cached worker packets, 128 duplicate polygons/512-word bound, CPU barriers, refused batch fallback, cull/material refresh and inline/absent capability
+PASS: cached alias topology, winding, UV seams, limits and release
+PASS: native MD2 meshlets preserve ordered triangles/UV seams, 32-vertex bounds, native frames, exact bounds/normal masks, invalid extents and release
+PASS: immutable native frame/UV upload, repeated/alternating skin dimensions, zero resident waits, generation refresh and allocation fallback
+PASS: MD2 direct/cached/fallback parity; colour generation wrap; 32000 interpolation bounds and all shell combinations; 100000 conservative culling cases
+PASS: exact dynamic lightmaps, cutoff/truncation boundaries, wide surfaces
+PASS: 3000 frames, exact full RGBA/RGB565 pages and style cache; uploads 8598 -> 8199, pixels 59351680 -> 3070118
+PASS: 3000 frames, exact sampled RGBA/RGB565 across polygon chains and style cache; uploads 8598 -> 1913, pixels 59351680 -> 239350
+PASS: 4000 exact sparse/full comparisons, 0-4 styles, missing samples, negative lights, gamma/minlight, UV edges and atomic fallback
+PASS: image lookup collisions, reuse, restart and missing-image retry
+PASS: BSP node loading and stack budget
+PASS: exact water polygon hunk sizing
+PASS: sound RMS results and accumulator range
+PASS: native mixer-less startup stays silent; hardware mixer startup unchanged
+PASS: exact trig results, signed zero, arbitrary finite arguments, repeats and collisions
+PASS: 5725147 exact mixed RNG outputs, initial state, full lag-state equality, wraps and15 reseeds
+PASS: 11329 exact batched particles; 2000 full/partial/exhausted pools, zero/negative counts, reseeds and complete PRNG state equality
+PASS: local server never stalls rendering; dedicated pacing retained
+PASS: Pocket Video menu controls, staging, defaults and conditional restart
+PASS: pad binding migration/rebinding, menu release/suppression, no duplicate digital input, sensitivity/inversion/run and menu gating
+PASS: supported compact Options and pad labels fit 320x240; scoped reset preserves video/bindings; one save on menu exit

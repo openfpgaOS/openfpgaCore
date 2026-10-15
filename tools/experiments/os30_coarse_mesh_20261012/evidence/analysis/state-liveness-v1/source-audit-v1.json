@@ -1,0 +1,151 @@
+{
+  "status": "PASS_SCOPED_SOURCE_AUDIT",
+  "scope": "Skip only these16 opcodes when proving omitted CPU canonical rows dead; actual dispatcher still executes all opcodes and GROUP construction still stops at every state/list boundary. No source edit.",
+  "whitelist": {
+    "0xd7": {
+      "name": "TEXTURE",
+      "handler": "gfx_sp_texture",
+      "effect": "Writes vertex-state epoch and future UV scales.",
+      "source_line": 2871,
+      "handler_sha256": "f6c7d2f7f6fd2d075b43fc674023ff7e450b84e58b96fc06b88f4450678f5bc1"
+    },
+    "0xfd": {
+      "name": "SETTIMG",
+      "handler": "gfx_dp_set_texture_image",
+      "effect": "Writes future texture source pointer and format size.",
+      "source_line": 2893,
+      "handler_sha256": "714c24eae45a8e55b6f8baf5124583c69764e119295349bec89892dcc153818e"
+    },
+    "0xd9": {
+      "name": "GEOMETRYMODE",
+      "handler": "gfx_sp_geometry_mode",
+      "effect": "Writes vertex-state epoch and future geometry mode.",
+      "source_line": 2784,
+      "handler_sha256": "bff02cbe7cbc485c110e3de5a1ef447d881ab1a79f4785a9b86fcc275af49bc9"
+    },
+    "0xfb": {
+      "name": "SETENVCOLOR",
+      "handler": "gfx_dp_set_env_color",
+      "effect": "Writes environment RGBA and GPU vertex-cache stale mask.",
+      "source_line": 3031,
+      "handler_sha256": "7f7c68f46510fa3a1f8004a65ef6b593443a92127513dbfb7f13d4ba5f86a031"
+    },
+    "0xf5": {
+      "name": "SETTILE",
+      "handler": "gfx_dp_set_tile",
+      "effect": "Writes texture tile/load metadata and change flags; no upload.",
+      "source_line": 2898,
+      "handler_sha256": "7a1394840f6b8cd057c0fadfe2eb8e67c4200dbe15539fc6626d785e21704126"
+    },
+    "0xf2": {
+      "name": "SETTILESIZE",
+      "handler": "gfx_dp_set_tile_size",
+      "effect": "Writes texture tile bounds and change flags.",
+      "source_line": 2915,
+      "handler_sha256": "7d20c1fc80e3ac93bb4bf40ca36fbc041d45493dc62c9661065d6cc91f7056b6"
+    },
+    "0xf3": {
+      "name": "LOADBLOCK",
+      "handler": "gfx_dp_load_block",
+      "effect": "Writes loaded-texture source/size/change metadata; no GPU upload or vertex read.",
+      "source_line": 2933,
+      "handler_sha256": "282d3a918cfd2aed639b84c2608d89b8fd7b0056214183210dc56da3a3ac199e"
+    },
+    "0xf4": {
+      "name": "LOADTILE",
+      "handler": "gfx_dp_load_tile",
+      "effect": "Writes loaded-texture metadata/tile bounds; no GPU upload or vertex read.",
+      "source_line": 2963,
+      "handler_sha256": "dc93b405dffbd6c0c112c7ce5c00a06ffb00c395f0dce61fbbbc513675158398"
+    },
+    "0xf0": {
+      "name": "LOADTLUT",
+      "handler": "gfx_dp_load_tlut",
+      "effect": "Writes palette pointer and texture-change flags.",
+      "source_line": 2926,
+      "handler_sha256": "9a7f829f4ef116abf2128b08ea0aab8467d3d6f39e74682ef820912b71bab42b"
+    },
+    "0xfa": {
+      "name": "SETPRIMCOLOR",
+      "handler": "gfx_dp_set_prim_color",
+      "effect": "Writes primitive RGBA and GPU vertex-cache stale mask.",
+      "source_line": 3042,
+      "handler_sha256": "59005633024c004dbeb877c8a546a7f4d0efc9b438d38771de1927abec642d99"
+    },
+    "0xfc": {
+      "name": "SETCOMBINE",
+      "handler": "gfx_dp_set_combine_mode",
+      "effect": "Writes combine mode from pure color-combiner decoding.",
+      "source_line": 3027,
+      "handler_sha256": "bbd092651401ca767aa44ca1cca44ff37502a7ca9353400759741021597836a7"
+    },
+    "0xf8": {
+      "name": "SETFOGCOLOR",
+      "handler": "gfx_dp_set_fog_color",
+      "effect": "Writes fog RGBA; this backend binds a no-op gpu_set_fog_color callback.",
+      "source_line": 3053,
+      "handler_sha256": "2fb04d761c6ae4c926d37ed95235f58f7d1a59fcf16832acfa75929265a2624c"
+    },
+    "0xe6": {
+      "name": "LOADSYNC",
+      "handler": "gfx_run_dl default -> gfx_dl_invalidate_material",
+      "effect": "No explicit sync case in this backend; default only invalidates material memo."
+    },
+    "0xe7": {
+      "name": "PIPESYNC",
+      "handler": "gfx_run_dl default -> gfx_dl_invalidate_material",
+      "effect": "No explicit sync case in this backend; default only invalidates material memo."
+    },
+    "0xe8": {
+      "name": "TILESYNC",
+      "handler": "gfx_run_dl default -> gfx_dl_invalidate_material",
+      "effect": "No explicit sync case in this backend; default only invalidates material memo."
+    },
+    "0xe9": {
+      "name": "FULLSYNC",
+      "handler": "gfx_run_dl default -> gfx_dl_invalidate_material",
+      "effect": "No explicit sync case in this backend; default only invalidates material memo."
+    }
+  },
+  "excluded": [
+    "SETOTHERMODE_H0xe3 and SETOTHERMODE_L0xe2 remain barriers: their shared handler may invoke canonical fog materialization. An omitted-slot/fog-mask invariant could support a separate proof, but it is outside this sixteen-op scope.",
+    "Every other state/draw/unknown opcode, malformed VTX, TRI referencing any still-pending slot, nonimmutable command/target, second external caller return, root-list end, cycle/step/stack exhaustion remains a rejection."
+  ],
+  "build_contract": [
+    "TARGET_OPENFPGA, GFX_GPU_GEOMETRY_WORKER_APP=0, current F3DEX_GBI_2E and actual gfx_gpu rendering backend.",
+    "The alternate geometry-worker-app pre-dispatch attribute-flush branch is inactive; do not reuse this whitelist under a different build without re-audit.",
+    "SETFOGCOLOR safety binds the actual no-op callback; a different rendering backend is not covered."
+  ],
+  "ownership_and_order_obligations": [
+    "Async success already clears cpu_fog_pending for all omitted written slots and begins with no lazy alias dependency in those slots. Whitelisted commands do not change either pending mask or read canonical vertices.",
+    "A later partial VTX first materializes old live survivors and drops overwritten lazy/fog rows as before. The proof removes only overwritten slots from its pending mask. A future TRI mentioning any remaining slot rejects regardless of material/cull state.",
+    "State changes remain CPU-executed and invalidate material/update epochs/cache flags exactly as now. No shared-context GROUP may cross a state opcode: immutable task eligibility is still checked at each actual material context.",
+    "Prepared GROUP input/context/material and repair descriptors remain immutable and ordered ahead of subsequently emitted GPU state. No publication, source-pool fence, lease yield, texture reuse wait or repair path is removed.",
+    "The proof may read only immutable command bytes. Mutable caller storage cannot be cached as if immutable, even if a historical snapshot suggests an overwrite."
+  ],
+  "cache_design": [
+    "Keep source-only static MeshTask.dead_after only for proofs needing no caller. Never store a contextual result there.",
+    "For caller-aware proofs, pass the immediate actual return_command; reject a second external return. Static nested G_DL calls use a bounded local return stack; tail branches keep the current continuation.",
+    "Cache exact task source plus exact immutable return_command, with exact comparison after any hash. Bind GROUP cache entries to the same contextual proof identity; context-entry replacement must not authorize stale group reuse.",
+    "Group end pointer remains inside its current physical list, preserving original CPU control-flow/state execution."
+  ],
+  "coverage_receipt": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/state-liveness-v1/native-traversal-v2/result.json",
+  "coverage_sha256": "545ad1d9788086b777feb7abcb92178620095ab68a2a8544d0a73cada5b12213",
+  "coverage_limit": "Source-bound cold traversal can establish caller-aware coverage. Warm continuation graph is not captured; only same-list warm counts are available. Structural candidates are not confirmed material admission or measured cycle savings.",
+  "if_implemented_tests": [
+    "Actual-helper proof tests with each whitelisted opcode between load and overwrite, partial overwrites then forbidden pending TRI, all explicitly excluded opcodes, malformed counts/indices, step and stack limits.",
+    "Same callee under overwrite versus live-TRI/state/mutable callers must not share a positive proof; nested call/branch/return, exact-key collisions and cache replacement.",
+    "Before/after dispatcher traces must still include every state opcode in order. Verify material/cull changes, fog alpha, GPU cache staleness, texture/source lifetimes, repair and canonical state with strict full-native oracle."
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v3/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "3e5df211b1571fab257d1ad4286096c4badd64e4c515428af3f9f6a41041a7df",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v3/src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "b4018e719dada1f54c07a2b7beadc114e431c0bfba6624efa159ae64fe89b145",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app-v2/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "20d5461d5d587fff296433f755c169c8cf039fbcbba85a0119f2df5ce4ebb8d9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v3/evidence/app-build-v3/final-build.log": "437ef0f10117b3aa9b2801a3c0a21e57884302d48a51d1486b8d10f1c3015002",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v3/evidence/app-build-v3/build-result.json": "2c6831fac16d9e1ae42d30de6fbf896ac12354017f84978c5dbcc0d04c2ff336",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/state-liveness-v1/native-traversal-v2/result.json": "545ad1d9788086b777feb7abcb92178620095ab68a2a8544d0a73cada5b12213",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/state-liveness-v1/native-traversal-v2/analyze.py": "f62d9e15e8bf8aa4080b0787090d507f6cc275974d3abb5cc7e64dee3887e6e5"
+  },
+  "physical_fit": false,
+  "deployed": false
+}

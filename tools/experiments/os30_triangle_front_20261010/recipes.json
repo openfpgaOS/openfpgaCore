@@ -1,0 +1,232 @@
+{
+  "scope": "Archived exact recipes; use original experiment layout and bound dependencies. No ROM/assets/binaries included.",
+  "evidence_root": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1",
+  "recipes": {
+    "build_model.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/build_model.py",
+      "sha256": "8bdaa4de97aa455b4da0b580b52d2636c2bb9cbac336413122b6e6ead1c9f43b"
+    },
+    "prepare_fixture_v3.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/prepare_fixture_v3.py",
+      "sha256": "928d4d0f981293a4b5f7dddb4148a90fba2071877addaa033434a967efca7deb"
+    },
+    "replay.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/replay.py",
+      "sha256": "cedab983cbdde214d3a493278d130dade6f98491e25ac2920feb3f3dae8113f2"
+    },
+    "analyze.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/analyze.py",
+      "sha256": "99f566f43d1aab21ccf71b77fab68e265757b34c1b01f0e8008b19d5cbb9b88f"
+    },
+    "tests/run_controller.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/tests/run_controller.py",
+      "sha256": "c5d52e9cfe58836ab806b5b22e474b47e1b1770b7cc134510e143746da6be2e8"
+    },
+    "tests/run_wrapper.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/tests/run_wrapper.py",
+      "sha256": "b8ae140b4914d458f920abd7ae3b74c5f23a8c6107ac26a32e18e88b73baa526"
+    },
+    "tests/run_native_cull.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/tests/run_native_cull.py",
+      "sha256": "d9d4c6da600fdd8d0bb6aa35011a41b71ce156220668c37e8ce127f5a9fe2f9e"
+    },
+    "tests/check_lazy_bulk.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/tests/check_lazy_bulk.py",
+      "sha256": "294240de4f26ead0a855babb0aaa761a30f9149c5b082eb6829dd4097d3d7f16"
+    },
+    "tests/check_replays.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/tests/check_replays.py",
+      "sha256": "4dbf49fc2ccf0a416b21eadf4978dd93a1bd731a316e7e30c44b7caa140c92f9"
+    },
+    "tests/native_cull.c": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/tests/native_cull.c",
+      "sha256": "ce9e440b3f8d3a575c145c23324355fb215944ea4bfcafd56cbca63d203cbb99"
+    },
+    "tests/native_cull_host.cpp": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/tests/native_cull_host.cpp",
+      "sha256": "0e53e8d2026c3a16365fbe86e1e3c8ee79030b09cacfc9b6fb0300969f953c94"
+    },
+    "tests/tb_triangle_preflight.v": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/tests/tb_triangle_preflight.v",
+      "sha256": "81ee22a3cab0c1bfff90688df5aa028f097f41d22c0b550977aec54470eab638"
+    },
+    "tests/test_triangle_preflight.cpp": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/tests/test_triangle_preflight.cpp",
+      "sha256": "f8a23a28524413ed7c8b4cc1c050965275eb5bca3151438b486bb04859dc7fb9"
+    },
+    "tests/test_preflight_wrapper.cpp": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/tests/test_preflight_wrapper.cpp",
+      "sha256": "8b044fbba9720b3ec7cb271ca7386137e8494a6fd252a3fc43fb9ab54ad36c24"
+    },
+    "tests/geometry_raw_load_stub.v": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/tests/geometry_raw_load_stub.v",
+      "sha256": "537307c67b1fa7d39b86d3904f65216a5f0efb3c0d91c3b7fa5d61d59e4afc03"
+    },
+    "tests/lazy_bulk_test_tail.c": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/tests/lazy_bulk_test_tail.c",
+      "sha256": "b95f50875f4b8df19cccc29e2c260897508daf33ec01f0c6cc8b5cefe27b86bc"
+    },
+    "app-build-v3/build_app.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/app-build-v3/build_app.py",
+      "sha256": "8fa83365c47a7becb4e2b23d9f759be856038feddd2ece4b9cccdd59b5849e86"
+    },
+    "app-build-v2/build_app.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/app-build-v2/build_app.py",
+      "sha256": "aaeb4a0ce91391a8795a4a2e361ada2d448f1f3d98b93f6c2f272feb6b9d052e"
+    }
+  },
+  "build_app_commands": {
+    "v3": [
+      "bash",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/work/sm64-v3/tools/sdk-container.sh",
+      "-C",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/work/sm64-v3/src/sm64",
+      "make",
+      "-j4",
+      "PROFILE=0",
+      "PERF_DIAG=1",
+      "GEOMETRY=1",
+      "GEOMETRY_REFERENCE=0",
+      "OBJ_DIR=/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/work/sm64-v3/.obj/sm64-triangle-front-v3-perfdiag",
+      "APP_LD=../sdk/app-sdram-staging.ld",
+      "LDFLAGS=-Wl,--defsym=__of_sdram_staging=1",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/work/sm64-v3/.obj/sm64-triangle-front-v3-perfdiag/app.elf"
+    ],
+    "v2": [
+      "bash",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/work/sm64-v2/tools/sdk-container.sh",
+      "-C",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/work/sm64-v2/src/sm64",
+      "make",
+      "-j4",
+      "PROFILE=0",
+      "PERF_DIAG=1",
+      "GEOMETRY=1",
+      "GEOMETRY_REFERENCE=0",
+      "OBJ_DIR=/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/work/sm64-v2/.obj/sm64-triangle-front-v2-perfdiag",
+      "APP_LD=../sdk/app-sdram-staging.ld",
+      "LDFLAGS=-Wl,--defsym=__of_sdram_staging=1",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/work/sm64-v2/.obj/sm64-triangle-front-v2-perfdiag/app.elf"
+    ]
+  },
+  "model_build_command": [
+    "verilator",
+    "-j",
+    "3",
+    "--assert",
+    "--timing",
+    "-DINCLUDE_VERT_TRI",
+    "-DINCLUDE_DIRECT_COLOR",
+    "-DINCLUDE_COMBINE",
+    "-DINCLUDE_Z_BURST",
+    "-DVEXII_CPU_OS30",
+    "-DINCLUDE_HW_MIXER",
+    "-DINCLUDE_TEX_MEM",
+    "-DINCLUDE_CB_WINDOW2",
+    "-DINCLUDE_VI_FILTER",
+    "-DINCLUDE_XFORM",
+    "-DEXCLUDE_GPU_LIGHT",
+    "-DEXCLUDE_CLIP_TRI",
+    "-DEXCLUDE_GPU_XFORM_MAC",
+    "-DINCLUDE_CPU_RING",
+    "-DEXCLUDE_GPU_COMMAND_DMA",
+    "-DEXCLUDE_GPU_PARAM_SPAN_LIST",
+    "-DINCLUDE_XFORM_VERTEX_RAM",
+    "-DINCLUDE_XFORM_RATIO_PIPE",
+    "-DINCLUDE_GPU_CLAMP_PIPE",
+    "-DINCLUDE_Z_COMPARE_PARALLEL",
+    "-DINCLUDE_CB_SPLIT_MULT",
+    "-DINCLUDE_PSS_SPECULATIVE_STEP",
+    "-DINCLUDE_SPAN_DEDICATED_MULT",
+    "-DINCLUDE_TEX_QUEUE_RAM",
+    "-DINCLUDE_TEX_QUEUE_MLAB",
+    "-DINCLUDE_EW_STEP_PREDECODE",
+    "-DINCLUDE_EARLY_Z_CAPTURE",
+    "-DEXCLUDE_SYSREG_DIAG_READBACK",
+    "-DINCLUDE_Z_WINDOW8",
+    "-DINCLUDE_GPU_RENDER_CACHE",
+    "-DINCLUDE_DERIVE_PARALLEL_SCALE",
+    "-DINCLUDE_Z_EARLY_RESTART",
+    "-DINCLUDE_GPU_CLAMP_FLAGS_PIPE",
+    "-DINCLUDE_GPU_WQ16",
+    "-DINCLUDE_Z_WINDOW_PREDECODE",
+    "-DINCLUDE_SPAN_LOOKAHEAD",
+    "-DOF_EXPERIMENT_SDRAM_STAGING",
+    "-DINCLUDE_CLK90",
+    "-DOF_EXPERIMENT_PSRAM32",
+    "-DINCLUDE_GPU_BRAM_IMPORT",
+    "-DINCLUDE_TRIANGLE_PREFLIGHT",
+    "--cc",
+    "--build",
+    "-Wall",
+    "-Wno-fatal",
+    "-Wno-BADVLTPRAGMA",
+    "-CFLAGS",
+    "-std=c++17 -O2",
+    "-I../targets/pocket/third_party/analogizer",
+    "-Wno-WIDTHEXPAND",
+    "-Wno-WIDTHTRUNC",
+    "-Wno-CASEINCOMPLETE",
+    "-Wno-SYNCASYNCNET",
+    "-Wno-UNOPTFLAT",
+    "-Wno-STMTDLY",
+    "-Wno-PINMISSING",
+    "-Wno-UNUSEDSIGNAL",
+    "-Wno-UNDRIVEN",
+    "-Wno-UNUSEDPARAM",
+    "-Wno-CASEOVERLAP",
+    "-Wno-SELRANGE",
+    "-Wno-WIDTHCONCAT",
+    "-Wno-MULTIDRIVEN",
+    "-Wno-LATCH",
+    "-Wno-IMPLICIT",
+    "-Wno-ASCRANGE",
+    "--top-module",
+    "tb_system",
+    "--Mdir",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/native-v1/obj",
+    "-I../common",
+    "-I../targets/pocket",
+    "-I.",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/native-v1/frozen/docs/measurements/os30-dual-20261004/validation/baseline128/tb_irq.v",
+    "bram_model.v",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/native-v1/frozen/docs/measurements/os30-dual-20261004/validation/baseline128/io_sdram_pocket_test.v",
+    "sdram_model_full.v",
+    "../common/cpu_system.v",
+    "../common/cpu_target_port.v",
+    "../common/cpu_target_port_per.v",
+    "../common/axi_register_slice.v",
+    "../common/axi_sdram_arbiter.v",
+    "../common/axi_sdram_slave.v",
+    "../common/axi_periph_slave.v",
+    "../common/sync_fifo.v",
+    "../targets/pocket/snac_shifter.v",
+    "../common/gpu_core.v",
+    "../common/gpu_edge_walker.v",
+    "../common/gpu_tex_cache.v",
+    "../targets/pocket/apf/common.v",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/native-v1/frozen/src/fpga/vendor/vexriscv/VexiiRiscv/VexiiRiscv_os30.v",
+    "../common/phase10_bram_alias.v",
+    "../common/phase10_load_alias.v",
+    "../common/phase10_float_recip2.v",
+    "../common/phase10_raw_vtx_dma.v",
+    "../common/GeometryFmaProbe.v",
+    "../common/geometry_lighting_batch.v",
+    "../common/geometry_color_rtz.v",
+    "../common/geometry_float_batch_recip.v",
+    "../common/geometry_transform_light.v",
+    "../common/geometry_raw_load.v",
+    "../common/phase10_cram1_read_arbiter.v",
+    "../common/gpu_color_depth_cache.sv",
+    "../common/psram32_controller.sv",
+    "../common/psram32_axi_adapter.sv",
+    "psram32_pin_model.sv",
+    "../common/geometry_import_view.v",
+    "../common/geometry_import_convert.v",
+    "../common/geometry_bram_import.v",
+    "../common/geometry_float_cull_mem.v",
+    "../common/geometry_triangle_preflight.v"
+  ],
+  "model_build_cwd": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/native-v1/frozen/src/fpga/test",
+  "note": "Recipes bind external qualified sources, toolchains, SDK and game data. They are not claimed standalone after copying only this directory."
+}

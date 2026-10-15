@@ -1,0 +1,66 @@
+GPU WQ16 metadata compaction
+==========================
+
+Selected source: full-strobe/axi_sdram_arbiter.v. Relative to before/, it
+adds MLAB,no_rw_check attributes to address, mask and last-marker arrays,
+and caches one full-strobe bit per slot on the same enqueue that writes
+its mask. The eight-position coalescing scan reads those cached bits;
+active downstream W still reads the complete four-bit mask. No queue
+capacity, burst limit, arbitration, handshakes, grant timing, coalescing
+criterion, read/write latency, or B retirement rule changes.
+
+For every occupied slot, full_strobe[slot] == (strb[slot] == 4'hF).
+Both are assigned from the same accepted input mask on the same edge.
+Neither changes while the slot is occupied. They need no reset because
+reset clears count and each later occupied slot is written before use.
+Every meaningful coalescing term for slot k is guarded by count>=k+1.
+Although the combinational circuit reads beyond the occupied prefix,
+those values cannot change the chosen run. The head-ready test separately
+requires a nonempty queue. Thus replacing the eight mask comparisons with
+cached bits produces the identical selected burst length and grant cycle,
+including partial/zero masks, bursts split by slow inbound writes, wrap,
+and simultaneous dequeue/enqueue. This removes seven mask read ports,
+allowing the active-W mask payload to infer a single-read LUT RAM.
+
+The retained ring invariant is count in [0,16] and
+  tail = (head + count) mod16.
+An enqueue writes free tail; full blocks enqueue. A downstream B retires
+exactly the selected run; nothing is freed at W acceptance. A valid GPU
+AW reads occupied head. A valid W reads head+active_index, where that index
+is inside the occupied selected run. The marker used to decide the GPU B
+belongs to the last occupied slot of that same run. Meaningful metadata
+scan reads are also occupied slots. None can equal free tail during an
+accepted enqueue. Simultaneous B retirement and enqueue preserve this:
+the old occupied slots remain protected until the sampling edge.
+Same-address asynchronous read-during-write values can therefore affect
+only invalid/unconsumed reads, so no_rw_check may eliminate bypass logic.
+This does not authorize synchronous-read latency or early retirement.
+
+Actual RTL miter evidence: before and candidate receive identical inputs
+and downstream responses; all externally valid AW/W fields, all valid
+signals, readiness, completion responses and arbitration state compare
+cycle by cycle. The candidate's same-address address/data/mask/last/full
+reads are deliberately replaced by arbitrary poison during enqueue, so
+this checks the lack of meaningful read-during-write dependency rather
+than only behavioral equivalence of synthesis attributes. Hierarchical
+assertions check the ring invariant, occupied head/scan/W/last non-alias,
+and occupancy on every cycle. The independent stimulus scoreboard also
+checks every drained data word/strobe and exactly one B per input burst.
+
+Four randomized uninitialized-state seeds at response delays 0 and 31
+pass: each runs 37 checks and 2000 randomized 1–8-word bursts / 9000 ordered
+words. Total: 16,000 random bursts and 72,000 words, plus the directed
+mixed GPU/CPU/audio arbitration cases. Queue full, wrap, concurrent enqueue
+and drain, full/partial strobes, slow inbound writes and delayed B occur.
+This combines induction reasoning and directed/random testing; it is not
+an unbounded formal proof. Existing real GPU/SDRAM integration gates were
+for the data-RAM-only change, and are not claimed as this candidate's proof.
+
+Component map, identical WQ16 / BUFFERED_SLAVE=0 and unrestricted ports:
+  baseline:       798 ALMs, 236 registers, 512 block-memory bits
+  no_rw only:     798 ALMs, 236 registers, 512 block-memory bits
+  MLAB metadata:  772 ALMs, 162 registers,   0 block-memory bits
+  +full-bit cache:672 ALMs, 114 registers,   0 block-memory bits
+Selected saving: 126 ALMs and 122 registers. No DSP cost. Constant-tied
+ports in the full design may produce a different saving. Whole-design
+fit/setup/hold/recovery/removal/pulse qualification remains required.

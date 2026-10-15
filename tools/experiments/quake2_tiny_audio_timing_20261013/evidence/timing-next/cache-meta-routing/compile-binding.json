@@ -1,0 +1,12 @@
+{
+  "passed": true,
+  "active_qsf_source": "src/fpga/common/os30/gpu_color_depth_cache.sv",
+  "qsf_sha256": "351431b8158de34a5a18361c8ae8a9d5d94a81b714c3853dfa3d315a47c1f1d1",
+  "compiled_flattened_input": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/timing-next/cache-meta-routing/full-write-path/inputs/gpu_color_depth_cache.sv",
+  "compiled_input_sha256": "8f320a9ffba4e2ab608250ced03f869b96de97651fb10bd2d345c22a670d6e41",
+  "build_command_sha256": "a4e2905378dae41792d83fa0f3228d79186821e0620ac34330961164671de708",
+  "verilator_input_record_sha256": "e7e11a7d54c588069e0df6a41a77542e99cbf34e4ac4dab6543218035b51a5a8",
+  "unambiguous_explicit_cache_input": true,
+  "full_write_path_receipt_sha256": "db7e2854585174b7e95b5b26e69452ca02ff31e49cf971eea358084ac023767a",
+  "no_new_simulation_needed": "Existing full-write-path directly compiled the correct8f320 candidate in the flattened fixture. This receipt corrects physical-source path binding only; no prior inputs or receipts changed."
+}

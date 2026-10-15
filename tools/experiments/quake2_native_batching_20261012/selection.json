@@ -1,0 +1,23 @@
+{
+  "status": "DEPLOYED_TO_POCKET_SD",
+  "deployed": true,
+  "version": "1.0.5-native5",
+  "app_sha256": "c08bed78555f08252c9694c1f019db968e2ce79809ff41b909cfdd61b30e743b",
+  "profile_sha256": "bf0247daa707fa6a23e7cbc08adbb3a3ce06f9e7b4e4bf6c6fd98c391ab5708a",
+  "core_sha256": "542029e588e2a646f20fc98f1dbaf89a667ced48c75de9e89354df74da8622b6",
+  "unchanged_core": true,
+  "configured_mhz": 100,
+  "timing_qualified": false,
+  "physical_FPS_improvement_established": false,
+  "app_exact_frames": 1920,
+  "paced_exact_frames": 8,
+  "host_test_groups": 26,
+  "byte_identical_clean_rebuild": true,
+  "deployment_package": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-native-batching-20261012/deployment-native-v5",
+  "deployment_manifest_sha256": "7f91af9f26df9aecf260ac1725c4d1ef3af34192c9cf1f1423284ced79b7af53",
+  "app_package_manifest_sha256": "cea83c2374ea5dc6d4c20737f7761228d1f1d80373b148c8edb47eda969f5675",
+  "core_package_manifest_sha256": "a80a8107274831ed4c8d3fbf3ba9c84a7809d4e91b77d252f31d3a750694ee68",
+  "limitations": "See evidence/final-validation.json; relative simulator throughput is not measured Pocket FPS.",
+  "safely_unmounted": true,
+  "backup": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-native-batching-20261012/deployment-native-v5/backups/before-20261013T002443Z-10rjy7sp"
+}

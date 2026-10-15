@@ -1,0 +1,621 @@
+{
+  "status": "READ_ONLY_MEASURED_SUBMISSION_ACCOUNTING_NOT_IMPLEMENTED",
+  "phase": "F27 warm",
+  "interval": {
+    "begin": 4758523,
+    "end": 9482785,
+    "candidate_cycles": 4724262,
+    "control_cycles": 4649707,
+    "delta_cycles": 74555,
+    "delta_percent": 1.6034343669396822,
+    "candidate_retired": 2080136,
+    "control_retired": 2198460
+  },
+  "calls": {
+    "legacy_loads": 250,
+    "acquire_calls": 250,
+    "actual_leases": 103,
+    "retained_lease_reuses": 147,
+    "release_if_pending_calls": 555,
+    "actual_pending_sequence_reads": 103,
+    "pending_releases": 87,
+    "new_quiescent_leases": 16,
+    "acquire_status_reads": 414,
+    "unsuccessful_status_iterations": 311,
+    "acquire_epoch_sequence_status_ticket_reads": 1240,
+    "service_calls": 832,
+    "service_status_reads": 832,
+    "warm_repairs": 0
+  },
+  "hardware_residence_cycles": {
+    "lease_granted": 2277534,
+    "lease_pending": 15267,
+    "raw_state": 203072,
+    "output_pending": 382319,
+    "group_active": 383977,
+    "repair_pending": 0,
+    "legacy_raw_active": 146838,
+    "lease_without_raw_active": 2130696,
+    "lease_and_old_async_output": 68903,
+    "lease_pending_and_raster": 8129
+  },
+  "output_pressure": {
+    "all": 4724262,
+    "output_full": 1093279,
+    "output_full_and_raster": 988952,
+    "lease_granted": 2277534,
+    "lease_pending": 15267
+  },
+  "lease_wait_distribution": {
+    "count": 103,
+    "min": 1,
+    "median": 1,
+    "max": 2001,
+    "sum": 15267,
+    "one_cycle": 87,
+    "greater_than_two_cycles": 16
+  },
+  "geo_mmio_writes": {
+    "candidate": {
+      "total": 4912,
+      "matrix": 2656,
+      "scalar": 1094,
+      "load_setup": 750,
+      "lease_protocol": 412,
+      "acquire_commands": 103,
+      "release_commands": 103,
+      "per_word": {
+        "0x2": 250,
+        "0x3": 250,
+        "0x4": 250,
+        "0x5": 166,
+        "0x6": 143,
+        "0x7": 143,
+        "0x8": 143,
+        "0x9": 143,
+        "0xa": 143,
+        "0xb": 105,
+        "0xc": 108,
+        "0x2b": 103,
+        "0x2c": 103,
+        "0x2d": 206,
+        "0x40": 166,
+        "0x41": 166,
+        "0x42": 166,
+        "0x43": 166,
+        "0x44": 166,
+        "0x45": 166,
+        "0x46": 166,
+        "0x47": 166,
+        "0x48": 166,
+        "0x49": 166,
+        "0x4a": 166,
+        "0x4b": 166,
+        "0x4c": 166,
+        "0x4d": 166,
+        "0x4e": 166,
+        "0x4f": 166
+      }
+    },
+    "control": {
+      "total": 2459,
+      "matrix": 1136,
+      "scalar": 345,
+      "load_setup": 978,
+      "lease_protocol": 0,
+      "acquire_commands": 0,
+      "release_commands": 0,
+      "per_word": {
+        "0x2": 326,
+        "0x3": 326,
+        "0x4": 326,
+        "0x5": 71,
+        "0x6": 53,
+        "0x7": 53,
+        "0x8": 53,
+        "0x9": 53,
+        "0xa": 53,
+        "0xb": 3,
+        "0xc": 6,
+        "0x40": 71,
+        "0x41": 71,
+        "0x42": 71,
+        "0x43": 71,
+        "0x44": 71,
+        "0x45": 71,
+        "0x46": 71,
+        "0x47": 71,
+        "0x48": 71,
+        "0x49": 71,
+        "0x4a": 71,
+        "0x4b": 71,
+        "0x4c": 71,
+        "0x4d": 71,
+        "0x4e": 71,
+        "0x4f": 71
+      }
+    }
+  },
+  "hypothetical_fused_acquire_transaction_count_only": {
+    "condition": "If target/ticket/control writes were replaced by one ticket-bearing ACQUIRE write with equivalent ownership/reset rules.",
+    "acquire_writes_before": 309,
+    "acquire_writes_after": 103,
+    "removed_writes": 206,
+    "fraction_of_candidate_geo_writes_percent": 4.193811074918567,
+    "removed_store_pc_charged_gap_cycles": 824,
+    "wall_time_saving": "UNMEASURED: posted-store retirement gaps are not end-to-end write latency; no cycle or FPS saving credited."
+  },
+  "selected_function_buckets": {
+    "gfx_gpu_async_raw_acquire": {
+      "candidate": [
+        17587,
+        108293
+      ],
+      "control": [
+        0,
+        0
+      ],
+      "delta": [
+        17587,
+        108293
+      ]
+    },
+    "gfx_gpu_async_raw_release_if_pending": {
+      "candidate": [
+        6695,
+        19496
+      ],
+      "control": [
+        1770,
+        3326
+      ],
+      "delta": [
+        4925,
+        16170
+      ]
+    },
+    "gfx_gpu_async_raw_release": {
+      "candidate": [
+        404,
+        6388
+      ],
+      "control": [
+        0,
+        0
+      ],
+      "delta": [
+        404,
+        6388
+      ]
+    },
+    "gfx_gpu_async_service": {
+      "candidate": [
+        15808,
+        29399
+      ],
+      "control": [
+        3840,
+        7674
+      ],
+      "delta": [
+        11968,
+        21725
+      ]
+    },
+    "gfx_async_try_load": {
+      "candidate": [
+        9342,
+        30404
+      ],
+      "control": [
+        0,
+        0
+      ],
+      "delta": [
+        9342,
+        30404
+      ]
+    },
+    "load_alias_vertex_legacy": {
+      "candidate": [
+        107005,
+        290798
+      ],
+      "control": [
+        112259,
+        296232
+      ],
+      "delta": [
+        -5254,
+        -5434
+      ]
+    },
+    "gfx_run_dl": {
+      "candidate": [
+        107344,
+        332033
+      ],
+      "control": [
+        109614,
+        291815
+      ],
+      "delta": [
+        -2270,
+        40218
+      ]
+    },
+    "load_alias_materialize_all": {
+      "candidate": [
+        11495,
+        17566
+      ],
+      "control": [
+        594,
+        959
+      ],
+      "delta": [
+        10901,
+        16607
+      ]
+    },
+    "gfx_mesh_lookup_impl": {
+      "candidate": [
+        16283,
+        51101
+      ],
+      "control": [
+        0,
+        0
+      ],
+      "delta": [
+        16283,
+        51101
+      ]
+    },
+    "gfx_async_group_build": {
+      "candidate": [
+        3533,
+        16541
+      ],
+      "control": [
+        0,
+        0
+      ],
+      "delta": [
+        3533,
+        16541
+      ]
+    },
+    "gfx_async_sources": {
+      "candidate": [
+        2655,
+        17338
+      ],
+      "control": [
+        0,
+        0
+      ],
+      "delta": [
+        2655,
+        17338
+      ]
+    }
+  },
+  "top_added_charged_buckets": [
+    [
+      "gfx_gpu_async_raw_acquire",
+      [
+        17587,
+        108293
+      ]
+    ],
+    [
+      "gfx_mesh_lookup_impl",
+      [
+        16283,
+        51101
+      ]
+    ],
+    [
+      "gfx_run_dl",
+      [
+        -2270,
+        40218
+      ]
+    ],
+    [
+      "gfx_async_try_load",
+      [
+        9342,
+        30404
+      ]
+    ],
+    [
+      "gfx_gpu_async_service",
+      [
+        11968,
+        21725
+      ]
+    ],
+    [
+      "gfx_async_sources",
+      [
+        2655,
+        17338
+      ]
+    ],
+    [
+      "load_alias_materialize_all",
+      [
+        10901,
+        16607
+      ]
+    ],
+    [
+      "gfx_async_group_build",
+      [
+        3533,
+        16541
+      ]
+    ],
+    [
+      "gfx_gpu_async_raw_release_if_pending",
+      [
+        4925,
+        16170
+      ]
+    ],
+    [
+      "gfx_gpu_async_group",
+      [
+        2283,
+        12103
+      ]
+    ],
+    [
+      "emit_tri_state",
+      [
+        -1190,
+        8988
+      ]
+    ],
+    [
+      "gfx_gpu_async_job",
+      [
+        2288,
+        7177
+      ]
+    ],
+    [
+      "gfx_gpu_async_raw_release",
+      [
+        404,
+        6388
+      ]
+    ],
+    [
+      "__clzsi2",
+      [
+        3500,
+        6071
+      ]
+    ],
+    [
+      "__ctzsi2",
+      [
+        3750,
+        5258
+      ]
+    ]
+  ],
+  "selected_instruction_sites": {
+    "acquire_calls": {
+      "pc": "0x104debc0",
+      "instruction": "lui a5,0x1135c",
+      "retired": 250,
+      "preceding_retirement_gap_cycles": 2327
+    },
+    "new_lease": {
+      "pc": "0x104dedec",
+      "instruction": "lui a5,0x1135f",
+      "retired": 103,
+      "preceding_retirement_gap_cycles": 918
+    },
+    "failed_poll": {
+      "pc": "0x104ded7a",
+      "instruction": "lw a5,44(s0)",
+      "retired": 311,
+      "preceding_retirement_gap_cycles": 311
+    },
+    "acquire_initial_epoch": {
+      "pc": "0x104dec5c",
+      "instruction": "lw a4,184(a5) # 4b0000b8 <__bss_end+0x39ca071c>",
+      "retired": 103,
+      "preceding_retirement_gap_cycles": 1133
+    },
+    "held_epoch": {
+      "pc": "0x104debf0",
+      "instruction": "lw a4,184(a5) # 4b0000b8 <__bss_end+0x39ca071c>",
+      "retired": 0,
+      "preceding_retirement_gap_cycles": 0
+    },
+    "sequence_precheck": {
+      "pc": "0x104dec88",
+      "instruction": "lw a3,140(a5) # 4b00008c <__bss_end+0x39ca06f0>",
+      "retired": 103,
+      "preceding_retirement_gap_cycles": 1133
+    },
+    "retry_epoch_without_flush": {
+      "pc": "0x104dedba",
+      "instruction": "lw a4,184(a5) # 4b0000b8 <__bss_end+0x39ca071c>",
+      "retired": 13,
+      "preceding_retirement_gap_cycles": 143
+    },
+    "retry_epoch_after_flush": {
+      "pc": "0x104dec9c",
+      "instruction": "lw a4,184(a5) # 4b0000b8 <__bss_end+0x39ca071c>",
+      "retired": 90,
+      "preceding_retirement_gap_cycles": 990
+    },
+    "target_write": {
+      "pc": "0x104decdc",
+      "instruction": "sw a2,172(a3) # 4b0000ac <__bss_end+0x39ca0710>",
+      "retired": 103,
+      "preceding_retirement_gap_cycles": 412
+    },
+    "ticket_write": {
+      "pc": "0x104decec",
+      "instruction": "sw a2,176(a4) # 4b0000b0 <__bss_end+0x39ca0714>",
+      "retired": 103,
+      "preceding_retirement_gap_cycles": 412
+    },
+    "acquire_command_write": {
+      "pc": "0x104ded06",
+      "instruction": "sw a4,180(a5) # 4b0000b4 <__bss_end+0x39ca0718>",
+      "retired": 103,
+      "preceding_retirement_gap_cycles": 412
+    },
+    "loop_epoch": {
+      "pc": "0x104ded84",
+      "instruction": "lw a4,0(s4)",
+      "retired": 414,
+      "preceding_retirement_gap_cycles": 4554
+    },
+    "loop_status": {
+      "pc": "0x104ded5a",
+      "instruction": "lw a5,0(s2)",
+      "retired": 414,
+      "preceding_retirement_gap_cycles": 18098
+    },
+    "loop_ticket": {
+      "pc": "0x104ded6a",
+      "instruction": "lw a3,0(s6)",
+      "retired": 103,
+      "preceding_retirement_gap_cycles": 1385
+    },
+    "release_if_pending_calls": {
+      "pc": "0x104d8f00",
+      "instruction": "lui a5,0x1135c",
+      "retired": 555,
+      "preceding_retirement_gap_cycles": 4065
+    },
+    "pending_epoch": {
+      "pc": "0x104d8f24",
+      "instruction": "lw t1,184(a3) # 4b0000b8 <__bss_end+0x39ca071c>",
+      "retired": 103,
+      "preceding_retirement_gap_cycles": 1133
+    },
+    "pending_sequence": {
+      "pc": "0x104d8fde",
+      "instruction": "lw a6,140(a0) # 4b00008c <__bss_end+0x39ca06f0>",
+      "retired": 103,
+      "preceding_retirement_gap_cycles": 1133
+    },
+    "pending_release_epoch": {
+      "pc": "0x104d8fee",
+      "instruction": "lw a3,0(a3)",
+      "retired": 87,
+      "preceding_retirement_gap_cycles": 1017
+    },
+    "pending_release_write": {
+      "pc": "0x104d8fc8",
+      "instruction": "sw a2,180(a3) # 4b0000b4 <__bss_end+0x39ca0718>",
+      "retired": 87,
+      "preceding_retirement_gap_cycles": 348
+    },
+    "before_wait_calls": {
+      "pc": "0x104d9040",
+      "instruction": "addi sp,sp,-48",
+      "retired": 0,
+      "preceding_retirement_gap_cycles": 0
+    },
+    "before_wait_epoch": {
+      "pc": "0x104d9080",
+      "instruction": "lw a4,184(a5) # 4b0000b8 <__bss_end+0x39ca071c>",
+      "retired": 0,
+      "preceding_retirement_gap_cycles": 0
+    },
+    "before_wait_sequence": {
+      "pc": "0x104d90c0",
+      "instruction": "lw a4,140(a5) # 4b00008c <__bss_end+0x39ca06f0>",
+      "retired": 0,
+      "preceding_retirement_gap_cycles": 0
+    },
+    "before_wait_release_epoch": {
+      "pc": "0x104d90e8",
+      "instruction": "lw a4,184(a5) # 4b0000b8 <__bss_end+0x39ca071c>",
+      "retired": 0,
+      "preceding_retirement_gap_cycles": 0
+    },
+    "before_wait_release_write": {
+      "pc": "0x104d912e",
+      "instruction": "sw a4,180(a5) # 4b0000b4 <__bss_end+0x39ca0718>",
+      "retired": 0,
+      "preceding_retirement_gap_cycles": 0
+    },
+    "service_calls": {
+      "pc": "0x104d91c0",
+      "instruction": "lui a5,0x1135c",
+      "retired": 832,
+      "preceding_retirement_gap_cycles": 1032
+    },
+    "service_status": {
+      "pc": "0x104d91e4",
+      "instruction": "lw a3,132(a5) # 4b000084 <__bss_end+0x39ca06e8>",
+      "retired": 832,
+      "preceding_retirement_gap_cycles": 9152
+    },
+    "direct_release_calls": {
+      "pc": "0x104dee80",
+      "instruction": "lui a5,0x1135c",
+      "retired": 28,
+      "preceding_retirement_gap_cycles": 1567
+    },
+    "direct_release_epoch": {
+      "pc": "0x104dee9e",
+      "instruction": "lw a1,184(a4) # 4b0000b8 <__bss_end+0x39ca071c>",
+      "retired": 16,
+      "preceding_retirement_gap_cycles": 176
+    },
+    "direct_release_write": {
+      "pc": "0x104deee4",
+      "instruction": "sw a3,180(a4) # 4b0000b4 <__bss_end+0x39ca0718>",
+      "retired": 16,
+      "preceding_retirement_gap_cycles": 64
+    }
+  },
+  "interpretation": [
+    "Priority/snapshot already makes most acquisitions prompt: 87 of 103 pending intervals last one cycle; total pending is 15267 cycles.",
+    "Lease-granted residence includes useful CPU rendering and canonical lifetime, so 2277534 granted cycles are not CPU blocked cycles.",
+    "The three-write acquire protocol is only 309 writes. Context matrix/scalar writes are 3750 and increase by2269 versus control, because new leases invalidate legacy dirty/control caches.",
+    "Candidate still executes250 legacy LOADs plus76 async members; GROUP batches the latter into27 submissions without removing legacy setup/admission/materialization.",
+    "The acquire function charged bucket108293 includes software setup/polling/cache gaps; it is not all hardware ownership wait and cannot be replaced with a summed savings estimate.",
+    "Fused acquisition alone does not change raw transformation, canonical readback, context reprogramming, material/admission lookup or raster/output pressure."
+  ],
+  "limits": [
+    "Two bounded native intervals; this report diagnoses warm only, not sustained Pocket FPS.",
+    "Function/instruction buckets charge the gap preceding retirement, not exclusive execution latency.",
+    "Hardware residence counters overlap; never sum them or subtract hypothetical eliminated work from frame cycles.",
+    "No new ABI, implementation, fit, or replay was performed."
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/remaining-submission-v1/analyze.py": "7a58771034851a02130ee16c8efa66d8ed7a6745a728fc4b8995337203507fc3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/phases-v3.json": "b9e0c74639ac2406d380bcd9c4fac558c4c1e15648ba6115967258d863efe837",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/native-v3.json": "20ac3e433effcfab8123bfe8b848508940e2cddb975caa09b4b5dc324fed5cd6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v3/evidence/app-build-v3/build-result.json": "2c6831fac16d9e1ae42d30de6fbf896ac12354017f84978c5dbcc0d04c2ff336",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v3/evidence/app-build-v3/app.dis": "0d182422d9ebf2fac96ab94048c39e5b02efea01d09949c25be0ba89ee2f4dcf",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/native-v2/prepared.json": "88e3f0a3d76a6c90a7a677e153c2564015dbb810aaa9610a52b472a1499fd5a0",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v3/check-independent-v2.json": "e40a81cf8b44b7be9de36a08e1be3c5f26ac2b32f4d59fd728a0c31a868b68ec",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v3/check-independent-v2.json": "def4fd96716480eb6e294d1ed58d68ee7ff68c6a38df6fc607bfb535558b8ef9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v3/src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "b4018e719dada1f54c07a2b7beadc114e431c0bfba6624efa159ae64fe89b145",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v3/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "3e5df211b1571fab257d1ad4286096c4badd64e4c515428af3f9f6a41041a7df",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/group_hooks.py": "bce47b378cb9e394d9448ba963d7fbabc37231f7f33a9c1f69155e48478b5e3b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v3/run/boundaries.tsv": "32398b818fd40361c2404b245f94d7d246ada49635ca687c49ad8fae16aa8bcc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v3/run/mmio.tsv": "efd2a867bf8032c1d2ac8a04685ae8b88680cb6c6ab714d7e2d5272893496e4f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v3/run/boundaries.tsv": "3bb890798fc7677bf87992739f0addde467996d8866598abce92bff0c1220798",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v3/run/mmio.tsv": "b0959a621da63b91f66fe2fe1146d600ed1578b17d1fcb62672cfd19f7b69383",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v3/run/pc-phase-2.csv": "37b8f52dbc638004da850e0c2b9f32b674639c76382909065d24e91d87a6689d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v3/run/async-events.tsv": "96d21f6230e9bf35a18c1cedbd67e1e8304d0da24d8f875d4658b49cf236ee4d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v3/run/async-overlap.tsv": "dba94687c6e3e72285bce1f2b562d9dde25756f730f268c13886973fb20c9139"
+  }
+}

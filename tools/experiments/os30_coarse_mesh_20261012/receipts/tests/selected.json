@@ -1,0 +1,71 @@
+{
+  "status": "PASS",
+  "checks": 133895,
+  "tests": [
+    {
+      "name": "wrapper-v3",
+      "top": "geometry_load_alias",
+      "receipt": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/tests/wrapper-v3/manifest.json",
+      "sha256": "c0622d285cf286ecaa08b177dbbf80d425914939d4dda5e9e4aac5d6b3227ae6",
+      "result": {
+        "status": "PASS",
+        "cases": 115,
+        "checks": 26595,
+        "cycles": 138760,
+        "AXI_bursts": 1303
+      },
+      "inactive_source_differences": [
+        {
+          "file": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/frozen/src/fpga/common/gpu_mesh_job_front.v",
+          "tested_sha256": "9f96f57fcd6977da846dd543301c390c9636377a73954a4a8b2ec78c0b6dac05",
+          "current_sha256": "02f0b4c5cf3a09e3801d993044b6288417a6983d587f349acbf5add83067c5ba",
+          "reason": "gpu_mesh_job_front is not elaborated by geometry_load_alias; actual final front is independently covered by combined-v2."
+        }
+      ]
+    },
+    {
+      "name": "faults-v1",
+      "top": "geometry_load_alias",
+      "receipt": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/tests/faults-v1/manifest.json",
+      "sha256": "65f690f2ce55eb1c1ee5b22910e39cdb60d1156b574b54879dbd62e9d8972d1c",
+      "result": {
+        "status": "PASS",
+        "cases": 32,
+        "checks": 740,
+        "cycles": 20408,
+        "AXI_bursts": 285
+      },
+      "inactive_source_differences": [
+        {
+          "file": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/frozen/src/fpga/common/gpu_mesh_job_front.v",
+          "tested_sha256": "9f96f57fcd6977da846dd543301c390c9636377a73954a4a8b2ec78c0b6dac05",
+          "current_sha256": "02f0b4c5cf3a09e3801d993044b6288417a6983d587f349acbf5add83067c5ba",
+          "reason": "gpu_mesh_job_front is not elaborated by geometry_load_alias; actual final front is independently covered by combined-v2."
+        }
+      ]
+    },
+    {
+      "name": "combined-v2",
+      "top": "tb_async_combined",
+      "receipt": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-core/tests/combined-v2/manifest.json",
+      "sha256": "aa2ca64f34e06e4998691156c887e7eda36f55679dc2e5fae921b0d53dffdb11",
+      "result": {
+        "status": "PASS",
+        "cases": 13,
+        "checks": 106560,
+        "cycles": 60523,
+        "AXI_bursts": 46,
+        "ingress_full_cycles": 5012,
+        "output_full_cycles": 9009
+      },
+      "inactive_source_differences": []
+    }
+  ],
+  "history": "history/failed-attempts.json",
+  "superseded": [
+    "old-wrapper-v1",
+    "wrapper-v1",
+    "wrapper-v2",
+    "combined-v1"
+  ]
+}

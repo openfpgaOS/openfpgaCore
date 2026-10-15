@@ -1,0 +1,124 @@
+{
+  "status": "PASS",
+  "tests": {
+    "status": "PASS",
+    "runs": [
+      {
+        "delay": 0,
+        "seed": 1,
+        "command": [
+          "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-extra/gpu-metadata/miter_mixed_wq16_delay0/Vtb_arbiter",
+          "+verilator+rand+reset+2",
+          "+verilator+seed+1"
+        ],
+        "status": "PASS",
+        "log_sha256": "d5596713d4b3cc58813434a5ed9a163baca6295049506164032fe6f97ee660e6"
+      },
+      {
+        "delay": 0,
+        "seed": 2,
+        "command": [
+          "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-extra/gpu-metadata/miter_mixed_wq16_delay0/Vtb_arbiter",
+          "+verilator+rand+reset+2",
+          "+verilator+seed+2"
+        ],
+        "status": "PASS",
+        "log_sha256": "d5596713d4b3cc58813434a5ed9a163baca6295049506164032fe6f97ee660e6"
+      },
+      {
+        "delay": 0,
+        "seed": 1977,
+        "command": [
+          "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-extra/gpu-metadata/miter_mixed_wq16_delay0/Vtb_arbiter",
+          "+verilator+rand+reset+2",
+          "+verilator+seed+1977"
+        ],
+        "status": "PASS",
+        "log_sha256": "d5596713d4b3cc58813434a5ed9a163baca6295049506164032fe6f97ee660e6"
+      },
+      {
+        "delay": 0,
+        "seed": 2494483,
+        "command": [
+          "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-extra/gpu-metadata/miter_mixed_wq16_delay0/Vtb_arbiter",
+          "+verilator+rand+reset+2",
+          "+verilator+seed+2494483"
+        ],
+        "status": "PASS",
+        "log_sha256": "d5596713d4b3cc58813434a5ed9a163baca6295049506164032fe6f97ee660e6"
+      },
+      {
+        "delay": 31,
+        "seed": 1,
+        "command": [
+          "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-extra/gpu-metadata/miter_mixed_wq16_delay31/Vtb_arbiter",
+          "+verilator+rand+reset+2",
+          "+verilator+seed+1"
+        ],
+        "status": "PASS",
+        "log_sha256": "9c819b1fb671f816c39b9ccc2ceab15891522e3a1044a9b7c581647d074ca539"
+      },
+      {
+        "delay": 31,
+        "seed": 2,
+        "command": [
+          "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-extra/gpu-metadata/miter_mixed_wq16_delay31/Vtb_arbiter",
+          "+verilator+rand+reset+2",
+          "+verilator+seed+2"
+        ],
+        "status": "PASS",
+        "log_sha256": "9c819b1fb671f816c39b9ccc2ceab15891522e3a1044a9b7c581647d074ca539"
+      },
+      {
+        "delay": 31,
+        "seed": 1977,
+        "command": [
+          "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-extra/gpu-metadata/miter_mixed_wq16_delay31/Vtb_arbiter",
+          "+verilator+rand+reset+2",
+          "+verilator+seed+1977"
+        ],
+        "status": "PASS",
+        "log_sha256": "9c819b1fb671f816c39b9ccc2ceab15891522e3a1044a9b7c581647d074ca539"
+      },
+      {
+        "delay": 31,
+        "seed": 2494483,
+        "command": [
+          "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-extra/gpu-metadata/miter_mixed_wq16_delay31/Vtb_arbiter",
+          "+verilator+rand+reset+2",
+          "+verilator+seed+2494483"
+        ],
+        "status": "PASS",
+        "log_sha256": "9c819b1fb671f816c39b9ccc2ceab15891522e3a1044a9b7c581647d074ca539"
+      }
+    ],
+    "ordered_words_per_run": 9000,
+    "bursts_per_run": 2000,
+    "cycle_exact_valid_outputs": true,
+    "same_address_reads_poisoned": true
+  },
+  "additional_coverage": [
+    "all16byte_strobes mixed within bursts",
+    "warm reset with8queued words",
+    "no stale completion after warm reset"
+  ],
+  "selected_source_sha256": "5e9e06dca5ccf978a89f0aaacba05aa295ed7706636d8abed85ef2601ee037f1",
+  "source_and_evidence_sha256": {
+    "run_mixed_tests.py": "99f0f7d15f0720a0b1f77ddfe611599cafc105f1664b888e6bc0725c824201a3",
+    "mixed-test-results.json": "217ee5ba043e2958b67b69f44d78d785584a3679c94081977f4721b1fac0baa6",
+    "tests-mixed/miter.v": "919dd1fd951eea71e00edfb92a0d2e2b33dd146e2a46fb1085cfd17115b3c8fc",
+    "tests-mixed/before.v": "a807831650ceaec124c7f0a3b566e7e659f31dddad5ed4f36896f71bfcbf1ffa",
+    "tests-mixed/after_poisoned.v": "123bb221561857918c98c037dda5f96c11d6002e92ea8826fb74cdf6c4f4b077",
+    "tests-mixed/tb_arbiter_main.cpp": "4068a7874f85d763e69745b03b7223f255b10c25ac5015e1ed61e14eacaebfcc",
+    "tests-mixed/liveness_watchdog.h": "35bd255daeafdaf5a29b24a120496ffaf25763abfe6abcd60698ae2cf6d0ce31",
+    "tests-mixed/tb_arbiter.v": "13c5fd0434603e576a038b8d16d3d1f22e3798b68a4a1509c2f714cadf60fe37",
+    "miter_mixed_wq16_delay0-seed1.log": "d5596713d4b3cc58813434a5ed9a163baca6295049506164032fe6f97ee660e6",
+    "miter_mixed_wq16_delay0-seed2.log": "d5596713d4b3cc58813434a5ed9a163baca6295049506164032fe6f97ee660e6",
+    "miter_mixed_wq16_delay0-seed1977.log": "d5596713d4b3cc58813434a5ed9a163baca6295049506164032fe6f97ee660e6",
+    "miter_mixed_wq16_delay0-seed2494483.log": "d5596713d4b3cc58813434a5ed9a163baca6295049506164032fe6f97ee660e6",
+    "miter_mixed_wq16_delay31-seed1.log": "9c819b1fb671f816c39b9ccc2ceab15891522e3a1044a9b7c581647d074ca539",
+    "miter_mixed_wq16_delay31-seed2.log": "9c819b1fb671f816c39b9ccc2ceab15891522e3a1044a9b7c581647d074ca539",
+    "miter_mixed_wq16_delay31-seed1977.log": "9c819b1fb671f816c39b9ccc2ceab15891522e3a1044a9b7c581647d074ca539",
+    "miter_mixed_wq16_delay31-seed2494483.log": "9c819b1fb671f816c39b9ccc2ceab15891522e3a1044a9b7c581647d074ca539"
+  }
+}

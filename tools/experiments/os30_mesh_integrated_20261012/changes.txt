@@ -1,0 +1,20 @@
+Final source-review bundle changes
+
+- Retains the native-v7 512-word multipacket RTL, exact physical wiring patch,
+  complete app integration through F18 MESH3, and all original v3 copied inputs.
+- Adds F19 MESH4 separately under additions/app-v4: only adaptive publication
+  and the label change versus v3. No new RTL or SDK-wide policy change.
+- Adds immutable app build/extracted-C test receipts and final independent
+  native control/candidate/source-cache proof receipts with exact checker recipes.
+- Adds results.txt, the unchanged detailed cross-variant report and its
+  reproducer, the qualified-app comparison, and exact queue-pressure evidence.
+- Preserves historical verification.json and earlier checker evidence; records
+  explicit historical source relocations and proof of unchanged v3 input copies.
+- Corrects inventory exclusion from basename to root-relative path so the
+  nested app-v4 manifest is included and verified.
+- Final verification uses six zero-fuzz, zero-offset forward/reverse patches,
+  source-only inventory, and exact external/frozen hashes.
+
+No production source, sibling game, SD card, profile or save is changed.
+No binaries, ROM assets, bitstreams, full models or long traces are included.
+No physical fit, timing qualification or deployment is selected.

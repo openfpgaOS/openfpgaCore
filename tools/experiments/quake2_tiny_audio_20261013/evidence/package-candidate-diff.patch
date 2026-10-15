@@ -1,0 +1,1229 @@
+--- a/src/fpga/common/axi_sdram_arbiter.v
++++ b/src/fpga/common/axi_sdram_arbiter.v
+@@ -222,10 +222,15 @@
+ localparam GPU_WQ_HIGH_WATERMARK = GPU_WQ_DEPTH - 2;
+ localparam GPU_WQ_PTR_W = $clog2(GPU_WQ_DEPTH);
+ 
+-reg [31:0] gpu_wq_addr [0:GPU_WQ_DEPTH-1];
+-reg [31:0] gpu_wq_data [0:GPU_WQ_DEPTH-1];
+-reg [3:0]  gpu_wq_strb [0:GPU_WQ_DEPTH-1];
+-reg        gpu_wq_last [0:GPU_WQ_DEPTH-1];
++(* ramstyle = "MLAB, no_rw_check" *) reg [31:0] gpu_wq_addr [0:GPU_WQ_DEPTH-1];
++// A valid downstream W reads an occupied entry; enqueue writes the free tail.
++// Entries retire only on B, and a full queue blocks enqueue. These addresses
++// therefore cannot alias while WVALID is asserted. Ignoring an invalid read
++// during a write permits MLAB inference without changing queue depth/latency.
++(* ramstyle = "MLAB, no_rw_check" *) reg [31:0] gpu_wq_data [0:GPU_WQ_DEPTH-1];
++(* ramstyle = "MLAB, no_rw_check" *) reg [3:0]  gpu_wq_strb [0:GPU_WQ_DEPTH-1];
++(* ramstyle = "MLAB, no_rw_check" *) reg        gpu_wq_last [0:GPU_WQ_DEPTH-1];
++reg [GPU_WQ_DEPTH-1:0] gpu_wq_full_strobe;
+ reg [GPU_WQ_PTR_W-1:0] gpu_wq_rd_ptr;
+ reg [GPU_WQ_PTR_W-1:0] gpu_wq_wr_ptr;
+ reg [GPU_WQ_PTR_W:0] gpu_wq_count;
+@@ -274,14 +279,14 @@
+ // chainK: entries 0..K are all present and full-strobe, with no WLAST strictly
+ // before K — i.e. entries 0..K-1 are non-last (so the run never crosses an AW
+ // boundary; it stops AT the first WLAST entry, including it).
+-wire gwq_fs0 = (gpu_wq_strb[gwq_p0] == 4'hF);
+-wire gwq_c1 = gwq_fs0 && (gpu_wq_count >= 4'd2) && !gpu_wq_last[gwq_p0] && (gpu_wq_strb[gwq_p1] == 4'hF);
+-wire gwq_c2 = gwq_c1  && (gpu_wq_count >= 4'd3) && !gpu_wq_last[gwq_p1] && (gpu_wq_strb[gwq_p2] == 4'hF);
+-wire gwq_c3 = gwq_c2  && (gpu_wq_count >= 4'd4) && !gpu_wq_last[gwq_p2] && (gpu_wq_strb[gwq_p3] == 4'hF);
+-wire gwq_c4 = gwq_c3  && (gpu_wq_count >= 4'd5) && !gpu_wq_last[gwq_p3] && (gpu_wq_strb[gwq_p4] == 4'hF);
+-wire gwq_c5 = gwq_c4  && (gpu_wq_count >= 4'd6) && !gpu_wq_last[gwq_p4] && (gpu_wq_strb[gwq_p5] == 4'hF);
+-wire gwq_c6 = gwq_c5  && (gpu_wq_count >= 4'd7) && !gpu_wq_last[gwq_p5] && (gpu_wq_strb[gwq_p6] == 4'hF);
+-wire gwq_c7 = gwq_c6  && (gpu_wq_count >= 4'd8) && !gpu_wq_last[gwq_p6] && (gpu_wq_strb[gwq_p7] == 4'hF);
++wire gwq_fs0 = gpu_wq_full_strobe[gwq_p0];
++wire gwq_c1 = gwq_fs0 && (gpu_wq_count >= 4'd2) && !gpu_wq_last[gwq_p0] && gpu_wq_full_strobe[gwq_p1];
++wire gwq_c2 = gwq_c1  && (gpu_wq_count >= 4'd3) && !gpu_wq_last[gwq_p1] && gpu_wq_full_strobe[gwq_p2];
++wire gwq_c3 = gwq_c2  && (gpu_wq_count >= 4'd4) && !gpu_wq_last[gwq_p2] && gpu_wq_full_strobe[gwq_p3];
++wire gwq_c4 = gwq_c3  && (gpu_wq_count >= 4'd5) && !gpu_wq_last[gwq_p3] && gpu_wq_full_strobe[gwq_p4];
++wire gwq_c5 = gwq_c4  && (gpu_wq_count >= 4'd6) && !gpu_wq_last[gwq_p4] && gpu_wq_full_strobe[gwq_p5];
++wire gwq_c6 = gwq_c5  && (gpu_wq_count >= 4'd7) && !gpu_wq_last[gwq_p5] && gpu_wq_full_strobe[gwq_p6];
++wire gwq_c7 = gwq_c6  && (gpu_wq_count >= 4'd8) && !gpu_wq_last[gwq_p6] && gpu_wq_full_strobe[gwq_p7];
+ // awlen = length-1 of the contiguous full-strobe run currently present from
+ // rd_ptr (capped at the first WLAST entry).  This coalesces opportunistically
+ // like the old 2-beat path — it does NOT wait for the AW's WLAST to be queued,
+@@ -384,6 +389,7 @@
+             gpu_wq_addr[gpu_wq_wr_ptr] <= m0w_addr;
+             gpu_wq_data[gpu_wq_wr_ptr] <= m0_wdata;
+             gpu_wq_strb[gpu_wq_wr_ptr] <= m0_wstrb;
++            gpu_wq_full_strobe[gpu_wq_wr_ptr] <= (m0_wstrb == 4'hF);
+             gpu_wq_last[gpu_wq_wr_ptr] <= m0_w_post_last;
+             gpu_wq_wr_ptr <= gpu_wq_wr_ptr + 1'b1;
+             if (m0_w_post_last) begin
+--- a/src/fpga/common/gpu_geometry_worker.v
++++ b/src/fpga/common/gpu_geometry_worker.v
+@@ -108,7 +108,6 @@
+ wire signed [31:0] active_yc = ((INCLUDE_NATIVE_MESH && mode == NATIVE) || (INCLUDE_PARTICLES && mode == PARTICLE)) ? native_yc : yc;
+ wire signed [31:0] active_xs = ((INCLUDE_NATIVE_MESH && mode == NATIVE) || (INCLUDE_PARTICLES && mode == PARTICLE)) ? native_xs : xs;
+ wire signed [31:0] active_ys = ((INCLUDE_NATIVE_MESH && mode == NATIVE) || (INCLUDE_PARTICLES && mode == PARTICLE)) ? native_ys : ys;
+-wire signed [31:0] active_nearclip = ((INCLUDE_NATIVE_MESH && mode == NATIVE) || (INCLUDE_PARTICLES && mode == PARTICLE)) ? native_nearclip : nearclip;
+ // Billboard context shares the native RAM's otherwise unused final words.
+ // Its full matrix-independent camera basis is retained across native jobs.
+ // The initial ABI admits true camera-facing planes only (basis Z == zero).
+@@ -236,13 +235,18 @@
+ 
+ wire input_empty = input_rdptr == input_wrptr;
+ wire [ADDR_BITS-1:0] used_words = write_ptr - output_rdptr;
+-wire [ADDR_BITS:0] free_words = (1 << QUEUE_BITS)-1 - {1'b0,used_words};
++localparam [ADDR_BITS:0] QUEUE_LAST = (1 << QUEUE_BITS)-1;
++wire [ADDR_BITS:0] free_words = QUEUE_LAST - {1'b0,used_words};
++// Zero free space is exactly equality with the typed capacity. Avoid a
++// second subtraction before the input-ring lookahead/queue-write enables.
++wire queue_has_space = {1'b0,used_words} != QUEUE_LAST;
+ wire take_input = enable && !input_empty
+     && ((state == HEADER) || (state == LOAD)
+-        || (state == COPY && (mode != PASS || free_words != 0)));
++        || (state == COPY && (mode != PASS || queue_has_space)));
+ // Look ahead on consumption so the synchronous RAM delivers the next word
+ // on the following cycle. Empty cycles continue refreshing the current head.
+-assign input_addr = input_rdptr + {{(ADDR_BITS-1){1'b0}},take_input};
++// Increment independently of the late consume decision, then select.
++assign input_addr = take_input ? input_rdptr + 1'b1 : input_rdptr;
+ assign busy = !input_empty || state != HEADER
+     || (INCLUDE_NATIVE_MESH && native_tx_state != 0);
+ // Explicit finite decode: Quartus implements even an 8-bit "% 5" here as
+@@ -335,7 +339,7 @@
+     emit = 1'b0;
+     if (enable) case (state)
+         SPACE: emit = free_words >= needed && mode == PASS;
+-        COPY: emit = !input_empty && mode == PASS && free_words != 0;
++        COPY: emit = !input_empty && mode == PASS && queue_has_space;
+         EMIT, TRI_HEADER, TRI_WORD, P_ALPHA_HEADER, P_ALPHA_WORD: emit = 1'b1;
+         default: ;
+     endcase
+@@ -548,7 +552,7 @@
+                         4: u <= input_data;
+                         5: v <= input_data;
+                         6: rgb <= input_data[15:0];
+-                        7: begin depth <= input_data; state <= DIV_INIT; end
++                        7: begin depth <= input_data; divisor <= nearclip; state <= DIV_INIT; end
+                         default: ;
+                     endcase
+                 end
+@@ -571,14 +575,18 @@
+                 case (row)
+                     0: cx <= (accumulator >>> 16) + matrix_q;
+                     1: cy <= (accumulator >>> 16) + matrix_q;
+-                    2: cw <= (accumulator >>> 16) + matrix_q;
++                    2: begin cw <= (accumulator >>> 16) + matrix_q; divisor <= nearclip; end
+                     default: ;
+                 endcase
+                 row <= row+1'b1; column <= 0;
+                 state <= row == 2 ? DIV_INIT : MAC_ADDR;
+             end
+             DIV_INIT: begin
+-                divisor <= cw < active_nearclip ? active_nearclip : cw;
++                // Every entry path stages its immutable near plane in divisor.
++                // Reuse the idle divider register to keep mode/context selection
++                // out of the signed clamp's combinational path. Staging uses
++                // existing predecessor cycles and survives output/enable stalls.
++                divisor <= cw < $signed(divisor) ? divisor : cw;
+                 remainder <= 0;
+                 if (INCLUDE_PARTICLES && mode == PARTICLE) begin
+                     quotient <= 47'h400000000000; iterations <= 47;
+@@ -692,7 +700,10 @@
+             P_ALPHA_WORD: begin slot <= 0; state <= P_VERTEX; end
+             P_VERTEX: begin
+                 native_resume <= P_NEXT_VERTEX;
+-                if (slot == 0) begin cx <= vx; cy <= vy; cw <= vz; state <= P_PROJECT_SPACE; end
++                if (slot == 0) begin
++                    cx <= vx; cy <= vy; cw <= vz; divisor <= native_nearclip;
++                    state <= P_PROJECT_SPACE;
++                end
+                 else begin row <= 0; state <= P_BASIS_ADDR; end
+             end
+             P_BASIS_ADDR: begin native_addr <= 8'd184 + (slot == 1 ? 0 : 3) + {6'd0,row}; state <= P_BASIS_WAIT; end
+@@ -853,7 +864,7 @@
+             N_PALETTE_CAPTURE: begin
+                 rgb <= native_current_word[24] ? native_q[31:16] : native_q[15:0];
+                 slot <= native_vertex[4:0]; native_resume <= N_NEXT_VERTEX;
+-                state <= N_OUTPUT_SPACE;
++                divisor <= native_nearclip; state <= N_OUTPUT_SPACE;
+             end
+             N_OUTPUT_SPACE: if (free_words >= 7) state <= DIV_INIT;
+             N_NEXT_VERTEX: begin
+--- a/src/fpga/common/os30/audio_mixer.v
++++ b/src/fpga/common/os30/audio_mixer.v
+@@ -119,7 +119,9 @@
+     // mixer still considers active.  (The former active_count /
+     // last_sample_data / sample_count diagnostic ports were removed —
+     // they were tied to zero and unconnected at every instantiation.)
+-    output wire [31:0] voice_active_mask
++    output wire [31:0] voice_active_mask,
++    output wire [4:0] fetch_voice,
++    output wire fetch_cacheable
+ );
+ 
+ // ============================================================
+@@ -170,7 +172,10 @@
+  *             FSM read/write plus queued CPU writes for retrigger/start state.
+  * ================================================================= */
+ reg  [8:0]  vtbl_a_addr;
+-reg  [31:0] vtbl_a_data;
++// Committed values remain stable through the following RAM write edge;
++// use the registered field address instead of duplicating22 data registers.
++wire [31:0] vtbl_a_data = vtbl_a_addr[1:0] == 2'd2 ? {16'd0,cur_vol_r,cur_vol_l} :
++                         vtbl_a_addr[1:0] == 2'd1 ? {16'd0,cur_pos_frac} : {10'd0,cur_pos_int};
+ reg         vtbl_a_wr;
+ wire [31:0] vtbl_a_q;
+ 
+@@ -316,7 +321,10 @@
+ // with a coherent position/current-volume tuple.
+ reg [31:0] voice_active;
+ reg [31:0] voice_start_pending;
+-reg [31:0] voice_end_clear_mask;
++// Clear and IRQ-set are the same one-cycle end event. Decode the current
++// voice once; cur_voice remains stable through the following NEXT_VOICE edge.
++reg voice_end_event;
++wire [31:0] voice_end_clear_mask = voice_end_event ? (32'd1 << cur_voice) : 32'd0;
+ always @(posedge clk) begin
+     if (!reset_n) begin
+         voice_active <= 32'd0;
+@@ -385,7 +393,7 @@
+ assign pos_readback = pos_readback_r;
+ 
+ // Voice-end IRQ pending with W1C (write-one-to-clear) support.
+-reg [31:0] voice_end_set_mask;
++wire [31:0] voice_end_set_mask = voice_end_clear_mask;
+ always @(posedge clk) begin
+     if (!reset_n)
+         voice_end_pending <= 32'd0;
+@@ -520,6 +528,9 @@
+ localparam S_WR_VOL_LOAD   = 6'd37;  // latch VOL_TARGET read data before target multiply
+ localparam S_RD_LSTART_W   = 6'd38;  // capture LOOP_START (moved out of S_FETCH_TAP0_CALC); queue WPTR read
+ localparam S_STREAM_WPTR_W = 6'd39;  // capture WPTR; register both ring-distance adder cones
++localparam S_STREAM_WRAP   = 6'd41;
++localparam S_FETCH_BASE = 6'd42;
++localparam S_ADV_FRAC = 6'd43;
+ localparam S_STREAM_CHK    = 6'd40;  // backlog thresholds; hold-branch for a starved stream voice
+ 
+ reg [5:0] state;
+@@ -536,15 +547,15 @@
+ end
+ 
+ // Per-voice cached fields for the current pass.
+-reg [31:0] voice_base;          // absolute SDRAM byte address from voice state
+-reg [21:0] cur_length;
+-reg [31:0] cur_rate;
++wire [31:0] voice_base = vtbl_cpu_q; // scheduled BASE read
++wire [21:0] cur_length = vtbl_cpu_q[21:0]; // scheduled LENGTH read
++wire [31:0] cur_rate = vtbl_cpu_q; // scheduled RATE read
+ reg [3:0]  cur_ctrl;        // {stream, loop, stereo, active}
+ reg [21:0] cur_pos_int;
+ reg [15:0] cur_pos_frac;
+ reg [7:0]  cur_vol_l, cur_vol_r;
+ reg [21:0] cur_loop_end, cur_loop_start;
+-reg [21:0] cur_loop_len;
++// Loop length reuses tap_nxt_raw after the fetch decision has consumed it.
+ reg        cur_loop_valid;
+ reg [7:0]  cur_vol_rate;
+ /* Per-voice volume-write pipeline (6 states):
+@@ -564,12 +575,14 @@
+  * available headroom also depends on SDRAM latency and active voice count. */
+ reg [7:0]  cur_gxm_r;
+ reg [7:0]  vol_raw_l_r, vol_raw_r_r;
+-reg [7:0]  tgt_l_r, tgt_r_r;
+-reg [7:0]  nxt_l_r, nxt_r_r;
++wire [7:0] tgt_l_r = vol_raw_l_r, tgt_r_r = vol_raw_r_r;
++// Ramped samples replace cur_vol_l/r after the current sample is mixed.
+ 
+ wire cur_stereo = cur_ctrl[1];
+ wire cur_loop   = cur_ctrl[2];
+ wire cur_stream = cur_ctrl[3];
++assign fetch_voice = cur_voice;
++assign fetch_cacheable = !cur_stream;
+ 
+ // Stream-mode pipeline registers (one job per cycle, same discipline as
+ // the advance/volume pipelines): S_STREAM_WPTR_W registers the two
+@@ -579,18 +592,16 @@
+ // voice pass by S_WR_VOL_MULT; it is re-assigned on every pass through
+ // S_STREAM_CHK (0 for non-stream voices), so it can never leak across
+ // voices.
+-reg [22:0] stream_lmp;     // length - pos (precomputed so WPTR_W is one adder deep)
+-reg [22:0] stream_d0;      // wptr - pos            (borrow in bit 22)
+-reg [22:0] stream_d1;      // wptr + (length - pos) (wrap-corrected)
++// Streaming availability is consumed before the tap-next decision starts;
++// both then expire before loop length occupies the same scheduled scratch.
++reg [22:0] stream_d0;
+ reg        stream_quiet;   // backlog < STREAM_LOW → fade volume target to 0
+ 
+ // Tap fetch state — linear interp needs 2 consecutive samples.
+ reg signed [15:0] tap0_l, tap0_r;
+ reg signed [15:0] tap1_l, tap1_r;
+ reg [31:0] tap_byte_addr;
+-reg [31:0] tap_araddr;     // registered m_araddr; pipelined from TAP0_CALC
+-reg [21:0] tap_nxt_raw;    // pos+1 before wrap/clamp.
+-reg [21:0] tap_nxt_wrapped;// pos+1 after optional loop wrap, before length clamp.
++wire [21:0] tap_nxt_raw = stream_d0[21:0];
+ reg        tap_wrap_only;  // registered loop-wrap decision.
+ // Burst-mode flags decided across S_FETCH_TAP1_NXT_CALC / S_FETCH_TAP1_MODE and
+ // consumed in S_FETCH_TAP0_AR / S_FETCH_TAP0_R.  Four mutually-
+@@ -622,7 +633,9 @@
+ // post-interp, pre-volume sample so the multiplier chain is split
+ // across two cycles.  Without this the tap1→accum combinational path
+ // is 2×mult + 3×add = ~25 ns, violating the 100 MHz budget.
+-reg signed [16:0] lerp_l_reg, lerp_r_reg;
++// Once the difference multiply is registered, tap1 is dead. Reuse its
++// storage for the interpolated samples during the following phase.
++wire signed [15:0] lerp_l_reg = tap1_l, lerp_r_reg = tap1_r;
+ 
+ // Pipeline register between LERP phase-0 (diff*frac multiply) and
+ // phase-1 (tap0 + delta>>>16 add).  Without this split the multiplier
+@@ -648,9 +661,6 @@
+ // The previous S_ADVANCE/S_ADV_WRAP implementation let cur_loop_start /
+ // cur_loop_end feed compare + subtract-add + repeat-wrap check + write
+ // address muxing in one cycle, which became the 100 MHz critical path.
+-reg [17:0] adv_new_frac_full;
+-reg [21:0] adv_new_pos_raw;
+-reg [21:0] adv_pos_next;
+ reg        adv_voice_ended;
+ reg        adv_check_wrap;
+ 
+@@ -705,14 +715,63 @@
+ wire [31:0] samp_addr_shared = sample_byte_addr(voice_base, samp_idx,
+                                                 cur_stereo);
+ 
++// One scheduled23-bit add/subtract serves all length/loop/stream decisions
++// and integer position advance. Operands are bounded to22 bits for compare
++// states, so result[22] is exactly unsigned borrow. Stream correction ignores
++// the top bit and preserves the original modular result.
++reg [22:0] position_a, position_b;
++reg position_sub;
++wire [16:0] frac_sum = {1'b0,cur_pos_frac} + {1'b0,cur_rate[15:0]};
++// The rate integer reuses cur_loop_start after all fetch/loop-length work.
++reg adv_frac_carry;
++wire position_carry = (state == S_ADV_COMPUTE) ? adv_frac_carry : position_sub;
++wire [22:0] position_b_signed = position_b ^ {23{position_sub}};
++wire [22:0] position_alu = position_a + position_b_signed + position_carry;
++always @(*) begin
++    position_a = {1'b0,cur_pos_int};
++    position_b = {1'b0,cur_length};
++    position_sub = 1'b1;
++    case (state)
++        S_RD_LSTART_W: begin
++            position_a = {1'b0,cur_loop_end};
++            position_b = {1'b0,vtbl_cpu_q[21:0]};
++        end
++        S_STREAM_WPTR_W: begin
++            position_a = {1'b0,vtbl_cpu_q[21:0]};
++            position_b = {1'b0,cur_pos_int};
++        end
++        S_STREAM_WRAP: begin
++            position_a = stream_d0;
++            position_b = stream_d0[22] ? {1'b0,cur_length} : 23'd0;
++            position_sub = 1'b0;
++        end
++        S_FETCH_TAP1_NXT_CALC: begin
++            position_a = {1'b0,tap_nxt_raw};
++            position_b = {1'b0,cur_loop_end};
++        end
++        S_FETCH_TAP1_MODE: position_a = {1'b0,tap_nxt_raw};
++        S_ADV_COMPUTE: begin
++            position_b = {7'd0,cur_loop_start[15:0]};
++            position_sub = 1'b0;
++        end
++        S_ADVANCE: position_b = cur_loop ? {1'b0,cur_loop_end} : {1'b0,cur_length};
++        S_ADV_CHECK: position_b = {1'b0,cur_loop_end};
++        S_ADV_WRAP: position_b = {1'b0,tap_nxt_raw};
++        S_LERP_INTERP: begin
++            position_a = {1'b0,cur_loop_end};
++            position_b = {1'b0,cur_loop_start};
++        end
++        default: begin end
++    endcase
++end
++
+ // ============================================================
+ // FSM body
+ // ============================================================
+ always @(posedge clk) begin
+     // Defaults each cycle.
+     vtbl_a_wr            <= 1'b0;
+-    voice_end_set_mask   <= 32'd0;
+-    voice_end_clear_mask <= 32'd0;
++    voice_end_event     <= 1'b0;
+     sample_wr            <= 1'b0;
+ 
+     if (!reset_n) begin
+@@ -725,17 +784,13 @@
+         m_araddr         <= 32'd0;
+         m_arlen          <= 8'd0;
+         lerp_phase       <= 1'b0;
+-        tap_nxt_raw      <= 22'd0;
+-        tap_nxt_wrapped  <= 22'd0;
+         tap_wrap_only    <= 1'b0;
+         burst_mode_2beat <= 1'b0;
+         burst_mode_seam  <= 1'b0;
+         burst_mode_dup   <= 1'b0;
+         vol_raw_l_r      <= 8'd0;
+         vol_raw_r_r      <= 8'd0;
+-        stream_lmp       <= 23'd0;
+         stream_d0        <= 23'd0;
+-        stream_d1        <= 23'd0;
+         stream_quiet     <= 1'b0;
+     end else if (cur_cancel && state != S_IDLE && state != S_START_SAMPLE &&
+                  state != S_NEXT_VOICE && state != S_OUTPUT &&
+@@ -778,7 +833,7 @@
+     // Voice-field read pipeline. The packed table keeps the public
+     // 16-word-per-voice ABI while avoiding one physical RAM per field.
+     S_RD_CTRL_W: begin
+-        cur_ctrl <= vtbl_a_q[3:0];
++        cur_ctrl <= vtbl_cpu_q[3:0];
+         state    <= S_CHECK_ACTIVE;
+     end
+ 
+@@ -801,51 +856,25 @@
+ 
+     S_RD_BASE: begin
+         cur_pos_frac <= vtbl_a_q[15:0];
+-        vtbl_a_addr  <= {cur_voice, VTBL_ADDR};
++        vtbl_a_addr  <= {cur_voice, VTBL_VOL_LR};
+         state        <= S_RD_BASE_W;
+     end
+ 
+     S_RD_BASE_W: begin
+-        voice_base  <= vtbl_a_q;
+-        vtbl_a_addr <= {cur_voice, VTBL_RATE};
+-        state       <= S_RD_RATE_W;
+-    end
+-
+-    S_RD_RATE_W: begin
+-        cur_rate    <= vtbl_a_q;
+-        vtbl_a_addr <= {cur_voice, VTBL_LEN};
+-        state       <= S_RD_LEN_W;
+-    end
+-
+-    S_RD_LEN_W: begin
+-        cur_length  <= vtbl_a_q[21:0];
+-        vtbl_a_addr <= {cur_voice, VTBL_VOL_LR};
+-        state       <= S_RD_VOL_W;
+-    end
+-
+-    S_RD_VOL_W: begin
+         cur_vol_l <= vtbl_a_q[7:0];
+         cur_vol_r <= vtbl_a_q[15:8];
+-        // Queue VOL_RATE next so cur_vol_rate is loaded before the
+-        // ramp_step() in S_WR_VOL.  Previously cur_vol_rate was never
+-        // written anywhere — it sat at 0 forever, which made every
+-        // ramp_step() snap to target.  That meant every note-on,
+-        // env update, master/group volume change, and voice steal
+-        // produced a sample-level discontinuity → audible click.
+-        // Even though VTBL_VOL_RATE was being programmed correctly
+-        // by the HAL, the FSM never read it back into cur_vol_rate.
+         vtbl_a_addr <= {cur_voice, VTBL_VOL_RATE};
+-        state       <= S_RD_VOL_RATE;
++        state <= S_RD_VOL_RATE;
+     end
+ 
+     S_RD_VOL_RATE: begin
+-        cur_vol_rate <= vtbl_a_q[7:0];
++        cur_vol_rate <= vtbl_cpu_q[7:0];
+         vtbl_a_addr  <= {cur_voice, VTBL_LOOP_END};
+         state        <= S_RD_LOOP_END;
+     end
+ 
+     S_RD_LOOP_END: begin
+-        cur_loop_end <= vtbl_a_q[21:0];
++        cur_loop_end <= vtbl_cpu_q[21:0];
+         vtbl_a_addr  <= {cur_voice, VTBL_LOOP_START};
+         state        <= S_RD_LSTART_W;
+     end
+@@ -855,11 +884,8 @@
+     // read, and precompute (length - pos) so S_STREAM_WPTR_W's d1 cone
+     // is a single adder off the RAM read.
+     S_RD_LSTART_W: begin
+-        cur_loop_start <= vtbl_a_q[21:0];
+-        cur_loop_valid <= (cur_loop_end > vtbl_a_q[21:0]);
+-        cur_loop_len   <= cur_loop_end - vtbl_a_q[21:0];
+-        stream_lmp     <= {1'b0, cur_length} - {1'b0, cur_pos_int};
+-`ifdef INCLUDE_NONSTREAM_BYPASS
++        cur_loop_start <= vtbl_cpu_q[21:0];
++        cur_loop_valid <= !position_alu[22] && (position_alu[21:0] != 22'd0);
+         if (cur_stream) begin
+             vtbl_a_addr <= {cur_voice, VTBL_WPTR};
+             state       <= S_STREAM_WPTR_W;
+@@ -867,12 +893,9 @@
+             // Ordinary voices have no ring producer. Skip both backlog
+             // states and clear any quiet flag left by the preceding stream.
+             stream_quiet <= 1'b0;
++            vtbl_a_addr <= {cur_voice, VTBL_LEN};
+             state        <= S_FETCH_TAP0_CALC;
+         end
+-`else
+-        vtbl_a_addr    <= {cur_voice, VTBL_WPTR};
+-        state          <= S_STREAM_WPTR_W;
+-`endif
+     end
+ 
+     // Two PARALLEL ring-distance cones registered straight off the WPTR
+@@ -880,9 +903,16 @@
+     // contract baked into silicon).  d1 is only consumed when wptr < pos,
+     // where it provably fits 22 bits (wptr < pos ⇒ d1 < length).
+     S_STREAM_WPTR_W: begin
+-        stream_d0 <= {1'b0, vtbl_a_q[21:0]} - {1'b0, cur_pos_int};
+-        stream_d1 <= {1'b0, vtbl_a_q[21:0]} + stream_lmp;
+-        state     <= S_STREAM_CHK;
++        stream_d0 <= position_alu;
++        vtbl_a_addr <= {cur_voice, VTBL_LEN};
++        state     <= S_STREAM_WRAP;
++    end
++
++    // Reuse the same position ALU for the conditional modular-distance
++    // correction. Low22 bits preserve the previous arbitrary-length math.
++    S_STREAM_WRAP: begin
++        stream_d0 <= position_alu;
++        state <= S_STREAM_CHK;
+     end
+ 
+     // Backlog thresholds.  stream_quiet (re-assigned EVERY pass, 0 for
+@@ -894,7 +924,7 @@
+     // next 48 kHz pass re-reads WPTR (resume needs zero CPU help).
+     S_STREAM_CHK: begin : stream_chk_blk
+         reg [21:0] avail;
+-        avail = stream_d0[22] ? stream_d1[21:0] : stream_d0[21:0];
++        avail = stream_d0[21:0];
+         stream_quiet <= cur_stream && (avail < STREAM_LOW);
+         if (cur_stream && (avail < STREAM_FLOOR))
+             state <= S_RAMP_STEP;     // starved: silence + hold position
+@@ -931,19 +961,22 @@
+     // MODE cycle: apply length clamp, pick mode, register flags.
+     // TAP0_AR / TAP0_R / TAP1_R: drive AR with chosen ARLEN, receive
+     //                            beat 0, optionally receive beat 1.
+-    S_FETCH_TAP0_CALC: begin : fetch_tap0_calc_blk
+-        reg [31:0] sample_addr;
+-        // (LOOP_START capture lives in S_RD_LSTART_W now.)
+-        if (cur_pos_int >= cur_length) begin
++    S_FETCH_TAP0_CALC: begin
++        // Terminating voices do not consume this speculative read. Avoid
++        // length-comparison feedback into the inferred RAM read enable.
++        vtbl_a_addr <= {cur_voice, VTBL_ADDR};
++        if (!position_alu[22]) begin
+             state <= S_VOICE_END;
+         end else begin
+-            // state==S_FETCH_TAP0_CALC ⇒ shared cone carries cur_pos_int.
+-            sample_addr   = samp_addr_shared;
+-            tap_byte_addr <= sample_addr;
+-            tap_araddr    <= word_aligned(sample_addr);
+-            tap_nxt_raw   <= cur_pos_int + 22'd1;
+-            state         <= S_FETCH_TAP1_NXT_CALC;  // first half of burst decision
+-        end
++            stream_d0 <= {1'b0,cur_pos_int + 22'd1};
++            state <= S_FETCH_BASE;
++        end
++    end
++    S_FETCH_BASE: begin
++        tap_byte_addr <= samp_addr_shared;
++        m_araddr <= word_aligned(samp_addr_shared);
++        vtbl_a_addr <= {cur_voice, VTBL_LEN};
++        state <= S_FETCH_TAP1_NXT_CALC;
+     end
+ 
+     // WRAP — repurposed S_FETCH_TAP1_NXT_CALC slot.  Keep the loop wrap
+@@ -953,9 +986,9 @@
+     // path and gives the fitter much more freedom around this FSM.
+     S_FETCH_TAP1_NXT_CALC: begin : burst_wrap_blk
+         reg        wrap_only;
+-        wrap_only = cur_loop && cur_loop_valid && (tap_nxt_raw >= cur_loop_end);
++        wrap_only = cur_loop && cur_loop_valid && (!position_alu[22]);
+         tap_wrap_only   <= wrap_only;
+-        tap_nxt_wrapped <= wrap_only ? cur_loop_start : tap_nxt_raw;
++        stream_d0 <= {1'b0,wrap_only ? cur_loop_start : tap_nxt_raw};
+         state           <= S_FETCH_TAP1_MODE;
+     end
+ 
+@@ -965,7 +998,7 @@
+     // advance path end the voice.
+     S_FETCH_TAP1_MODE: begin : burst_mode_blk
+         reg clamp_after_wrap;
+-        clamp_after_wrap = (tap_nxt_wrapped >= cur_length);
++        clamp_after_wrap = (!position_alu[22]);
+         // Mode encoding (mutually exclusive):
+         //   _2beat : contiguous + needs separate words for tap0/tap1
+         //   _seam  : loop wrap with valid (in-range) loop_start
+@@ -979,7 +1012,6 @@
+     end
+ 
+     S_FETCH_TAP0_AR: begin
+-        m_araddr  <= tap_araddr;
+         m_arlen   <= burst_mode_2beat ? 8'd1 : 8'd0;
+         m_arvalid <= 1'b1;
+         state     <= S_FETCH_TAP0_R;
+@@ -1010,6 +1042,7 @@
+                 // sample[cur_loop_start] so tap1 is the right value
+                 // and LERP can interpolate across the seam.
+                 m_rready <= 1'b0;
++                vtbl_a_addr <= {cur_voice, VTBL_ADDR};
+                 state    <= S_FETCH_SEAM_AR;
+             end else if (burst_mode_dup) begin
+                 // Clamp at sample end (one-shot voice).  No interp
+@@ -1097,6 +1130,9 @@
+         reg signed [16:0] diff_l, diff_r;
+         begin
+             if (lerp_phase == 1'b0) begin
++                // Fetch bookkeeping is dead; retain the loop length here for
++                // the later repeated-subtract advance states.
++                stream_d0 <= {1'b0,position_alu[21:0]};
+                 // Phase 0: subtract + multiply, register the 33-bit
+                 // signed delta into delta_*_reg.  tap0_l/tap0_r hold
+                 // stable across the next cycle so phase 1 can read them.
+@@ -1114,8 +1150,8 @@
+                  * zero-extends `tap0_l` — for any negative tap0 the result
+                  * is off by 65536 (caught by the mixer probe: voices were
+                  * active but output was nonsense). */
+-                lerp_l_reg <= $signed(tap0_l) + (delta_l_reg >>> 16);
+-                lerp_r_reg <= $signed(tap0_r) + (delta_r_reg >>> 16);
++                tap1_l <= $signed(tap0_l) + (delta_l_reg >>> 16);
++                tap1_r <= $signed(tap0_r) + (delta_r_reg >>> 16);
+                 lerp_phase <= 1'b0;
+                 state      <= S_LERP_MIX;
+             end
+@@ -1124,32 +1160,16 @@
+ 
+     // ---- Stage 2: volume multiply + accumulate ----
+     S_LERP_MIX: begin : lerp_mix_blk
+-        reg signed [24:0] scaled_l, scaled_r;
+-        reg signed [16:0] post_l, post_r;
+-        reg signed [15:0] samp_l_tmp, samp_r_tmp;
++        reg signed [23:0] scaled_l, scaled_r;
+         begin
+-            // Apply per-channel volume (8-bit unsigned), shift right 8.
++            // Convex interpolation and unsigned8 volume prove signed16
++            // bounds. No per-voice saturation/magnitude comparators needed.
+             scaled_l = lerp_l_reg * $signed({1'b0, cur_vol_l});
+             scaled_r = lerp_r_reg * $signed({1'b0, cur_vol_r});
+-            /* Divide by 256 AND saturate to 16-bit signed.  A bare
+-             * `scaled[23:8]` slice is unsigned, so when lerp is close
+-             * to ±65535 (17-bit range) and vol ~255, scaled exceeds
+-             * ±2^23 and bit 23 becomes set on POSITIVE values, making
+-             * the slice look negative in s16.  Large-signal samples
+-             * get their sign flipped → audible as clicks.  Arithmetic
+-             * shift preserves sign; saturation clips to s16. */
+-            post_l = scaled_l >>> 8;
+-            post_r = scaled_r >>> 8;
+-            samp_l_tmp = (post_l >  17'sd32767) ? 16'sh7FFF :
+-                         (post_l < -17'sd32768) ? 16'sh8000 :
+-                                                   post_l[15:0];
+-            samp_r_tmp = (post_r >  17'sd32767) ? 16'sh7FFF :
+-                         (post_r < -17'sd32768) ? 16'sh8000 :
+-                                                   post_r[15:0];
+-
+-            accum_l <= accum_l + $signed({{(ACCUM_W-16){samp_l_tmp[15]}}, samp_l_tmp});
+-            accum_r <= accum_r + $signed({{(ACCUM_W-16){samp_r_tmp[15]}}, samp_r_tmp});
+-            state   <= S_ADV_COMPUTE;
++            accum_l <= accum_l + $signed(scaled_l[23:8]);
++            accum_r <= accum_r + $signed(scaled_r[23:8]);
++            vtbl_a_addr <= {cur_voice, VTBL_RATE};
++            state   <= S_ADV_FRAC;
+         end
+     end
+ 
+@@ -1158,35 +1178,35 @@
+     // rate_high) land into pipeline registers; the wrap/clamp/write
+     // happens in S_ADVANCE next cycle so the pos_latch M10K input isn't
+     // on the same path as the adders.
+-    S_ADV_COMPUTE: begin : adv_c_blk
+-        reg [17:0] nf_full;
+-        reg [21:0] np_raw;
+-        begin
+-            nf_full = {1'b0, cur_pos_frac} + cur_rate[15:0];
+-            np_raw  = cur_pos_int + {18'd0, nf_full[17:16]} + cur_rate[31:16];
+-            adv_new_frac_full <= nf_full;
+-            adv_new_pos_raw   <= np_raw;
+-            state             <= S_ADVANCE;
+-        end
++    // The fractional carry is registered before the integer position add.
++    // Static RATE comes directly from CPU-owned RAM, so neither the mutable
++    // table mux nor two carry chains feed the final position register.
++    S_ADV_FRAC: begin
++        cur_pos_frac <= frac_sum[15:0];
++        adv_frac_carry <= frac_sum[16];
++        cur_loop_start <= {6'd0,cur_rate[31:16]};
++        state <= S_ADV_COMPUTE;
++    end
++    S_ADV_COMPUTE: begin
++        cur_pos_int <= position_alu[21:0];
++        vtbl_a_addr <= {cur_voice, VTBL_LEN};
++        state <= S_ADVANCE;
+     end
+ 
+     // ---- Advance phase: stage 2 (first boundary decision) ----
+     S_ADVANCE: begin : adv_a_blk
+         begin
+-            cur_pos_frac    <= adv_new_frac_full[15:0];
+-            adv_pos_next    <= adv_new_pos_raw;
+             adv_voice_ended <= 1'b0;
+             adv_check_wrap  <= 1'b0;
+ 
+             if (cur_loop) begin
+                 if (!cur_loop_valid) begin
+                     adv_voice_ended <= 1'b1;
+-                end else if (adv_new_pos_raw >= cur_loop_end) begin
+-                    adv_pos_next   <= adv_new_pos_raw - cur_loop_len;
++                end else if (!position_alu[22]) begin
+                     adv_check_wrap <= 1'b1;
+                 end
+             end else begin
+-                if (adv_new_pos_raw >= cur_length)
++                if (!position_alu[22])
+                     adv_voice_ended <= 1'b1;
+             end
+             state <= S_ADV_CHECK;
+@@ -1198,9 +1218,8 @@
+     // in S_ADV_COMMIT so cur_loop_end does not feed the write-address mux.
+     S_ADV_CHECK: begin
+         if (adv_voice_ended) begin
+-            cur_pos_int <= adv_pos_next;
+             state       <= S_VOICE_END;
+-        end else if (adv_check_wrap && (adv_pos_next >= cur_loop_end)) begin
++        end else if (adv_check_wrap && (!position_alu[22])) begin
+             state <= S_ADV_WRAP;
+         end else begin
+             state <= S_ADV_COMMIT;
+@@ -1209,7 +1228,7 @@
+ 
+     // Stage 4: one loop-length subtract per pass for extreme rates.
+     S_ADV_WRAP: begin
+-        adv_pos_next   <= adv_pos_next - cur_loop_len;
++        cur_pos_int   <= position_alu[21:0];
+         adv_check_wrap <= 1'b1;
+         state          <= S_ADV_CHECK;
+     end
+@@ -1217,17 +1236,14 @@
+     // Stage 5: unconditional commit.  No loop compare or subtract feeds
+     // the position storage setup path in this cycle.
+     S_ADV_COMMIT: begin
+-        cur_pos_int           <= adv_pos_next;
+         vtbl_a_addr           <= {cur_voice, VTBL_POS_INT};
+-        vtbl_a_data           <= {10'd0, adv_pos_next};
+         vtbl_a_wr             <= 1'b1;
+-        pos_latch[cur_voice]  <= adv_pos_next;
++        pos_latch[cur_voice]  <= cur_pos_int;
+         state                 <= S_WR_POS_FRAC;
+     end
+ 
+     S_WR_POS_FRAC: begin
+         vtbl_a_addr <= {cur_voice, VTBL_POS_FRAC};
+-        vtbl_a_data <= {16'd0, cur_pos_frac};
+         vtbl_a_wr   <= 1'b1;
+         // Fall through to ramp.
+         state       <= S_RAMP_STEP;
+@@ -1260,8 +1276,8 @@
+         // S_WR_VOL_MULT).  0 × gxm = 0, so the existing ramp fades the
+         // starving stream voice out, and back in on recovery, with the
+         // app's programmed VOL_TARGET untouched in storage.
+-        vol_raw_l_r <= stream_quiet ? 8'd0 : vtbl_a_q[7:0];
+-        vol_raw_r_r <= stream_quiet ? 8'd0 : vtbl_a_q[15:8];
++        vol_raw_l_r <= stream_quiet ? 8'd0 : vtbl_cpu_q[7:0];
++        vol_raw_r_r <= stream_quiet ? 8'd0 : vtbl_cpu_q[15:8];
+         state       <= S_WR_VOL_MULT;
+     end
+ 
+@@ -1276,8 +1292,8 @@
+             tgt_r_x = vol_raw_r_r * cur_gxm_r;
+             tgt_l_b = tgt_l_x[15:8];
+             tgt_r_b = tgt_r_x[15:8];
+-            tgt_l_r <= tgt_l_b;
+-            tgt_r_r <= tgt_r_b;
++            vol_raw_l_r <= tgt_l_b;
++            vol_raw_r_r <= tgt_r_b;
+             // Settled fast-path: the target is recomputed every pass from the
+             // CURRENT gxm (group×master), so when both channels already sit on
+             // that fresh target, ramp_step() is a no-op and S_WR_VOL would
+@@ -1298,24 +1314,22 @@
+         // but avoids duplicating the add/compare/mux chain in ALMs.
+         // ramp_out is the SHARED cone (see above the FSM): in this state
+         // its operand muxes select the left channel.
+-        nxt_l_r <= ramp_out;
++        cur_vol_l <= ramp_out;
+         state   <= S_WR_VOL_RAMP_R;
+     end
+ 
+     S_WR_VOL_RAMP_R: begin
+         // Shared cone again — operand muxes now select the right channel.
+-        nxt_r_r <= ramp_out;
++        cur_vol_r <= ramp_out;
+         state   <= S_WR_VOL;
+     end
+ 
+     S_WR_VOL: begin
+-        // Pure write-decision + storage setup.  No multiply, no
+-        // compare chain — both already registered.
+-        if (nxt_l_r != cur_vol_l || nxt_r_r != cur_vol_r) begin
+-            vtbl_a_addr <= {cur_voice, VTBL_VOL_LR};
+-            vtbl_a_data <= {16'd0, nxt_r_r, nxt_l_r};
+-            vtbl_a_wr   <= 1'b1;
+-        end
++        // The settled-target branch skipped this state when neither channel
++        // changes. Otherwise ramp_step changes at least one channel, so the
++        // original write-if-changed predicate is provably always true here.
++        vtbl_a_addr <= {cur_voice, VTBL_VOL_LR};
++        vtbl_a_wr <= 1'b1;
+         state <= S_NEXT_VOICE;
+     end
+ 
+@@ -1325,8 +1339,7 @@
+          * No VTBL_CTRL write here: CTRL is CPU-owned storage.  The shadow clear makes
+          * S_CHECK_ACTIVE skip this voice on every subsequent pass until
+          * CPU re-arms it with a fresh CTRL write. */
+-        voice_end_clear_mask[cur_voice] <= 1'b1;
+-        voice_end_set_mask[cur_voice] <= 1'b1;
++        voice_end_event <= 1'b1;
+         state       <= S_NEXT_VOICE;
+     end
+ 
+--- /dev/null
++++ b/src/fpga/common/os30/audio_sample_cache.v
+@@ -0,0 +1,189 @@
++// SPDX-License-Identifier: Apache-2.0
++// Optional per-voice read cache. One32-byte line per logical mixer voice.
++// Stream requests and requests accepted while disabled bypass unchanged.
++// An invalidation may leave the already accepted response in flight; the
++// mixer owns cancellation of that response. It prevents later line reuse.
++`default_nettype none
++module audio_sample_cache (
++    input wire clk,
++    input wire reset_n,
++    input wire cache_enable,
++    input wire request_cacheable,
++    input wire [4:0] request_voice,
++    input wire invalidate_valid,
++    input wire [4:0] invalidate_voice,
++
++    input wire s_arvalid,
++    output wire s_arready,
++    input wire [31:0] s_araddr,
++    input wire [7:0] s_arlen,
++    output wire s_rvalid,
++    input wire s_rready,
++    output wire [31:0] s_rdata,
++    output wire [1:0] s_rresp,
++    output wire s_rlast,
++
++    output wire m_arvalid,
++    input wire m_arready,
++    output wire [31:0] m_araddr,
++    output wire [7:0] m_arlen,
++    input wire m_rvalid,
++    output wire m_rready,
++    input wire [31:0] m_rdata,
++    input wire [1:0] m_rresp,
++    input wire m_rlast
++);
++localparam IDLE=4'd0, TAG_WAIT=4'd1, CHECK=4'd2, DATA_WAIT=4'd3,
++           REPLY=4'd4, FILL_AR=4'd5, FILL_R=4'd6,
++           BYPASS_AR=4'd7, BYPASS_R=4'd8;
++reg [3:0] state;
++reg [4:0] voice;
++reg [31:0] address;
++reg [7:0] remaining;
++reg canceled;
++
++// Reads are synchronous. A read result is consumed only after its WAIT
++// state. During fills neither read result is consumed; on a same-address
++// read/write the unspecified RAM output is therefore harmless.
++(* ramstyle = "M10K, no_rw_check" *) reg [31:0] data_mem [0:255];
++(* ramstyle = "M10K, no_rw_check" *) reg [26:0] tag_mem [0:31];
++reg [7:0] data_read_address;
++reg [4:0] tag_read_address;
++reg [31:0] data_q;
++reg [26:0] tag_q;
++reg [31:0] valid;
++
++reg [2:0] fill_word;
++reg [1:0] fill_error;
++reg transient_valid;
++reg [1:0] transient_error;
++
++wire accepted = s_arvalid && s_arready;
++wire invalidating_current = invalidate_valid && invalidate_voice == voice;
++wire fill_beat = state == FILL_R && m_rvalid;
++wire fill_done = fill_beat && m_rlast;
++wire [1:0] ending_error = fill_error | m_rresp |
++                         ((fill_word != 3'd7) ? 2'b10 : 2'b00);
++wire commit_line = fill_done && ending_error == 2'b00 &&
++                   !canceled && cache_enable && !invalidating_current;
++wire transient_hit = transient_valid;
++wire stored_hit = valid[voice] && tag_q == address[31:5] &&
++                  cache_enable && !canceled && !invalidating_current;
++
++assign s_arready = state == IDLE;
++assign s_rvalid = state == REPLY || (state == BYPASS_R && m_rvalid);
++assign s_rdata = state == BYPASS_R ? m_rdata : data_q;
++assign s_rresp = state == BYPASS_R ? m_rresp : transient_error;
++assign s_rlast = state == BYPASS_R ? m_rlast : remaining == 8'd0;
++assign m_arvalid = state == FILL_AR || state == BYPASS_AR;
++assign m_araddr = state == FILL_AR ? {address[31:5],5'b0} : address;
++assign m_arlen = state == FILL_AR ? 8'd7 : remaining;
++assign m_rready = state == FILL_R || (state == BYPASS_R && s_rready);
++
++always @(posedge clk) begin
++    data_q <= data_mem[data_read_address];
++    tag_q <= tag_mem[tag_read_address];
++    if (fill_beat)
++        data_mem[{voice,fill_word}] <= m_rdata;
++    if (commit_line)
++        tag_mem[voice] <= address[31:5];
++end
++
++always @(posedge clk) begin
++    if (!reset_n) begin
++        valid <= 32'b0;
++    end else if (!cache_enable) begin
++        valid <= 32'b0;
++    end else begin
++        if (state == CHECK && !transient_hit && !stored_hit)
++            valid[voice] <= 1'b0;
++        if (commit_line)
++            valid[voice] <= 1'b1;
++        // Invalidation wins over a simultaneous refill commit.
++        if (invalidate_valid)
++            valid[invalidate_voice] <= 1'b0;
++    end
++end
++
++always @(posedge clk) begin
++    if (!reset_n) begin
++        state <= IDLE;
++        voice <= 0;
++        address <= 0;
++        remaining <= 0;
++        canceled <= 0;
++        data_read_address <= 0;
++        tag_read_address <= 0;
++        fill_word <= 0;
++        fill_error <= 0;
++        transient_valid <= 0;
++        transient_error <= 0;
++    end else begin
++        if (state != IDLE && (!cache_enable || invalidating_current))
++            canceled <= 1'b1;
++        case (state)
++            IDLE: if (accepted) begin
++                voice <= request_voice;
++                address <= s_araddr;
++                remaining <= s_arlen;
++                tag_read_address <= request_voice;
++                transient_valid <= 1'b0;
++                canceled <= invalidate_valid && invalidate_voice == request_voice;
++                // The mixer issues word-aligned requests. Be conservative
++                // for any other requester: preserve the original burst.
++                state <= cache_enable && request_cacheable && s_araddr[1:0] == 0
++                         ? TAG_WAIT : BYPASS_AR;
++            end
++            TAG_WAIT: state <= CHECK;
++            CHECK: begin
++                if (transient_hit || stored_hit) begin
++                    data_read_address <= {voice,address[4:2]};
++                    if (!transient_hit) begin
++                        transient_valid <= 1'b1;
++                        transient_error <= 2'b00;
++                    end
++                    state <= DATA_WAIT;
++                end else begin
++                    fill_word <= 3'd0;
++                    fill_error <= 2'b00;
++                    transient_valid <= 1'b0;
++                    state <= FILL_AR;
++                end
++            end
++            DATA_WAIT: state <= REPLY;
++            REPLY: if (s_rready) begin
++                if (remaining == 0) state <= IDLE;
++                else begin
++                    remaining <= remaining - 8'd1;
++                    address <= address + 32'd4;
++                    // The in-flight line is usable until this request
++                    // crosses its32-byte boundary, even if invalidated.
++                    if (address[4:2] == 3'd7) transient_valid <= 1'b0;
++                    // Adjacent interpolation taps often straddle a line and
++                    // repeat for several output samples. Fetching a whole
++                    // second line would evict the first and thrash on every
++                    // repetition. The final crossing word bypasses without
++                    // allocation, retaining the useful first line.
++                    state <= remaining == 8'd1 && address[4:2] == 3'd7
++                             ? BYPASS_AR : CHECK;
++                end
++            end
++            FILL_AR: if (m_arready) state <= FILL_R;
++            FILL_R: if (m_rvalid) begin
++                fill_error <= fill_error | m_rresp;
++                if (m_rlast) begin
++                    // Even an invalidated/error line can finish this one
++                    // accepted burst, but it never becomes a reusable line.
++                    transient_valid <= 1'b1;
++                    transient_error <= ending_error;
++                    state <= CHECK;
++                end else fill_word <= fill_word + 3'd1;
++            end
++            BYPASS_AR: if (m_arready) state <= BYPASS_R;
++            BYPASS_R: if (m_rvalid && s_rready && m_rlast) state <= IDLE;
++            default: state <= IDLE;
++        endcase
++    end
++end
++endmodule
++`default_nettype wire
+--- a/src/fpga/common/os30/axi_periph_slave.v
++++ b/src/fpga/common/os30/axi_periph_slave.v
+@@ -42,6 +42,8 @@
+     // the backend, so ONE os.bin runs on both.  Default 1 (HW mixer
+     // present); every current pocket variant and mister ship the HW mixer.
+     parameter INCLUDE_HW_MIXER   = 1,
++    // Optional immutable-SFX cache. Defaults off for all existing clients.
++    parameter INCLUDE_AUDIO_SAMPLE_CACHE = 0,
+     // GPU param-triangle (CMD_DRAW_PARAM_TRI 0x49) + the shared edge walker.
+     // Advertised in HW_FEATURES bit 19.  Must track gpu_core's
+     // INCLUDE_PARAM_TRI on the same target so apps don't submit 0x49 to a
+@@ -282,6 +284,7 @@
+     //   addr[11]=1, [7]=0      = control region (group/master/ctrl/irq)
+     //   addr[11]=1, [7]=1      = per-voice POS_INT readback
+     output reg         mix_enable,
++    output reg         mix_sample_cache_enable,
+     output reg         mix_voice_wr,
+     input  wire        mix_voice_ready,
+     output reg  [4:0]  mix_voice_sel,    // derived per-write from addr[10:6]
+@@ -2018,9 +2021,10 @@
+         5'h04: mixer_ctrl_rdata = {24'b0, mix_group_vol_3};       // 0x810
+         5'h05: mixer_ctrl_rdata = mix_voice_group_packed[31:0];   // 0x814
+         5'h06: mixer_ctrl_rdata = mix_voice_group_packed[63:32];  // 0x818
+-        5'h08: mixer_ctrl_rdata = {31'b0, mix_enable};            // 0x820
++        5'h08: mixer_ctrl_rdata = {30'b0, mix_sample_cache_enable, mix_enable}; // 0x820
+         5'h09: mixer_ctrl_rdata = mix_voice_end_pending;          // 0x824
+         5'h0C: mixer_ctrl_rdata = mix_active_mask;                // 0x830
++        5'h0D: mixer_ctrl_rdata = INCLUDE_AUDIO_SAMPLE_CACHE ? 32'h53434631 : 32'd0; // 0x834: SCF1
+         default: mixer_ctrl_rdata = 32'h0;
+     endcase
+ end
+@@ -2237,6 +2241,7 @@
+         /* Mixer (0x48) state — kept in this always block so all the
+          * mix_* drivers live in one process (Quartus 10028). */
+         mix_enable             <= 1'b0;
++        mix_sample_cache_enable <= 1'b0;
+         mix_voice_wr           <= 1'b0;
+         mix_voice_sel          <= 5'd0;
+         mix_voice_field        <= 4'd0;
+@@ -2495,7 +2500,10 @@
+                                 5'h04: mix_group_vol_3        <= req_wdata[7:0];
+                                 5'h05: mix_voice_group_packed[31:0]  <= req_wdata;
+                                 5'h06: mix_voice_group_packed[63:32] <= req_wdata;
+-                                5'h08: mix_enable             <= req_wdata[0];
++                                5'h08: begin
++                                    mix_enable <= req_wdata[0];
++                                    mix_sample_cache_enable <= INCLUDE_AUDIO_SAMPLE_CACHE && req_wdata[1];
++                                end
+                                 5'h09: begin
+                                     mix_irq_clear    <= req_wdata;
+                                     mix_irq_clear_wr <= 1'b1;
+--- a/src/fpga/common/os30/cpu_system.v
++++ b/src/fpga/common/os30/cpu_system.v
+@@ -309,9 +309,9 @@
+ localparam WR_PTR_W      = 2;  // log2(WR_FIFO_DEPTH)
+ localparam WR_CNT_W      = 3;  // log2(WR_FIFO_DEPTH+1)
+ 
+-reg [31:0] wr_addr_mem [0:WR_FIFO_DEPTH-1];
+-reg [31:0] wr_data_mem [0:WR_FIFO_DEPTH-1];
+-reg [3:0]  wr_mask_mem [0:WR_FIFO_DEPTH-1];
++(* ramstyle = "MLAB, no_rw_check" *) reg [31:0] wr_addr_mem [0:WR_FIFO_DEPTH-1];
++(* ramstyle = "MLAB, no_rw_check" *) reg [31:0] wr_data_mem [0:WR_FIFO_DEPTH-1];
++(* ramstyle = "MLAB, no_rw_check" *) reg [3:0]  wr_mask_mem [0:WR_FIFO_DEPTH-1];
+ // Equality with the preceding queue entry is fixed when an entry is pushed.
+ // Cache that comparison once instead of multiplexing and comparing three
+ // pairs of 36-bit address/mask values on the AW path. The oldest entry's
+@@ -437,9 +437,33 @@
+     lsu_aw_sent ? burst_awlen : presented_awlen;
+ wire                w_is_last = (burst_w_idx == eff_burst_awlen);
+ 
++// Payload reset is unnecessary: count/head validity masks empty entries.
++// Valid W reads occupied entries, enqueue writes the unoccupied tail; full
++// blocks enqueue, so no valid same-address read/write can occur.
++always @(posedge clk) begin
++    if (!reset && wr_push)
++        wr_data_mem[wr_tail] <= lsu_cmd_data;
++end
++
++// Valid head/W reads cannot alias the free tail. The comparison's second
++// read uses tail-1, which also cannot equal tail. Empty-head metadata is
++// ignored; each non-head match flag is computed against a written prior slot.
++always @(posedge clk) begin
++    if (!reset && wr_push) begin
++        wr_addr_mem[wr_tail] <= lsu_cmd_addr;
++        wr_mask_mem[wr_tail] <= lsu_cmd_mask;
++    end
++end
++
+ // Write FIFO push/pop and burst tracking.
+-integer wi;
+-wire [WR_PTR_W-1:0] wr_previous = wr_tail - 2'd1;
++reg [31:0] wr_previous_addr;
++reg [3:0] wr_previous_mask;
++always @(posedge clk) begin
++    if (!reset && wr_push) begin
++        wr_previous_addr <= lsu_cmd_addr;
++        wr_previous_mask <= lsu_cmd_mask;
++    end
++end
+ always @(posedge clk or posedge reset) begin
+     if (reset) begin
+         wr_head     <= {WR_PTR_W{1'b0}};
+@@ -452,19 +476,11 @@
+         burst_w_idx <= {WR_PTR_W{1'b0}};
+         awlen_held <= 1'b0;
+         held_awlen <= 0;
+-        for (wi = 0; wi < WR_FIFO_DEPTH; wi = wi + 1) begin
+-            wr_addr_mem[wi] <= 32'b0;
+-            wr_data_mem[wi] <= 32'b0;
+-            wr_mask_mem[wi] <= 4'b0;
+-        end
+     end else begin
+         if (wr_push) begin
+             wr_matches_prev[wr_tail] <=
+-                (lsu_cmd_addr == wr_addr_mem[wr_previous]) &&
+-                (lsu_cmd_mask == wr_mask_mem[wr_previous]);
+-            wr_addr_mem[wr_tail] <= lsu_cmd_addr;
+-            wr_data_mem[wr_tail] <= lsu_cmd_data;
+-            wr_mask_mem[wr_tail] <= lsu_cmd_mask;
++                (lsu_cmd_addr == wr_previous_addr) &&
++                (lsu_cmd_mask == wr_previous_mask);
+             wr_tail              <= wr_tail + {{(WR_PTR_W-1){1'b0}}, 1'b1};
+         end
+ 
+--- a/src/fpga/targets/pocket/ap_core.qsf
++++ b/src/fpga/targets/pocket/ap_core.qsf
+@@ -892,6 +892,7 @@
+ # audio_mixer.v v2 - hardware voice mixer, SDRAM sample fetch (resurrected post-f11811c).
+ # audio_dma.v retired (v1 pre-mixed ring DMA); HW mixer now drives the FIFO directly.
+ set_global_assignment -name VERILOG_FILE ../../common/os30/audio_mixer.v
++set_global_assignment -name VERILOG_FILE ../../common/os30/audio_sample_cache.v
+ # cram1_controller.v / cram1_phy.sv / axi_cram1_slave.v / bridge_to_cram1.v /
+ # cram1_burst_mmio.v retired in memory-arch v2.
+ set_global_assignment -name VERILOG_FILE audio_output.v
+@@ -998,7 +999,8 @@
+ set_global_assignment -name VERILOG_MACRO INCLUDE_DIRECT_COLOR
+ set_global_assignment -name VERILOG_MACRO INCLUDE_Z_BURST
+ set_global_assignment -name VERILOG_MACRO VEXII_CPU_OS30
+-set_global_assignment -name VERILOG_MACRO NATIVE_MESH_SILENT_AUDIO
++set_global_assignment -name VERILOG_MACRO INCLUDE_HW_MIXER
++set_global_assignment -name VERILOG_MACRO INCLUDE_AUDIO_SAMPLE_CACHE
+ set_global_assignment -name VERILOG_MACRO INCLUDE_TEX_MEM
+ # Color blend destination read window: use existing four-word default.
+ set_global_assignment -name VERILOG_MACRO INCLUDE_VI_FILTER
+@@ -1042,3 +1044,14 @@
+ 
+ # Experimental native billboard command path.
+ set_global_assignment -name VERILOG_MACRO INCLUDE_GPU_PARTICLES
++
++# Isolated area-synthesis experiment; retain all clocks and SDCs.
++set_global_assignment -name OPTIMIZATION_TECHNIQUE AREA
++
++# Targeted timing qualification of tested audio lifetime/read-address cleanup.
++set_global_assignment -name PHYSICAL_SYNTHESIS_COMBO_LOGIC ON
++set_global_assignment -name PHYSICAL_SYNTHESIS_EFFORT FAST
++
++set_global_assignment -name PHYSICAL_SYNTHESIS_COMBO_LOGIC OFF
++set_global_assignment -name PHYSICAL_SYNTHESIS_EFFORT NORMAL
++set_instance_assignment -name PHYSICAL_SYNTHESIS_COMBO_LOGIC ON -to ic|cpu|cpu
+--- a/src/fpga/targets/pocket/os30/core_top.v
++++ b/src/fpga/targets/pocket/os30/core_top.v
+@@ -2703,6 +2703,7 @@
+         // at boot.  Bit 0 (OF_HW_MIXER, "mixer available") stays SET in both
+         // cases.  OS25/MiSTer keep the HW mixer → INCLUDE_HW_MIXER 1.
+         .INCLUDE_HW_MIXER(`ifdef INCLUDE_HW_MIXER 1 `else 0 `endif),
++        .INCLUDE_AUDIO_SAMPLE_CACHE(`ifdef INCLUDE_AUDIO_SAMPLE_CACHE 1 `else 0 `endif),
+         // Triangle extras.  OS25 includes none of them (only Quake1 emits 0x49,
+         // and it falls back to SW alias rendering); OS30 (Quake2) includes
+         // PARAM_TRI/VERT_TRI/PARAM_TRI_RECS but NOT column/compact (Quake2
+@@ -2853,6 +2854,7 @@
+         .audio_sample_data      (periph_audio_sample_data),
+         // Hardware mixer MMIO ↔ audio_mixer (flat addressing, 0x4B000000)
+         .mix_enable             (mixer_enable_mmio),
++        .mix_sample_cache_enable (mixer_sample_cache_enable),
+         .mix_voice_wr           (mixer_voice_wr_mmio),
+         .mix_voice_ready        (mixer_voice_ready_mmio),
+         .mix_voice_sel          (mixer_voice_sel_mmio),
+@@ -3586,6 +3588,7 @@
+ 
+ // MMIO-driven voice programming signals (from axi_periph_slave).
+ wire        mixer_enable_mmio;
++wire        mixer_sample_cache_enable;
+ wire        mixer_voice_wr_mmio;
+ wire        mixer_voice_ready_mmio;
+ wire [4:0]  mixer_voice_sel_mmio;
+@@ -3625,6 +3628,12 @@
+ assign mixer_arlen             = 8'd0;
+ assign mixer_rready            = 1'b0;
+ `else
++wire mixer_source_arvalid, mixer_source_arready, mixer_source_rvalid, mixer_source_rlast, mixer_source_rready;
++wire [31:0] mixer_source_araddr, mixer_source_rdata;
++wire [7:0] mixer_source_arlen;
++wire [1:0] mixer_source_rresp;
++wire [4:0] mixer_fetch_voice;
++wire mixer_fetch_cacheable;
+ audio_mixer audio_mixer_inst (
+     .clk              (clk_cpu),
+     .reset_n          (reset_n_cpu_media),
+@@ -3641,15 +3650,15 @@
+     .group_vol_2      (mixer_group_vol_2_mmio),
+     .group_vol_3      (mixer_group_vol_3_mmio),
+     .voice_group_packed(mixer_voice_group_packed_mmio),
+-    .m_arvalid        (mixer_arvalid),
+-    .m_arready        (mixer_arready),
+-    .m_araddr         (mixer_araddr),
+-    .m_arlen          (mixer_arlen),
+-    .m_rvalid         (mixer_rvalid),
+-    .m_rdata          (mixer_rdata),
+-    .m_rresp          (mixer_rresp),
+-    .m_rlast          (mixer_rlast),
+-    .m_rready         (mixer_rready),
++    .m_arvalid        (mixer_source_arvalid),
++    .m_arready        (mixer_source_arready),
++    .m_araddr         (mixer_source_araddr),
++    .m_arlen          (mixer_source_arlen),
++    .m_rvalid         (mixer_source_rvalid),
++    .m_rdata          (mixer_source_rdata),
++    .m_rresp          (mixer_source_rresp),
++    .m_rlast          (mixer_source_rlast),
++    .m_rready         (mixer_source_rready),
+     .sample_wr        (mixer_sample_wr),
+     .sample_data      (mixer_sample_data),
+     .fifo_level       (audio_fifo_level),
+@@ -3658,8 +3667,38 @@
+     .irq_clear        (mixer_irq_clear_mmio),
+     .voice_end_pending(mixer_voice_end_pending),
+     .voice_end_irq    (),
+-    .voice_active_mask(mixer_active_mask)
++    .voice_active_mask(mixer_active_mask),
++    .fetch_voice(mixer_fetch_voice),
++    .fetch_cacheable(mixer_fetch_cacheable)
+ );
++`ifdef INCLUDE_AUDIO_SAMPLE_CACHE
++// Default-off cache for immutable SFX; streaming reads always bypass it.
++// MIX_CTRL[1] is an explicit application opt-in, advertised at MIX+0x834.
++audio_sample_cache mixer_sample_cache (
++    .clk(clk_cpu), .reset_n(reset_n_cpu_media),
++    .cache_enable(mixer_sample_cache_enable && mixer_enable_mmio),
++    .request_voice(mixer_fetch_voice), .request_cacheable(mixer_fetch_cacheable),
++    .invalidate_valid(mixer_voice_wr_mmio), .invalidate_voice(mixer_voice_sel_mmio),
++    .s_arvalid(mixer_source_arvalid), .s_arready(mixer_source_arready),
++    .s_araddr(mixer_source_araddr), .s_arlen(mixer_source_arlen),
++    .s_rvalid(mixer_source_rvalid), .s_rready(mixer_source_rready),
++    .s_rdata(mixer_source_rdata), .s_rresp(mixer_source_rresp), .s_rlast(mixer_source_rlast),
++    .m_arvalid(mixer_arvalid), .m_arready(mixer_arready), .m_araddr(mixer_araddr), .m_arlen(mixer_arlen),
++    .m_rvalid(mixer_rvalid), .m_rready(mixer_rready), .m_rdata(mixer_rdata),
++    .m_rresp(mixer_rresp), .m_rlast(mixer_rlast)
++);
++`else
++assign mixer_arvalid = mixer_source_arvalid;
++assign mixer_source_arready = mixer_arready;
++assign mixer_araddr = mixer_source_araddr;
++assign mixer_arlen = mixer_source_arlen;
++assign mixer_source_rvalid = mixer_rvalid;
++assign mixer_source_rdata = mixer_rdata;
++assign mixer_source_rresp = mixer_rresp;
++assign mixer_source_rlast = mixer_rlast;
++assign mixer_rready = mixer_source_rready;
++`endif
++
+ `endif
+ 
+ // cram1_burst_mmio retired with CRAM1 chip; 0x4E000000 MMIO slot is

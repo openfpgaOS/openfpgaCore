@@ -1,0 +1,19 @@
+{
+  "passed": true,
+  "source_fingerprint": "f63613efe348448c45af303972d6804a41d15724ac3a716f17eff4b40e6eb2d3",
+  "rows": [
+    {
+      "new": "integrated-final-ring-v1",
+      "previous": "integrated-reuse-readaddr-fast-v1",
+      "exact_results": true,
+      "results_sha256": "df61797b4c2d9f2e4a02fe96d0f05f65217e7cdd2c247fb4231684b142cc2dfe"
+    },
+    {
+      "new": "integrated-final-ring-all22-v1",
+      "previous": "integrated-reuse-readaddr-all22-v1",
+      "exact_results": true,
+      "results_sha256": "160d755e32bb1be9de2b38aa3d563429c3cdfb0102c4c4b39aa9a2d3bc6d5291"
+    }
+  ],
+  "scope": "52 sustained 400 ms synthetic cases; exact PCM and timing/bus/underrun statistics. No game FPS or physical interface claim."
+}

@@ -1,0 +1,48 @@
+{
+  "status": "PASS_ACTUAL_EXTRACTED_DEPTH_QUEUE",
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/tests/run_queue.py": "6af584fa24d991006bd08a3ea462092d76b8c961cec9be19bd3f7cd0ed5a90e6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/tests/test_depth_queue.cpp": "b878e9f1d44808ffa670f24c0878a322aa08fba21499844aa7e579285e765799",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/work/gpu_core.v": "56ab019679f812cdce2020b34085e0238ef9ab3ebc97c92394f6aae102f9c0c7"
+  },
+  "extracted_block_sha256": "8cef227ca1ddea4a970b033eb4e510b830f18a286b0b59431cb2aa3aab501dc6",
+  "generated_wrapper_sha256": "a7ad84c865a241baf7c0628d926537e20b2a0e1dea47c90fce113389886683e9",
+  "executable_sha256": "7f0354d0e603391da9efae935aa3778c80a5f1a869f34b73ff9e46ea6b329419",
+  "command": [
+    "verilator",
+    "--cc",
+    "--exe",
+    "--build",
+    "--assert",
+    "-j",
+    "3",
+    "-Wno-fatal",
+    "--top-module",
+    "depth_queue",
+    "--Mdir",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/tests/queue-v1/obj",
+    "-CFLAGS",
+    "-std=c++17 -O2",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/tests/queue-v1/depth_queue.v",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/depth-hazard-v1/tests/test_depth_queue.cpp"
+  ],
+  "result": {
+    "pass": true,
+    "cycles": 152255,
+    "checks": 723153,
+    "pushes": 100117,
+    "pops": 98933,
+    "simultaneous_push_pop": 65261,
+    "pointer_wraps": 12294,
+    "safe_queries": 47379,
+    "same_word_queries": 68908,
+    "same_line_queries": 67334,
+    "conservative_hash_aliases": 5420,
+    "holding_guard_queries": 57695,
+    "pending_commit_pop": 5425,
+    "full_queue_cycles": 2776,
+    "resets": 152,
+    "ring_resets_preserved": 446
+  },
+  "scope": "Unmodified source-marked queue/pending block with independent full-address FIFO model. Legal producer/pop controls and query tag supplied by harness; full GPU FSM/tag pipeline wiring and downstream cache ordering tested in separate layers. Hash aliases conservatively wait; masks do not bypass hazards. Ring reset intentionally leaves queue/tracker intact."
+}

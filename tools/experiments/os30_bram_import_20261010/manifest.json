@@ -1,0 +1,76 @@
+{
+  "status": "EXPERIMENTAL_NOT_PROMOTED",
+  "scope": "os30 only; no deployed bitstream or production source change",
+  "patches": {
+    "core.patch": {
+      "base": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen",
+      "candidate": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/bram-import-v1/physical-snapshot-v1/frozen",
+      "files": {
+        "src/fpga/common/os30/geometry_bram_import.v": {
+          "before_sha256": null,
+          "after_sha256": "4c89941b527ff02cf2f8b409db730b3a0b82872651c4c3d79ae1ab0152456586"
+        },
+        "src/fpga/common/os30/geometry_import_convert.v": {
+          "before_sha256": null,
+          "after_sha256": "3beac876e469ec45ff3d3e81c9645671dcb92737d1f84dd188ca454fbbcf7526"
+        },
+        "src/fpga/common/os30/geometry_import_view.v": {
+          "before_sha256": null,
+          "after_sha256": "937f80db1ec005f22d91b7df384ebd5258c97d494e9009cbc13ae1ac53eaa128"
+        },
+        "src/fpga/common/os30/gpu_core.v": {
+          "before_sha256": "bb1143c3d6a42f6d209a59d220b373ce8ef6ef1d69dce7f10f400c30cf7810ee",
+          "after_sha256": "7b512b95c060714694e032d160d654e31c53936069f2790bb1f84586566110ac"
+        },
+        "src/fpga/common/os30/phase10_load_alias.v": {
+          "before_sha256": "298dc6470719159e9b85aa90a6879ea41d78b32fae2fdb7dea580cd4980cec6a",
+          "after_sha256": "2e898607d90e6f0b01addf220812ec78518eaa91d0896f6adfaf6f1e940f80f5"
+        },
+        "src/fpga/targets/pocket/os30/core_top.v": {
+          "before_sha256": "25d5b5966aea68cafce7db5a716cc5640190b8db928785304b1078905db40802",
+          "after_sha256": "e572870351dd77be158414a244492fc8f61ab42eb3c8b18d27b912b494cd3a37"
+        }
+      },
+      "exact_patch_roundtrip": true
+    },
+    "sm64.patch": {
+      "base": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/sm64",
+      "candidate": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/bram-import-v1/work/sm64-v7",
+      "files": {
+        "src/sdk/include/of_gpu.h": {
+          "before_sha256": "045dda5b533d5959b89cbd281b4a8d2f86a3205067426d0eaf08a3ae4c9108ad",
+          "after_sha256": "7e4b105e444b7307b36010da87749eff445650b6983283eeab9223e6af3dc01d"
+        },
+        "src/sm64/sm64/src/pc/gfx/gfx_gpu.c": {
+          "before_sha256": "6d3d4496f779367bc5ed17c62a52e89c4e92ae7d7ab70d02654289888284adc1",
+          "after_sha256": "3ac6a7e7ca8d0271574cc55539001d1b3cad0c5cc0119ed48d001689d7df4a27"
+        },
+        "src/sm64/sm64/src/pc/gfx/gfx_gpu.h": {
+          "before_sha256": "9c718d4b7da17511afe41fd3d6ba2ad179acac6e7072716912e1919bc7358199",
+          "after_sha256": "facce72508262dd08686de52bc6993c31f4c2d4a111554801a2b6a1c4aae5887"
+        },
+        "src/sm64/sm64/src/pc/gfx/gfx_pc.c": {
+          "before_sha256": "b4de4dbbdcea642607d57884e7338a4110ded73310f9455b2532d5a4bbae621d",
+          "after_sha256": "d3261809fd08f8fd0359af2a80e2f0e802c562f85b09dd2968b1c02a29af9eaf"
+        },
+        "src/sm64/pocket/perf_pocket.c": {
+          "before_sha256": "33d5e776ef5ee3cc7d0eee85b15f7d5e3ebe8fe31f323b11b70992ac4dd8b3f2",
+          "after_sha256": "05212e5580ea5e124e88853f1f2384891507e46b6e505ccbe18e8409d737ef6e"
+        }
+      },
+      "exact_patch_roundtrip": true
+    }
+  },
+  "files": {
+    "core.patch": "3d1a32242c49c7207489ea146ab609354c209f1afb74794ef965aaf253d55c85",
+    "core.patch.check.txt": "d59faeb6a38372d9c4521fc59609122a05142cd25d1b8efcd9fc110ec16381d3",
+    "sm64.patch": "cde5c158d4530aa441ae5394ec84de0a2f967be6d45b5e86ca687065901cd963",
+    "sm64.patch.check.txt": "7d7f94cadf44912beae8b4f78877c7d86a20649d795fee80414b6935a34c0c62",
+    "abi.json": "e0122cb7b0465a8274e71db0a1c665ef9f99c41e9629ade0b32f145dd6443032",
+    "architecture-assessment.json": "aea6ff7276fff26729e78680e361b6eb7e5daf450741422014f8c47b14a399f9",
+    "results.json": "7209a5606f536bbc7f9771ccbe32104a04a7d1504006e99e85bcb375c195c216",
+    "REPORT.txt": "9fca2f94a1ea8d602e34463efa99a988ad8a1bfdca194a1d446b963a4ae75adc",
+    "README.txt": "f6c9a3de3294e9a9c5e1424a2ea3793ae01a1ed918f054e36c46ed0c50f73378",
+    "verify.py": "5d805d38505c006c0dd931cec6edb1c890c653364f00dc0481dbb24a4b70d564"
+  }
+}

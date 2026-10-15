@@ -1,0 +1,100 @@
+{
+  "scope": "Read-only architecture assessment through softwarev6. Softwarev7 result pending. No RTL edits or physical compilation.",
+  "recommendation": "Ifv7 gives no measured warm-frame improvement, retain the qualified baseline and do not fit or promote BIM2 merely because transport and ownership are correct.",
+  "already_offloaded_in_baseline": [
+    "Raw vertex transform, reciprocal, and supported lighting through LOAD engine.",
+    "GPU projection and indexed-triangle rasterization."
+  ],
+  "direct_import_removes_for_accepted_supported_dirty_slots": [
+    "CPU UV offset/bias arithmetic and fixedpoint conversion.",
+    "CPU clip X/Y/W and depth fixedpoint conversions, RGB565 packing, prepared-payload stores.",
+    "Nine-word0x56 load packets are replaced with three-word0x5E references, plus six words of shared context/release per batch."
+  ],
+  "CPU_work_retained": [
+    "Display-list decode and matrix/material/texture/light state updates.",
+    "LOAD eligibility and source-pool checks, dirty control writes, start/completion handling, alias cache invalidation.",
+    "Full eight-word raw-result readback and nine-word canonical vertex store per successful LOAD; packed int16 UVs are still converted to float.",
+    "Exact per-triangle clip rejection and CPU floating-point culling/cross products.",
+    "Material/alpha eligibility, W/clip tests, stale-slot masks, job construction, bounded run splitting, compatibility/fallback selection.",
+    "Import supported-range scans, claim/status/token MMIO and command publication; CPU preparation remains for rejected claims, older partial-LOAD slots and unsupported materials.",
+    "Game logic, texture management, clipping/fog fallback, audio and other frame work."
+  ],
+  "GPU_work_retained": [
+    "Existing reciprocal/projection path, triangle setup, raster traversal and fragment/depth/color work.",
+    "Importer itself adds synchronous snapshot reads and format conversion before reusing existing projection."
+  ],
+  "decoupling_result": "Snapshotv1/v2 application counters record zero raw-copy wait entries and polls. GPU-held snapshots no longer serialize the next raw LOAD.",
+  "measured_pairs": [
+    {
+      "baseline": {
+        "name": "baseline-v5",
+        "warm_cycles": 4303590,
+        "warm_upload_words": 23000,
+        "warm_retired": 2080548,
+        "gpu_projection_cycles": 72716
+      },
+      "candidate": {
+        "name": "snapshot-v1",
+        "warm_cycles": 4372522,
+        "warm_upload_words": 19196,
+        "warm_retired": 2139208,
+        "gpu_projection_cycles": 72716
+      },
+      "warm_cycle_delta": 68932,
+      "warm_cycle_percent": 1.6017325070464494,
+      "warm_upload_word_reduction_percent": 16.539130434782614
+    },
+    {
+      "baseline": {
+        "name": "baseline-v6",
+        "warm_cycles": 4317744,
+        "warm_upload_words": 23000,
+        "warm_retired": 2088901,
+        "gpu_projection_cycles": 72716
+      },
+      "candidate": {
+        "name": "snapshot-v2",
+        "warm_cycles": 4389211,
+        "warm_upload_words": 21788,
+        "warm_retired": 2154713,
+        "gpu_projection_cycles": 72716
+      },
+      "warm_cycle_delta": 71467,
+      "warm_cycle_percent": 1.6551930823133665,
+      "warm_upload_word_reduction_percent": 5.269565217391303
+    }
+  ],
+  "bounded_budget": {
+    "baseline_v5_warm_cycles": 4303590,
+    "canonical_copy_retirement_gap_cycles": 200977,
+    "fraction_percent": 4.669984826621495,
+    "interpretation": "Only an optimistic local removal budget if all other timing stayed unchanged. Function retirement-gap attribution is observational and is not a causal wall-time speedup bound. No FPS claim.",
+    "indexed_run_retirement_gap_cycles": 580374,
+    "indexed_run_caveat": "Includes cull, material, tracking and preparation. Quantization is inlined and not separately isolated, so the whole bucket cannot be called removable conversion."
+  },
+  "larger_architecture_requirement": "Removing canonical readback requires exact cull metadata and a lazy fallback/lifetime design for fog, clipping, material changes and surviving partial LOAD slots. Keeping snapshots alive for those CPU consumers could reintroduce bank pressure. It is a separate design, not deleting the current copy call.",
+  "physical_limit": {
+    "baseline_ALMs": 18169,
+    "device_ALMs": 18480,
+    "ALM_headroom": 311,
+    "baseline_M10Ks": 304,
+    "device_M10Ks": 308,
+    "expected_snapshot_M10Ks": 2,
+    "baseline_Fmax_MHz": 90.28,
+    "configured_MHz": 90,
+    "candidate_fit_or_timing_qualified": false
+  },
+  "inputs_sha256": {
+    "docs/measurements/os30-psram32-20261009/bram-import-v1/work/sm64-v6/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "6f42df20599a899000ccad623a8621a948d36652a56ff14a1910c952de5a9e92",
+    "docs/measurements/os30-psram32-20261009/bram-import-v1/work/sm64-v6/src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "adf25a45feadbadd309cbf2b166b93ac763fc793c49e8864962c5e2d8c883ffd",
+    "docs/measurements/os30-psram32-20261009/bram-import-v1/review/snapshot-v1-cost-analysis.json": "7b25ee6eb07e815c17a5eeea6f8970be8edf856b869b5ae30f0f6922bf2bc62b",
+    "docs/measurements/os30-psram32-20261009/bram-import-v1/baseline-v5/run/boundaries.tsv": "4a2f17799c93e8a75039dea4b7714e68cac7c9ec430854ec54dc45c45e5913c4",
+    "docs/measurements/os30-psram32-20261009/bram-import-v1/baseline-v5/run/gpu-profile.json": "e8333218dd7668dd6217577418133d23339d24716eb474c6e63b57191f0c8905",
+    "docs/measurements/os30-psram32-20261009/bram-import-v1/snapshot-v1/run/boundaries.tsv": "4a99c199fd8eeeafa1e15cb3b41e346e99e0d2c4b235f1861972679412102847",
+    "docs/measurements/os30-psram32-20261009/bram-import-v1/snapshot-v1/run/gpu-profile.json": "a90b11d1963e043b68ae68c14c709662467eacbc0ed7a3aa0314c6994469d06a",
+    "docs/measurements/os30-psram32-20261009/bram-import-v1/baseline-v6/run/boundaries.tsv": "2cf1132f781cf2700013f18c2f2d271e32a81452e2670131212481b9a90ab951",
+    "docs/measurements/os30-psram32-20261009/bram-import-v1/baseline-v6/run/gpu-profile.json": "d57e44fa7a78a63e769a805c00efe8891302b047156199c414fb7e09e3e3eecd",
+    "docs/measurements/os30-psram32-20261009/bram-import-v1/snapshot-v2/run/boundaries.tsv": "66ae0c54f6e4ceae396649f0ed5d44ab7ad1ccc29b98856892bbd89c456bcdb4",
+    "docs/measurements/os30-psram32-20261009/bram-import-v1/snapshot-v2/run/gpu-profile.json": "4c6d7c7c4b731e0fdd8dad46e967d876f7eac30f323b3cbc61c74eff9ba73eda"
+  }
+}

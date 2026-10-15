@@ -1,0 +1,225 @@
+{
+  "status": "FUNCTIONAL_STREAMED_COMPONENT_QUALIFIED_NO_APP_INTEGRATION_OR_FIT_CLAIM",
+  "implemented_chain": [
+    "Original F3DEX2 VTX header decoding and count/destination validation in RTL",
+    "Hardware two-word original-command prefetch after rawLOAD, sharing one sequential AXI read master; no CPU pertriangle feed loop",
+    "One controller launches and owns actual baseline raw DMA, transform/light, reciprocal and exact shared-FMA culler",
+    "Original TRI1/TRI2 command words decoded in RTL; own-loaded slot and whole64triangle budget validation",
+    "Whole-span cull/preflight, retained survivor list and raw view; no output on fallback",
+    "Root packet consumer prevalidates all used raw values/list entries and emits ordinary0x56/0x54 commands under backpressure"
+  ],
+  "source_bindings": "source-manifest.json; final hardware stream receipt tests/scene-stream-v2/manifest.json",
+  "context_contract": {
+    "matrix": "Sixteen initialized words are written while idle; writes are blocked while task owns raw state. Matrix can persist across tasks.",
+    "scalars": "Aspect, lighting coefficients/RGB, lighting enable and UV scales captured at task acceptance. Packet RGB/UV/filter flags captured at packet start.",
+    "unsupported_features": "Captured task-level context descriptor flags. The prototype does not yet extract or classify live SM64 material state; this must not become CPU pertriangle admission.",
+    "source": "Original24-byte vertices and original8-byte command records immutable until matching task completion/repair ACK. Current CRAM pool recycle needs a worker drain or source lease.",
+    "command_source": "Command source is captured once and read in hardware as original8-byte TRI1/TRI2 records. Default native guest window is parameterized and forwarded to both vertex and command DMA; eventual physical PSRAM offset window must be configured explicitly."
+  },
+  "ownership": {
+    "accept": "task_valid&&task_ready owns source/context and existing raw bank",
+    "preflight": "Every requested command checked before preflight_valid; TRI2 and entire task atomic with respect to output",
+    "success": "Packet launch automatically reserves raw/list ports, preventing debug-port theft. Owner ACK is blocked until packet completion and all command reads drain; serial must match.",
+    "fallback": "No task packet emitted; in-flight command prefetch is canceled and drained before fallback becomes visible. Source/context/raw retained through matching ordered repair ACK.",
+    "cancel": "Cancel wins against first packet launch on the same edge. After accepted packet launch ordinary cancel is ignored and one publication completes; duplicate launch is blocked. Coupled fabric/consumer reset required to discard a published prefix.",
+    "reset": "Only coupled fabric reset resets accepted raw AXI state; no async consumer-only reset integration in this prototype."
+  },
+  "fallback_reasons": {
+    "1": "invalidVTX/task shape",
+    "2": "unsupported captured context or incomplete matrix",
+    "3": "rawDMA error",
+    "4": "rawtransform/light/reciprocal unsupported",
+    "5": "unsupported command or out-of-range encoded index",
+    "6": "reference outside this LOADs slots",
+    "7": "more than64triangles",
+    "8": "kept partial-clipped triangle",
+    "9": "kept bad/equal W triangle",
+    "10": "cull arithmetic unsupported",
+    "11": "other triangle eligibility failure",
+    "14": "cancel after outstanding work drained"
+  },
+  "resource_ledger": {
+    "qualified_baseline": {
+      "used_ALMs": 18169,
+      "device_ALMs": 18480,
+      "ALM_spare": 311,
+      "used_M10Ks": 304,
+      "device_M10Ks": 308,
+      "M10K_spare": 4,
+      "used_DSPs": 45,
+      "device_DSPs": 66,
+      "Fmax_MHz": 90.28,
+      "seed": 3
+    },
+    "existing_reused": [
+      "OneGeometryFmaProbe, existing reciprocal/UV/color arithmetic",
+      "Existing raw positions96x32, accumulator128x32, context64x32 and attribute128x32 storage, W queue",
+      "Existing raw AXI burst reader: can share at task boundaries with command fetch",
+      "Existing CPU/GPU ingress ring and GPU raster/cache"
+    ],
+    "new_in_current_controller": "One128x32 survivor RAM. Command fetch uses two word registers and sequential AXI owner control, no additionalBRAM. Scalar/control registers and converter ALMs remain unfitted; several replace baseline orQGF ownership state.",
+    "proposed_complete_path_M10Ks": {
+      "output512x32_FIFO": 2,
+      "survivors_and_command_chunk128x32": 1,
+      "remaining_immutable_context_queue_budget": 1,
+      "maximum_added_if_realized": 4
+    },
+    "removed_relative_QGF": [
+      "Two snapshot banks512x32 (two M10Ks)",
+      "Snapshot copier, generation/bank lease metadata and CPU Wfingerprint/importable planes",
+      "Competing CPU rawproducer/GPU snapshot reader arbitration"
+    ],
+    "no_new_FPU_or_DSP": "Actual engine has one shared FMA across LOAD and cull; phases sequential. Packet converter adds combinational logic, no BRAM.",
+    "not_qualified": [
+      "311ALM headroom is tight; controller/command DMA mux/output FIFO/converter fit unproven",
+      "NoQuartus build, noclock/FPS improvement claim",
+      "Port arithmetic/register counts cannot substitute for final synthesized physical fit"
+    ]
+  },
+  "next_integration": [
+    "Submit immutable coarse task/context descriptors from the real app before any synchronous LOAD, canonical readback or CPU pertriangle admission. Resolve task-level supported material without rescanning triangles.",
+    "Preserve exact deferred/cold material preparation and viewport/surface ordering; controlledmaterial packet comparisons do not establish actual raster-state binding.",
+    "Implement task-local ordered clipping/equal-W/exception repair or an explicit safe CPU state barrier. Retain raw/source/context until completion/repair and drain vertex-source pool recycle.",
+    "Queue credits, real memory contention, GPU/raster scheduling and CPU progress must be exercised by a paired native fullframe replay. Only a useful measured gain justifies area/timing fit; no sweep is proposed."
+  ],
+  "tests": [
+    {
+      "receipt": "tests/engine-v4/manifest.json",
+      "sha256": "d16dd0a269fb7f52020981f10e717d814cbb071423bf99884a69fadbb2c2b995",
+      "status": "PASS",
+      "result": {
+        "status": "PASS",
+        "tasks": 13,
+        "checks": 1797,
+        "cycles": 2175,
+        "AXI_bursts": 23,
+        "AXI_beats": 214
+      },
+      "scope": "Actual baseline raw LOAD, DMA, transform/light, reciprocal and shared exact culler under bounded controller; synthetic contexts; no GPU/frame timing claim."
+    },
+    {
+      "receipt": "tests/controller-v3/manifest.json",
+      "sha256": "a708d6b386316d2ae6952732bb7a9e25ff708b5277d5ea1136660485829d643d",
+      "status": "PASS",
+      "result": {
+        "status": "PASS",
+        "tasks": 319,
+        "triangles": 2459,
+        "checks": 11111,
+        "cycles": 57395,
+        "LOAD_launches": 325,
+        "cull_requests": 2589
+      },
+      "scope": "Actual task controller with actual original frame360 command bytes and independent CPU-decoded index oracle. LOAD/cull responses modeled with random legal delay; actual arithmetic separately tested."
+    },
+    {
+      "receipt": "tests/chain-v1/manifest.json",
+      "sha256": "94ce9356d2ae33e6333c005d8682d3720f13896747c9a9d239266c4921c85028",
+      "status": "PASS",
+      "result": {
+        "status": "PASS",
+        "tasks": 13,
+        "checks": 2702,
+        "cycles": 3125,
+        "AXI_bursts": 23,
+        "AXI_beats": 214
+      },
+      "scope": "Actual baseline LOAD/DMA/shared FMA/culler plus actual packet converter, synthetic contexts, original TRI input, ordinary GPU packets with randomized backpressure; no GPU raster/frame timing or live-scene context claim."
+    },
+    {
+      "receipt": "tests/scene-cull-oracle-v1/manifest.json",
+      "sha256": "b40fcea95b94252aa0187ba8ded612a31933969e67a094fe249d066ffb3311f0",
+      "status": "PASS_ACTUAL_CURRENT_CPU_SCENE_CULL_ORACLE",
+      "result": {
+        "vectors": 4918
+      },
+      "scope": "Captured transformed triangle operands executed through exact unchanged native CPU nineoperation cull kernel. No sourceDMA or packet test; consumed separately by mesh chain."
+    },
+    {
+      "receipt": "tests/scene-chain-v1/manifest.json",
+      "sha256": "d582790692c975938d523b1d1bb607e08532972a5088be46c834b3e36d120031",
+      "status": "PASS",
+      "result": {
+        "status": "PASS",
+        "tasks": 638,
+        "accepted_geometry_tasks": 488,
+        "fallback_tasks": 150,
+        "triangles": 4918,
+        "kept_triangles": 1511,
+        "raw_words_compared": 64544,
+        "packet_words_compared": 26377,
+        "checks": 232516,
+        "cycles": 876211
+      },
+      "scope": "Actual baseline rawLOAD/DMA/sharedFMA/culler with exact638captured instancecontexts and24Binputs. Allraw8word outputs compared to unchanged native baseline, survivor order to current CPU arithmetic oracle. Every ordinary emitted packet compared to independent conversion under controlled materialflags; actual material/raster binding, command DMA, CPUrepair/fullframe performance not covered."
+    },
+    {
+      "receipt": "tests/scene-stream-v2/manifest.json",
+      "sha256": "6cd54b0bef07f7af91bb557840a947fd3f99cc2cae1200153a044a2b9d18a8c1",
+      "status": "PASS",
+      "result": {
+        "status": "PASS",
+        "tasks": 638,
+        "accepted_geometry_tasks": 488,
+        "fallback_tasks": 150,
+        "triangles": 4918,
+        "kept_triangles": 1511,
+        "raw_words_compared": 64544,
+        "packet_words_compared": 26377,
+        "checks": 237402,
+        "cycles": 878404
+      },
+      "scope": "Actual baseline rawLOAD/DMA/sharedFMA/culler with exact638captured instancecontexts and24Binputs. Allraw8word outputs compared to unchanged native baseline, survivor order to current CPU arithmetic oracle. Every ordinary emitted packet compared to independent conversion under controlled materialflags; Hardware command DMA shares AXI sequentially after raw LOAD; early fallback drains prefetch before ACK. Actual material/raster binding and CPUrepair/fullframe performance not covered."
+    },
+    {
+      "receipt": "tests/stream-control-v3/manifest.json",
+      "sha256": "a3f3e19b2fdfecf6d2d0f3ef75bb43180091b5710177f8689f95e0d9f9b25224",
+      "status": "PASS",
+      "result": {
+        "status": "PASS",
+        "cases": 6,
+        "checks": 594,
+        "cycles": 1529,
+        "AXI_bursts": 20,
+        "AXI_beats": 125
+      },
+      "scope": "Actual baseline LOAD/DMA/shared FMA/culler plus actual packet converter, directed sequential-AXI ownership/cancel/prefetch-drain/late-RLAST/recovery tests. No GPU raster/frame timing claim."
+    }
+  ],
+  "per_phase_geometry": {
+    "1": {
+      "tasks": 319,
+      "input_triangles": 2459,
+      "raw_words_compared": 32272,
+      "CPU_cull_rejected": 1028,
+      "CPU_kept_before_scope": 1000,
+      "fallback_tasks": 75,
+      "fallback_input_triangles": 455,
+      "fallback_partial_clip": 58,
+      "CPU_clip_rejected": 431,
+      "accepted_geometry_tasks": 244,
+      "accepted_input_triangles": 2004,
+      "emitted_triangles": 754,
+      "emitted_packet_words": 13154,
+      "fully_rejected_accepted_tasks": 80,
+      "fallback_W": 17
+    },
+    "2": {
+      "tasks": 319,
+      "input_triangles": 2459,
+      "raw_words_compared": 32272,
+      "CPU_cull_rejected": 1023,
+      "CPU_kept_before_scope": 997,
+      "fallback_tasks": 75,
+      "fallback_input_triangles": 451,
+      "fallback_partial_clip": 58,
+      "CPU_clip_rejected": 439,
+      "accepted_geometry_tasks": 244,
+      "accepted_input_triangles": 2008,
+      "emitted_triangles": 757,
+      "emitted_packet_words": 13223,
+      "fully_rejected_accepted_tasks": 79,
+      "fallback_W": 17
+    }
+  }
+}

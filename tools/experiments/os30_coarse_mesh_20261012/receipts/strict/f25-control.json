@@ -1,0 +1,165 @@
+{
+  "binding": {
+    "bound_files": 41,
+    "model_sources": 169
+  },
+  "health": {
+    "cycles": [
+      4229536,
+      4594411
+    ],
+    "latency_maxima": {
+      "0": {
+        "scan_latency": 0,
+        "audio_latency": 0,
+        "audio_queue_latency": 0
+      },
+      "1": {
+        "scan_latency": 402,
+        "audio_latency": 443,
+        "audio_queue_latency": 376
+      },
+      "2": {
+        "scan_latency": 382,
+        "audio_latency": 447,
+        "audio_queue_latency": 400
+      }
+    },
+    "gpu_counters_reconcile": true,
+    "commands": 5562,
+    "command_words": 46036
+  },
+  "frames": [
+    {
+      "frame": 1,
+      "buffer": 0,
+      "sha256": "b7a2e67c63ec5f1ce5f787bedad2fff8743d2c7a1edadaf9bcb8d274fe3ac5bc"
+    },
+    {
+      "frame": 2,
+      "buffer": 2,
+      "sha256": "a42df17ef68b61162980c48170bf3a307ce909b7d1c1ba265f1b3a1b2b1bb8eb"
+    }
+  ],
+  "register_differences": {
+    "entry-regs.bin": {},
+    "entry-2.bin": {
+      "21": [
+        3470454,
+        1837064355
+      ]
+    },
+    "entry-3.bin": {
+      "21": [
+        8067590,
+        1843391331
+      ]
+    }
+  },
+  "all_FCSR_and_FP_registers_exact": true,
+  "final_surface_pool_sha256": "de2e78c2524a0b5baec57b810967b5bc741d9402c1c1033df5d96112881c6f8c",
+  "untouched_buffer_history_exact": true,
+  "removed_reference_clear": [
+    {
+      "word": 23036,
+      "payload": [
+        270532608,
+        41943280,
+        41943040
+      ]
+    }
+  ],
+  "front_preparation": {
+    "probe_address": 288718472,
+    "probe_before": 2,
+    "probe_after": 0
+  },
+  "mesh_preparation": {
+    "probe_address": 288718580,
+    "probe_before": 2,
+    "probe_after": 0
+  },
+  "async_preparation": {
+    "probe_address": 288718576,
+    "probe_before": 2,
+    "probe_after": 0
+  },
+  "status": "PASS_SAME_ELF_CAPABILITY_OFF_NATIVE_ORACLE",
+  "fixture": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/fixture-v1",
+  "fixture_manifest_sha256": "48ba5cc0dd93e4c42a6a8ecfbe6a181f61be8579e1e37a6899b2107c4295f077",
+  "evidence_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/input.cfg": "da7046e85b7aeeeb74138abe828c88699c34afead4446a4df81744894c9826ab",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/run.log": "ac0e07e76fb091267eec3e8d62bfa0fbe69fe6b4ab2a837f87f685ea83db5191",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/prepared-group.json": "a762f25f98e321a4b1f6aabf50599674bc0a2b4001435088cfcfda9f93252e00",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/prepared-async.json": "0e4a67451fe9cd7e70652b21cd97c06b467d1882791e36fd10e92cfefa5ae1c6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/prepared-mesh.json": "2f73c8785c0fb157554e525b2901fc8b17712228b99aca0590b18b2b92bc1683",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/prepared-memory.json": "0af1923b3fead00c3526773da9a1fe5a9be562bc20db6d9538a3f5662488aa44",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/prepared-front.json": "e441ddaeebf5f84edddb3e151db77e21d2730d98065b8c5003eb56ce6ad7ed83",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/commands.bin": "af62cab7a4edbc491b306fab342ddcad8a1ec3ed95c0aa3e6601f5e63a9c8a86",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/mmio.tsv": "55329a50b507da3cf65b0bc307e962f9b4f969290e01ca0f5a2f4e0aae59f435",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/result.json": "975cc0f518eb320fe2d1ffeb1f324375e75397304de36eca0fb0c06ab6be995d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/pc.csv": "5000118283abec43503b4e866932c38fe6dbb0c838688676496fe26182633d25",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/vtx-calls.tsv": "2ba6d578dd65f6732bb3d4d7febfa517fdd981cc285f6b7ba0b92e4d9b3e5a89",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/boundaries.tsv": "bec7f165d330a91a23213571b6abb1ec96252e749ba842e7ce977dc80e42c23a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/entry-regs.bin": "72323bde84bb450b51f4789340cbf9fc3b8fa01315ef0e8aa02af96e884f01f3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/entry-2.bin": "5b6bd2102b3c4c8d25abaed9ed7198113cb717a64600693c003863bbe01f3566",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/frame-1.bin": "b7a2e67c63ec5f1ce5f787bedad2fff8743d2c7a1edadaf9bcb8d274fe3ac5bc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/frame-1-buffer0.bin": "b7a2e67c63ec5f1ce5f787bedad2fff8743d2c7a1edadaf9bcb8d274fe3ac5bc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/frame-1-buffer1.bin": "5087dc62a353e03130310ca0925575785854d33dc6233b6dfb158ba0c07bfeb4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/frame-1-buffer2.bin": "1a74bac257b8449c58783ab93cc39ec07d83ba9ff9289e19d1bc49310b58fe4a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/entry-3.bin": "2504e87b4b9c937e93797ea5ea43c7d47180923ce0b2bee3f4409a5732079956",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/frame-2.bin": "a42df17ef68b61162980c48170bf3a307ce909b7d1c1ba265f1b3a1b2b1bb8eb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/frame-2-buffer0.bin": "0fc3c70f9d86c5f4a655efa383ca56a2258c619a6ec004e8f80d684e476d210e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/frame-2-buffer1.bin": "2e0673ab3ba1900e839cfd476ef19e330e4f653b6d21be38fe74ebe7b5c9125e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/frame-2-buffer2.bin": "a42df17ef68b61162980c48170bf3a307ce909b7d1c1ba265f1b3a1b2b1bb8eb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/surface-arena.bin": "de2e78c2524a0b5baec57b810967b5bc741d9402c1c1033df5d96112881c6f8c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/surface-arena.physical.bin": "de2e78c2524a0b5baec57b810967b5bc741d9402c1c1033df5d96112881c6f8c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/surface-arena.json": "f0a96be3dad7f62f544c333bd4d326942781aac1656ddcf58aadb2e7223592a9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/async-group-stats.bin": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/async-group-stats.physical.bin": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/async-group-stats.json": "3637fc95ac1def43ddce24e769974c968ce0635152ed4c9eba7681eadb1a6657",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/async-source-stats.bin": "374708fff7719dd5979ec875d56cd2286f6d3cf7ec317a3b25632aab28ec37bb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/async-source-stats.physical.bin": "374708fff7719dd5979ec875d56cd2286f6d3cf7ec317a3b25632aab28ec37bb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/async-source-stats.json": "bfe10c40d230686055420471b7c868f56b64b1752c2a268610f2ee43d21d693e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/async-hint-stats.bin": "374708fff7719dd5979ec875d56cd2286f6d3cf7ec317a3b25632aab28ec37bb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/async-hint-stats.physical.bin": "374708fff7719dd5979ec875d56cd2286f6d3cf7ec317a3b25632aab28ec37bb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/async-hint-stats.json": "f3500a9a1724ea39554294ef73ec552c0cf10d38ebe331f05d895aa369f8fda8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/import-stats.bin": "f1c19314208ec565b4e50664b650fc0d256b4eb5a177acdccefc78bef7543a6c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/import-stats.physical.bin": "f1c19314208ec565b4e50664b650fc0d256b4eb5a177acdccefc78bef7543a6c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/import-stats.json": "260a693363f6c925543b9cc74e021ed2b9d2092dfcadbdba1421705d3ac9edf1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/front-stats.bin": "f366f82b0177478c240783195f72602e8b14b8f4f683508ef88b05682d8ed539",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/front-stats.physical.bin": "f366f82b0177478c240783195f72602e8b14b8f4f683508ef88b05682d8ed539",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/front-stats.json": "9b2a28d726e42cf619eb7c3a732d18a1f805dc462815c409d8df295e8fbd1228",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/mesh-stats.bin": "f366f82b0177478c240783195f72602e8b14b8f4f683508ef88b05682d8ed539",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/mesh-stats.physical.bin": "f366f82b0177478c240783195f72602e8b14b8f4f683508ef88b05682d8ed539",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/mesh-stats.json": "15c8633a653a8da80d06dfca36de87a0c356e4a042b59ab02cd5cdc88544fe7a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/async-stats.bin": "f366f82b0177478c240783195f72602e8b14b8f4f683508ef88b05682d8ed539",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/async-stats.physical.bin": "f366f82b0177478c240783195f72602e8b14b8f4f683508ef88b05682d8ed539",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/async-stats.json": "1d130a4373edb7cf7c8c5663def5812df10a559328b713db0d2e6f3c33cfc7cd",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/frame.bin": "0fc3c70f9d86c5f4a655efa383ca56a2258c619a6ec004e8f80d684e476d210e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/stalls.json": "668c1f2c61615c19282e4b686388ea8d065b825f875bda9349db6ec0278550cd",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/stalls-pcs.csv": "9bdf320278da9505283f21758804e7dc0365cda978c0b957e1189624f5b3a251",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/stalls-pages.csv": "283915f923ec2e20ec7eac65f4442253808f81aab3724488f1974edd6bc66c3d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/first-word.json": "deefc8f60163d3c6c619c411d5bc091bd88961d5a0fb828e0befe660ba760636",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/gpu-profile.json": "aaace6ce47dcdeeed4cc408c72d0bd2bf3a748d64c01facf38d24b8d5ebfe9a1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/gpu-profile-timeline.csv": "ccf0695c46e942b28d48f350d917420afca67bfaa34376ebb5ae5aebc63f7cca",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/gpu-profile-events.csv": "03b6952238d0d53cb4b13ff90d3eb427005d5a5951bcb7081c311ad928bca210",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/pc-phase-1.csv": "f21b7b01680ab52079ea71c6917eb67aefdea3062046474b6130e713748393f1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/pc-phase-2.csv": "587b4f2ee54af8852bfea024d2065c051e64a966418d46900f31cf425bb112b3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/process.json": "c6469cc8d1d7c598bfd5178a77294e15da7a5b9e9d4d69cdb27921f89ed6c624",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/run/manifest.json": "9be03ff93250108364053fc85339749fbe5b217498b796f8deb12c5a43d7d47f"
+  },
+  "checker_sources_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/check_replays.py": "7701c9d54bdf9e68659e1a381c26d90bed81dc15618de10909c5e3669aff56de",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/check_replays.py": "0b136a3a7d377af3e1268975d33995380fba9a5e275dbfdc2cd8e01497f70ba3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/triangle-front-v1/tests/check_replays.py": "4dbf49fc2ccf0a416b21eadf4978dd93a1bd731a316e7e30c44b7caa140c92f9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/gpu-bottleneck-v1/review/check_runs.py": "cc73ef3582f0c4594162e3635bbb6704089ad5879f2c36441b8de04a5cef9793"
+  },
+  "normalization": "Only known framebuffer bases/flip indices, the one prepared zero-clear, known s5 timestamp at later frame entries and redundant sticky material/vertex preparation. Every actual indexed draw resolves exact vertex payload and material/object state; other side effects retain exact order. Registers/FCSR otherwise remain strict.",
+  "limitations": [
+    "Two prepared, GPU-drained full game/render/audio intervals on actual native CPU and raster RTL.",
+    "Fixed synthetic display/audio arrivals and bounded service implementations; not sustained Pocket FPS or full OS/PCM/interrupt qualification.",
+    "No ideal producer, instruction-cost subtraction or assumed overlap is credited as a frame-time gain.",
+    "Physical area, timing and hardware behavior require separate qualification after measured benefit."
+  ]
+}

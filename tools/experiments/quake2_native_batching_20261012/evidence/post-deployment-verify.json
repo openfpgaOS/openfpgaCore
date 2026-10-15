@@ -1,0 +1,13 @@
+{
+  "passed": true,
+  "installed": {
+    "Assets/quake2/common/os.bin": "054abd4b3d2c57d55b4ecec23f2fcaa3703206db3df14ebe7793c22941d34ef7",
+    "Cores/thinkelastic.quake2/loader.bin": "fc1f8d37eb0fb322006b4428f0b59d2801c9b74978bd3f24103f5f9bbfca3c99",
+    "Assets/quake2/common/quake2.elf": "c08bed78555f08252c9694c1f019db968e2ce79809ff41b909cfdd61b30e743b",
+    "Cores/thinkelastic.quake2/os30.rbf_r": "542029e588e2a646f20fc98f1dbaf89a667ced48c75de9e89354df74da8622b6",
+    "Cores/thinkelastic.quake2/core.json": "41d9381d48dfbb0a77a45cde79876b203ab098058c51970124e613218036e549"
+  },
+  "previous_backup_verified": true,
+  "backup": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-native-batching-20261012/deployment-native-v5/backups/before-20261013T002443Z-10rjy7sp",
+  "core_bitstream_unchanged": true
+}

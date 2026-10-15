@@ -1,0 +1,44 @@
+{
+  "status": "COMPONENT_PROTOTYPE_VERIFIED_NOT_APPLICATION_INTEGRATED",
+  "architecture": "Original vertex and triangle command DMA -> shared transform/light/reciprocal/cull -> retained raw BRAM -> ordinary GPU vertex/index packets",
+  "captured_chain": {
+    "status": "PASS",
+    "tasks": 638,
+    "accepted_geometry_tasks": 488,
+    "fallback_tasks": 150,
+    "triangles": 4918,
+    "kept_triangles": 1511,
+    "raw_words_compared": 64544,
+    "packet_words_compared": 26377,
+    "checks": 237402,
+    "cycles": 878404
+  },
+  "scope_limits": [
+    "Controlled packet material flags; real shader/material and viewport publication unqualified.",
+    "Whole-task CPU repair and application queue/lifetime integration remain.",
+    "No full-frame candidate performance measurement or physical fit."
+  ],
+  "warm_input_geometry": {
+    "total_frame_triangles": 2553,
+    "structural_candidate_tasks": 319,
+    "structural_candidate_triangles": 2459,
+    "accepted_geometry_tasks": 244,
+    "accepted_task_input_triangles": 2008,
+    "emitted_triangles": 757,
+    "clipping_fallback_tasks": 58,
+    "w_fallback_tasks": 17
+  },
+  "covered_cpu_work": {
+    "ready_nonzero_material_memo_tasks": 152,
+    "focused_charged_cycles": 609377,
+    "cold_or_ineligible_tasks": 92,
+    "additional_focused_charged_cycles": 256297,
+    "baseline_interval_cycles": 4366717,
+    "interpretation": "Disjoint CPU routine charges, excluding raw driver. Includes stalls/deferred older submission. Material memo is a proxy. Not a speedup estimate."
+  },
+  "full_frame_gain": null,
+  "fitted_ALMs": null,
+  "fitted_M10Ks": null,
+  "fitted_Fmax_MHz": null,
+  "bitstream": null
+}

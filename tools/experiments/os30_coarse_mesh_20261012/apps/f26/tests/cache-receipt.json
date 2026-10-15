@@ -1,0 +1,48 @@
+{
+  "status": "PASS",
+  "checks": 139255,
+  "random_groups": 512,
+  "bounded_shape_cases": 62,
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v2/evidence/test_group_cache.py": "39c5db96d3d21db12c7f21356f5d8f9a3dd7aa505c07a5879258a9dcf3af03fd",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v2/src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "d658d6d87219941b2d6b4bc413055bf29c736388031a7942f98c52ed32fb5e25",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v2/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "3e5df211b1571fab257d1ad4286096c4badd64e4c515428af3f9f6a41041a7df",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v2/src/sm64/sm64/src/pc/gfx/gfx_gpu.h": "8c499dcf1a1202e84f56cc6b89eb69ebe12ebde980ea6056f853db3d09cdd816",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v2/evidence/group-cache-tests-v1/test.c": "2a1b35f0f010b5d64a1ab24e83beb13f35a2ff9941bfab8687e0a5b34cd443e0"
+  },
+  "extracted_functions_sha256": {
+    "gfx_async_forget_sources": "d56e7f87a7fee9f38bd81e40add160c650b41f7492112f3d102112837a57c734",
+    "gfx_async_sources": "34361ea2e3c271c27610b4f6270d28261f46b817612157133607d29e1df2e75e",
+    "gfx_async_note_repair": "325b682d7619ab0da8930395a38f1a4a4ac8903657cafbb8ce4096e6b1781ad6",
+    "gfx_async_dead_suffix": "ff9e101d1e717602b408067c4f3b6a6d91f9dbf60265721db2215c10175ffea3",
+    "gfx_async_route_task": "eca4440c4801f8b7166cce00509cce9bc41efdac3c641c529a845b3ac88a54c1",
+    "gfx_mesh_lookup_impl": "158ae122820297979111c86dd4b39399d6e2bf1ac9d48756310247a1a94ec62a",
+    "gfx_mesh_lookup": "008df10693a7923df3024abf2404414514b704166a2024ead61d7bba83b15f23",
+    "gfx_async_group_refresh": "a67cbfc8e0367a275ca0cdf718a985c61b14a356e2582407b4ad2ed882631694",
+    "gfx_async_group_build": "283377e213b4d5ea768018d75a14466c20f4330d595ddde77abde7b7c41c28f8",
+    "gfx_async_group_sources": "a72b54d5b9b61e3814c55413cb349c427df6a87d22e3f3ed148f788920b06448"
+  },
+  "scope": [
+    "Actual topology compiler, suffix proof, source memo, repair hint, group builder, allocator and group uploader compiled together. Immutable ELF address bounds use a fixed synthetic image; real32-bit source pointers use a non-PIE executable.",
+    "Upload and hardware-drain callbacks are models that check allocation immutability and copied bytes; this is not RTL progress or full-render equivalence evidence.",
+    "Cases cover all2..32member counts and mixed LOAD counts,32member cap, cached singleton/AJ02 fallback, changed cull, per-task repair splits, hint epoch wrap, repair during partial build, whole-group retry on member/table allocation recycle, pool generation wrap, throttle failure, state/end barriers and512 randomized groups. New targeted-hint cases prove unrelated/before/end-boundary hints preserve cache offsets without wait/upload, related hints rebuild, duplicate/unknown callbacks do not advance, log capacity/epoch wrap clear all caches, and unrelated mid-build callbacks conservatively retry."
+  ],
+  "commands": [
+    [
+      "cc",
+      "-std=c11",
+      "-O1",
+      "-g",
+      "-fno-pie",
+      "-no-pie",
+      "-fsanitize=address,undefined",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v2/evidence/group-cache-tests-v1/test.c",
+      "-o",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v2/evidence/group-cache-tests-v1/test"
+    ],
+    [
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v2/evidence/group-cache-tests-v1/test"
+    ]
+  ],
+  "sanitizers": "ASan+UBSan; LSan disabled under ptrace"
+}

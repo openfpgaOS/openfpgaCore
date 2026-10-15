@@ -1,0 +1,20 @@
+{
+  "passed": true,
+  "mixer_sha256": "9e4028bc2d32fa17d74d821f40b16daaf1cc6eed4f3383e23f22e12e3944255c",
+  "reference": {
+    "samples": "18432",
+    "scenarios": "96",
+    "errors": "0",
+    "saturation_samples": "169",
+    "stream_holds": "12808",
+    "hash": "46e30baca498b56b",
+    "processing_cycles": "22412815"
+  },
+  "inherited_results": "=== Results: 177 passed, 0 failed ===",
+  "limits": [
+    "Dynamic component tests, not a formal proof.",
+    "SDRAM response latency/AR/R stalls are synthetic, not the shared physical arbiter.",
+    "FIFO sink uses existing synchronous48 kHz model; Pocket CDC and physical audio pins require separate checks.",
+    "No physical fitter, timing result or game FPS claim."
+  ]
+}

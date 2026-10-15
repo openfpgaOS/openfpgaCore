@@ -1,0 +1,4483 @@
+{
+  "passed": true,
+  "label": "alias-v2-cpu",
+  "workload": "main",
+  "geometry_mode": "0",
+  "elf_sha256": "bcb3e95bb8745811375628188c5b66aa5aa1122b99a78dce0a3c2f9cc23e87d9",
+  "frames": 360,
+  "steady_frames": 340,
+  "steady_frame_indices": "20..359",
+  "cycles_per_frame": 5831407.738235294,
+  "instructions_per_frame": 3084635.8911764706,
+  "words_per_frame": 38686.31764705882,
+  "functions": [
+    {
+      "function": "ofgl_emit_ctri",
+      "cycles_per_frame": 724896.9205882353,
+      "percent": 12.430907820683522,
+      "self_insns": 160863915,
+      "self_cycles": 246464953,
+      "calls": 9308,
+      "tailcalls": 625912
+    },
+    {
+      "function": "ofgl_cached_tri",
+      "cycles_per_frame": 477637.5764705882,
+      "percent": 8.190776531348009,
+      "self_insns": 112876100,
+      "self_cycles": 162396776,
+      "calls": 976252,
+      "tailcalls": 148565
+    },
+    {
+      "function": "ofgl_alias_cvert",
+      "cycles_per_frame": 361162.6941176471,
+      "percent": 6.193404926045224,
+      "self_insns": 85602060,
+      "self_cycles": 122795316,
+      "calls": 2348130,
+      "tailcalls": 0
+    },
+    {
+      "function": "OFGL_DrawWorldPolys",
+      "cycles_per_frame": 353248.83235294116,
+      "percent": 6.057693925889698,
+      "self_insns": 43013996,
+      "self_cycles": 120104603,
+      "calls": 16879,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_project_cvert",
+      "cycles_per_frame": 343660.42647058825,
+      "percent": 5.893266975952998,
+      "self_insns": 71098221,
+      "self_cycles": 116844545,
+      "calls": 1030409,
+      "tailcalls": 0
+    },
+    {
+      "function": "R_DrawAliasModel",
+      "cycles_per_frame": 319779.50294117647,
+      "percent": 5.483744531263877,
+      "self_insns": 41264309,
+      "self_cycles": 108725031,
+      "calls": 10197,
+      "tailcalls": 0
+    },
+    {
+      "function": "R_ApplyGLBuffer",
+      "cycles_per_frame": 291444.1705882353,
+      "percent": 4.9978355771162795,
+      "self_insns": 58398321,
+      "self_cycles": 99091018,
+      "calls": 26877,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_cvert",
+      "cycles_per_frame": 239707.1,
+      "percent": 4.110621495874689,
+      "self_insns": 60830652,
+      "self_cycles": 81500414,
+      "calls": 445695,
+      "tailcalls": 0
+    },
+    {
+      "function": "R_RenderView",
+      "cycles_per_frame": 237771.80294117646,
+      "percent": 4.077434019613439,
+      "self_insns": 20165928,
+      "self_cycles": 80842413,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "__muldf3",
+      "cycles_per_frame": 224409.48235294118,
+      "percent": 3.848290025777758,
+      "self_insns": 64789626,
+      "self_cycles": 76299224,
+      "calls": 308267,
+      "tailcalls": 0
+    },
+    {
+      "function": "R_RecursiveWorldNode",
+      "cycles_per_frame": 184024.3205882353,
+      "percent": 3.155744356231981,
+      "self_insns": 17493326,
+      "self_cycles": 62568269,
+      "calls": 85885,
+      "tailcalls": 0
+    },
+    {
+      "function": "CL_AddEntities",
+      "cycles_per_frame": 167405.19411764707,
+      "percent": 2.8707509684155164,
+      "self_insns": 12679905,
+      "self_cycles": 56917766,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_fetch_attrs",
+      "cycles_per_frame": 165979.5205882353,
+      "percent": 2.846302780372277,
+      "self_insns": 30870862,
+      "self_cycles": 56433037,
+      "calls": 718048,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_setup_tri_state",
+      "cycles_per_frame": 156053.59705882354,
+      "percent": 2.6760879030223435,
+      "self_insns": 34299011,
+      "self_cycles": 53058223,
+      "calls": 105220,
+      "tailcalls": 0
+    },
+    {
+      "function": "R_BuildLightMap",
+      "cycles_per_frame": 132267.7294117647,
+      "percent": 2.268195525833556,
+      "self_insns": 24879480,
+      "self_cycles": 44971028,
+      "calls": 10817,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_lm_store",
+      "cycles_per_frame": 124531.27647058823,
+      "percent": 2.13552682406451,
+      "self_insns": 30715604,
+      "self_cycles": 42340634,
+      "calls": 0,
+      "tailcalls": 574
+    },
+    {
+      "function": "ofgl_blit_rect",
+      "cycles_per_frame": 114453.2205882353,
+      "percent": 1.9627031023365078,
+      "self_insns": 9376871,
+      "self_cycles": 38914095,
+      "calls": 2680,
+      "tailcalls": 340
+    },
+    {
+      "function": "R_MarkLeaves",
+      "cycles_per_frame": 96953.22352941177,
+      "percent": 1.662604089467286,
+      "self_insns": 4497429,
+      "self_cycles": 32964096,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_box_bounds",
+      "cycles_per_frame": 88329.7911764706,
+      "percent": 1.514725005375821,
+      "self_insns": 9545776,
+      "self_cycles": 30032129,
+      "calls": 91236,
+      "tailcalls": 0
+    },
+    {
+      "function": "_gpu_stream_reserve_words",
+      "cycles_per_frame": 72577.39411764705,
+      "percent": 1.2445947423942352,
+      "self_insns": 10022699,
+      "self_cycles": 24676314,
+      "calls": 296977,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofq2_tri_batch_refill",
+      "cycles_per_frame": 70555.1205882353,
+      "percent": 1.2099157485699457,
+      "self_insns": 8531364,
+      "self_cycles": 23988741,
+      "calls": 45407,
+      "tailcalls": 0
+    },
+    {
+      "function": "__adddf3",
+      "cycles_per_frame": 51971.888235294115,
+      "percent": 0.891240855866167,
+      "self_insns": 12896305,
+      "self_cycles": 17670442,
+      "calls": 120192,
+      "tailcalls": 0
+    },
+    {
+      "function": "randk",
+      "cycles_per_frame": 51924.032352941176,
+      "percent": 0.890420198410864,
+      "self_insns": 14417078,
+      "self_cycles": 17654171,
+      "calls": 177998,
+      "tailcalls": 0
+    },
+    {
+      "function": "R_RecursiveLightPoint",
+      "cycles_per_frame": 40555.538235294116,
+      "percent": 0.695467373501944,
+      "self_insns": 2532458,
+      "self_cycles": 13788883,
+      "calls": 10356,
+      "tailcalls": 0
+    },
+    {
+      "function": "BoxOnPlaneSide",
+      "cycles_per_frame": 40314.22647058823,
+      "percent": 0.6913292343846319,
+      "self_insns": 6223436,
+      "self_cycles": 13706837,
+      "calls": 200520,
+      "tailcalls": 0
+    },
+    {
+      "function": "R_RenderLightmappedPoly",
+      "cycles_per_frame": 36575.43235294118,
+      "percent": 0.6272144565217741,
+      "self_insns": 2951948,
+      "self_cycles": 12435647,
+      "calls": 86822,
+      "tailcalls": 0
+    },
+    {
+      "function": "CL_Frame",
+      "cycles_per_frame": 34831.05294117647,
+      "percent": 0.5973009349491497,
+      "self_insns": 1011679,
+      "self_cycles": 11842558,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "__subdf3",
+      "cycles_per_frame": 34722.638235294115,
+      "percent": 0.5954417834243557,
+      "self_insns": 8197464,
+      "self_cycles": 11805697,
+      "calls": 75632,
+      "tailcalls": 0
+    },
+    {
+      "function": "memcpy",
+      "cycles_per_frame": 34465.45,
+      "percent": 0.5910313863669215,
+      "self_insns": 8261511,
+      "self_cycles": 11718253,
+      "calls": 113649,
+      "tailcalls": 340
+    },
+    {
+      "function": "ofgl_clipped_tri",
+      "cycles_per_frame": 32933.68529411765,
+      "percent": 0.5647638918846047,
+      "self_insns": 5784367,
+      "self_cycles": 11197453,
+      "calls": 0,
+      "tailcalls": 5750
+    },
+    {
+      "function": "strcmp",
+      "cycles_per_frame": 30490.858823529412,
+      "percent": 0.522873038419306,
+      "self_insns": 1984348,
+      "self_cycles": 10366892,
+      "calls": 204086,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_begin3d",
+      "cycles_per_frame": 27789.961764705884,
+      "percent": 0.4765566568513645,
+      "self_insns": 4582153,
+      "self_cycles": 9448587,
+      "calls": 21670,
+      "tailcalls": 0
+    },
+    {
+      "function": "memset",
+      "cycles_per_frame": 23889.964705882354,
+      "percent": 0.40967748746569305,
+      "self_insns": 7094200,
+      "self_cycles": 8122588,
+      "calls": 121970,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_tri3d",
+      "cycles_per_frame": 22436.811764705883,
+      "percent": 0.3847580682378374,
+      "self_insns": 6091165,
+      "self_cycles": 7628516,
+      "calls": 148565,
+      "tailcalls": 0
+    },
+    {
+      "function": "R_MarkSurfaceLights",
+      "cycles_per_frame": 20783.085294117645,
+      "percent": 0.35639911024995563,
+      "self_insns": 1198248,
+      "self_cycles": 7066249,
+      "calls": 16907,
+      "tailcalls": 0
+    },
+    {
+      "function": "Cvar_FindVar",
+      "cycles_per_frame": 18345.74411764706,
+      "percent": 0.3146023214490377,
+      "self_insns": 1151580,
+      "self_cycles": 6237553,
+      "calls": 1020,
+      "tailcalls": 0
+    },
+    {
+      "function": "CL_DeltaEntity",
+      "cycles_per_frame": 18319.514705882353,
+      "percent": 0.31415252591180015,
+      "self_insns": 2505607,
+      "self_cycles": 6228635,
+      "calls": 11541,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_DrawArrays",
+      "cycles_per_frame": 18289.079411764706,
+      "percent": 0.3136306057257345,
+      "self_insns": 2561983,
+      "self_cycles": 6218287,
+      "calls": 717,
+      "tailcalls": 0
+    },
+    {
+      "function": "R_MarkLights",
+      "cycles_per_frame": 18212.779411764706,
+      "percent": 0.31232217380972016,
+      "self_insns": 1231788,
+      "self_cycles": 6192345,
+      "calls": 17424,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_world_prepare",
+      "cycles_per_frame": 13808.394117647058,
+      "percent": 0.23679349374094302,
+      "self_insns": 2182916,
+      "self_cycles": 4694854,
+      "calls": 21293,
+      "tailcalls": 0
+    },
+    {
+      "function": "CL_ParticleEffect",
+      "cycles_per_frame": 12166.714705882352,
+      "percent": 0.20864112495697745,
+      "self_insns": 1264964,
+      "self_cycles": 4136683,
+      "calls": 258,
+      "tailcalls": 0
+    },
+    {
+      "function": "printf_core",
+      "cycles_per_frame": 11080.720588235294,
+      "percent": 0.19001793538773457,
+      "self_insns": 1903944,
+      "self_cycles": 3767445,
+      "calls": 9092,
+      "tailcalls": 0
+    },
+    {
+      "function": "CL_ParseDelta",
+      "cycles_per_frame": 10974.558823529413,
+      "percent": 0.1881974184650402,
+      "self_insns": 1582658,
+      "self_cycles": 3731350,
+      "calls": 11541,
+      "tailcalls": 0
+    },
+    {
+      "function": "__truncdfsf2",
+      "cycles_per_frame": 10921.938235294117,
+      "percent": 0.18729505336561023,
+      "self_insns": 2281471,
+      "self_cycles": 3713459,
+      "calls": 43365,
+      "tailcalls": 0
+    },
+    {
+      "function": "CL_ParseEntityBits",
+      "cycles_per_frame": 9798.402941176471,
+      "percent": 0.16802808825955418,
+      "self_insns": 1823768,
+      "self_cycles": 3331457,
+      "calls": 7393,
+      "tailcalls": 0
+    },
+    {
+      "function": "__sindf",
+      "cycles_per_frame": 9467.24705882353,
+      "percent": 0.162349255682274,
+      "self_insns": 1649222,
+      "self_cycles": 3218864,
+      "calls": 977,
+      "tailcalls": 18200
+    },
+    {
+      "function": "ofgl_mat_postmul",
+      "cycles_per_frame": 8326.220588235294,
+      "percent": 0.142782342823364,
+      "self_insns": 2233096,
+      "self_cycles": 2830915,
+      "calls": 10769,
+      "tailcalls": 1360
+    },
+    {
+      "function": "CL_ParseFrame",
+      "cycles_per_frame": 7600.020588235294,
+      "percent": 0.13032908912205854,
+      "self_insns": 935852,
+      "self_cycles": 2584007,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "R_DrawBrushModel",
+      "cycles_per_frame": 7357.976470588235,
+      "percent": 0.12617839123722316,
+      "self_insns": 398887,
+      "self_cycles": 2501712,
+      "calls": 1470,
+      "tailcalls": 0
+    },
+    {
+      "function": "__cosdf",
+      "cycles_per_frame": 7218.105882352941,
+      "percent": 0.12377981795073878,
+      "self_insns": 1565216,
+      "self_cycles": 2454156,
+      "calls": 9987,
+      "tailcalls": 9101
+    },
+    {
+      "function": "R_FindImage",
+      "cycles_per_frame": 7210.626470588235,
+      "percent": 0.12365155712418631,
+      "self_insns": 1410674,
+      "self_cycles": 2451613,
+      "calls": 3867,
+      "tailcalls": 0
+    },
+    {
+      "function": "SCR_UpdateScreen",
+      "cycles_per_frame": 7140.014705882353,
+      "percent": 0.12244067001295078,
+      "self_insns": 203660,
+      "self_cycles": 2427605,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "CL_PMpointcontents",
+      "cycles_per_frame": 7085.714705882353,
+      "percent": 0.1215095054908069,
+      "self_insns": 364932,
+      "self_cycles": 2409143,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "sift",
+      "cycles_per_frame": 6746.697058823529,
+      "percent": 0.11569585530071716,
+      "self_insns": 1524204,
+      "self_cycles": 2293877,
+      "calls": 10694,
+      "tailcalls": 7781
+    },
+    {
+      "function": "COM_Parse",
+      "cycles_per_frame": 6061.614705882353,
+      "percent": 0.10394770830613749,
+      "self_insns": 1211080,
+      "self_cycles": 2060949,
+      "calls": 24820,
+      "tailcalls": 0
+    },
+    {
+      "function": "SCR_ExecuteLayoutString",
+      "cycles_per_frame": 6017.835294117647,
+      "percent": 0.10319695627969877,
+      "self_insns": 712112,
+      "self_cycles": 2046064,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "R_LightPoint",
+      "cycles_per_frame": 5910.914705882353,
+      "percent": 0.10136342665812491,
+      "self_insns": 310714,
+      "self_cycles": 2009711,
+      "calls": 4227,
+      "tailcalls": 0
+    },
+    {
+      "function": "Cvar_Get",
+      "cycles_per_frame": 5786.614705882353,
+      "percent": 0.09923186588275687,
+      "self_insns": 448460,
+      "self_cycles": 1967449,
+      "calls": 1020,
+      "tailcalls": 0
+    },
+    {
+      "function": "cycle",
+      "cycles_per_frame": 5521.308823529412,
+      "percent": 0.0946822632094026,
+      "self_insns": 1098205,
+      "self_cycles": 1877245,
+      "calls": 26256,
+      "tailcalls": 0
+    },
+    {
+      "function": "Qcommon_Frame",
+      "cycles_per_frame": 5497.952941176471,
+      "percent": 0.0942817444427281,
+      "self_insns": 199215,
+      "self_cycles": 1869304,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "G_RunFrame",
+      "cycles_per_frame": 5478.264705882353,
+      "percent": 0.09394412038730447,
+      "self_insns": 155040,
+      "self_cycles": 1862610,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "__extendsfdf2",
+      "cycles_per_frame": 5334.9382352941175,
+      "percent": 0.09148628384041933,
+      "self_insns": 1416610,
+      "self_cycles": 1813879,
+      "calls": 41665,
+      "tailcalls": 0
+    },
+    {
+      "function": "entitycmpfnc",
+      "cycles_per_frame": 5265.317647058823,
+      "percent": 0.09029239393663492,
+      "self_insns": 588998,
+      "self_cycles": 1790208,
+      "calls": 0,
+      "tailcalls": 82442
+    },
+    {
+      "function": "__clzsi2",
+      "cycles_per_frame": 5191.941176470588,
+      "percent": 0.08903409621707876,
+      "self_insns": 810266,
+      "self_cycles": 1765260,
+      "calls": 52020,
+      "tailcalls": 0
+    },
+    {
+      "function": "sinf",
+      "cycles_per_frame": 5160.411764705882,
+      "percent": 0.08849341353495427,
+      "self_insns": 669033,
+      "self_cycles": 1754540,
+      "calls": 22299,
+      "tailcalls": 0
+    },
+    {
+      "function": "CL_AddHeatBeams",
+      "cycles_per_frame": 5083.588235294118,
+      "percent": 0.08717600386544944,
+      "self_insns": 111520,
+      "self_cycles": 1728420,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "cosf",
+      "cycles_per_frame": 5037.376470588235,
+      "percent": 0.08638354059105205,
+      "self_insns": 638238,
+      "self_cycles": 1712708,
+      "calls": 20434,
+      "tailcalls": 0
+    },
+    {
+      "function": "trinkle",
+      "cycles_per_frame": 4610.988235294118,
+      "percent": 0.07907161430439606,
+      "self_insns": 1188866,
+      "self_cycles": 1567736,
+      "calls": 11667,
+      "tailcalls": 0
+    },
+    {
+      "function": "CL_AddMuzzleFlash2",
+      "cycles_per_frame": 4489.89705882353,
+      "percent": 0.07699508009677036,
+      "self_insns": 556782,
+      "self_cycles": 1526565,
+      "calls": 108,
+      "tailcalls": 0
+    },
+    {
+      "function": "RI_BeginFrame",
+      "cycles_per_frame": 3694.826470588235,
+      "percent": 0.06336079788010789,
+      "self_insns": 60520,
+      "self_cycles": 1256241,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_EnableClientState",
+      "cycles_per_frame": 3584.429411764706,
+      "percent": 0.061467651940411726,
+      "self_insns": 872042,
+      "self_cycles": 1218706,
+      "calls": 66232,
+      "tailcalls": 0
+    },
+    {
+      "function": "qsort_r",
+      "cycles_per_frame": 3469.2705882352943,
+      "percent": 0.0594928487934059,
+      "self_insns": 747729,
+      "self_cycles": 1179552,
+      "calls": 0,
+      "tailcalls": 340
+    },
+    {
+      "function": "ofgl_Rotatef",
+      "cycles_per_frame": 3409.45,
+      "percent": 0.058467014365072865,
+      "self_insns": 454869,
+      "self_cycles": 1159213,
+      "calls": 11772,
+      "tailcalls": 4764
+    },
+    {
+      "function": "OFGL_SetDrawBounds",
+      "cycles_per_frame": 3080.9529411764706,
+      "percent": 0.05283377667068829,
+      "self_insns": 472298,
+      "self_cycles": 1047524,
+      "calls": 4414,
+      "tailcalls": 0
+    },
+    {
+      "function": "R_SetAliasDrawBounds",
+      "cycles_per_frame": 3012.826470588235,
+      "percent": 0.05166550867012396,
+      "self_insns": 481126,
+      "self_cycles": 1024361,
+      "calls": 4414,
+      "tailcalls": 0
+    },
+    {
+      "function": "__intscan",
+      "cycles_per_frame": 3009.9470588235295,
+      "percent": 0.051616131025926215,
+      "self_insns": 619500,
+      "self_cycles": 1023382,
+      "calls": 5638,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_DisableClientState",
+      "cycles_per_frame": 2936.420588235294,
+      "percent": 0.05035526102868458,
+      "self_insns": 586383,
+      "self_cycles": 998383,
+      "calls": 49353,
+      "tailcalls": 0
+    },
+    {
+      "function": "CL_DiminishingTrail",
+      "cycles_per_frame": 2772.7176470588233,
+      "percent": 0.04754799821111302,
+      "self_insns": 327309,
+      "self_cycles": 942724,
+      "calls": 1860,
+      "tailcalls": 0
+    },
+    {
+      "function": "R_Buffer2DQuad",
+      "cycles_per_frame": 2772.664705882353,
+      "percent": 0.047547090348400496,
+      "self_insns": 367160,
+      "self_cycles": 942706,
+      "calls": 0,
+      "tailcalls": 2680
+    },
+    {
+      "function": "__fwritex",
+      "cycles_per_frame": 2677.105882352941,
+      "percent": 0.04590839815229743,
+      "self_insns": 683840,
+      "self_cycles": 910216,
+      "calls": 21370,
+      "tailcalls": 0
+    },
+    {
+      "function": "__divdf3",
+      "cycles_per_frame": 2448.8529411764707,
+      "percent": 0.04199419850407416,
+      "self_insns": 289340,
+      "self_cycles": 832610,
+      "calls": 1360,
+      "tailcalls": 0
+    },
+    {
+      "function": "CL_CalcViewValues",
+      "cycles_per_frame": 2255.1588235294116,
+      "percent": 0.03867263145985861,
+      "self_insns": 141143,
+      "self_cycles": 766754,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "CL_BaseMove",
+      "cycles_per_frame": 2185.964705882353,
+      "percent": 0.037486054894591746,
+      "self_insns": 78540,
+      "self_cycles": 743228,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "IN_Update",
+      "cycles_per_frame": 2015.394117647059,
+      "percent": 0.03456102210847906,
+      "self_insns": 73100,
+      "self_cycles": 685234,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "AngleVectors",
+      "cycles_per_frame": 1819.1558823529413,
+      "percent": 0.031195827217245075,
+      "self_insns": 255029,
+      "self_cycles": 618513,
+      "calls": 3242,
+      "tailcalls": 0
+    },
+    {
+      "function": "RDraw_PicScaled",
+      "cycles_per_frame": 1816.1382352941177,
+      "percent": 0.031144079042631296,
+      "self_insns": 119291,
+      "self_cycles": 617487,
+      "calls": 2473,
+      "tailcalls": 0
+    },
+    {
+      "function": "vfprintf",
+      "cycles_per_frame": 1722.3911764705883,
+      "percent": 0.029536455926023445,
+      "self_insns": 390956,
+      "self_cycles": 585613,
+      "calls": 4546,
+      "tailcalls": 0
+    },
+    {
+      "function": "__rem_pio2f",
+      "cycles_per_frame": 1682.6117647058823,
+      "percent": 0.02885429797119753,
+      "self_insns": 184635,
+      "self_cycles": 572088,
+      "calls": 1865,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_TexCoordPointer",
+      "cycles_per_frame": 1636.4117647058824,
+      "percent": 0.02806203644406959,
+      "self_insns": 352440,
+      "self_cycles": 556380,
+      "calls": 39160,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_DrawElements",
+      "cycles_per_frame": 1621.8911764705883,
+      "percent": 0.027813029876751622,
+      "self_insns": 140949,
+      "self_cycles": 551443,
+      "calls": 373,
+      "tailcalls": 0
+    },
+    {
+      "function": "memcmp",
+      "cycles_per_frame": 1562.8147058823529,
+      "percent": 0.026799955963211268,
+      "self_insns": 235280,
+      "self_cycles": 531357,
+      "calls": 1700,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_PushMatrix",
+      "cycles_per_frame": 1560.9823529411765,
+      "percent": 0.026768533825994516,
+      "self_insns": 332084,
+      "self_cycles": 530734,
+      "calls": 5444,
+      "tailcalls": 0
+    },
+    {
+      "function": "__tandf",
+      "cycles_per_frame": 1374.414705882353,
+      "percent": 0.023569175190247968,
+      "self_insns": 163880,
+      "self_cycles": 467301,
+      "calls": 0,
+      "tailcalls": 1360
+    },
+    {
+      "function": "OFQ2_Finish",
+      "cycles_per_frame": 1368.4941176470588,
+      "percent": 0.023467645876897536,
+      "self_insns": 121839,
+      "self_cycles": 465288,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "R_SetPerspective",
+      "cycles_per_frame": 1323.0029411764706,
+      "percent": 0.02268753962275392,
+      "self_insns": 76840,
+      "self_cycles": 449821,
+      "calls": 680,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_alias_colliding_tri",
+      "cycles_per_frame": 1308.2264705882353,
+      "percent": 0.022434145052325428,
+      "self_insns": 360871,
+      "self_cycles": 444797,
+      "calls": 2352,
+      "tailcalls": 0
+    },
+    {
+      "function": "R_EnableMultitexture",
+      "cycles_per_frame": 1270.285294117647,
+      "percent": 0.021783510108350987,
+      "self_insns": 92370,
+      "self_cycles": 431897,
+      "calls": 1088,
+      "tailcalls": 0
+    },
+    {
+      "function": "COM_BlockSequenceCRCByte",
+      "cycles_per_frame": 1262.5764705882352,
+      "percent": 0.021651315210044243,
+      "self_insns": 104720,
+      "self_cycles": 429276,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "strlen",
+      "cycles_per_frame": 1260.3294117647058,
+      "percent": 0.021612781481579402,
+      "self_insns": 217446,
+      "self_cycles": 428512,
+      "calls": 5568,
+      "tailcalls": 0
+    },
+    {
+      "function": "RotatePointAroundVector",
+      "cycles_per_frame": 1118.6529411764707,
+      "percent": 0.019183239989234546,
+      "self_insns": 165920,
+      "self_cycles": 380342,
+      "calls": 1360,
+      "tailcalls": 0
+    },
+    {
+      "function": "memchr",
+      "cycles_per_frame": 1116.6882352941177,
+      "percent": 0.01914954819523649,
+      "self_insns": 197602,
+      "self_cycles": 379674,
+      "calls": 3866,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_TexEnvi",
+      "cycles_per_frame": 1075.629411764706,
+      "percent": 0.01844545022485795,
+      "self_insns": 174048,
+      "self_cycles": 365714,
+      "calls": 12432,
+      "tailcalls": 0
+    },
+    {
+      "function": "pop_arg",
+      "cycles_per_frame": 1014.1676470588235,
+      "percent": 0.017391472052436723,
+      "self_insns": 105238,
+      "self_cycles": 344817,
+      "calls": 4546,
+      "tailcalls": 0
+    },
+    {
+      "function": "sn_write",
+      "cycles_per_frame": 960.0117647058823,
+      "percent": 0.016462778934343596,
+      "self_insns": 200024,
+      "self_cycles": 326404,
+      "calls": 4546,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_ClientActiveTexture",
+      "cycles_per_frame": 954.2294117647059,
+      "percent": 0.016363620151409197,
+      "self_insns": 215604,
+      "self_cycles": 324438,
+      "calls": 35934,
+      "tailcalls": 0
+    },
+    {
+      "function": "CL_SendCmd",
+      "cycles_per_frame": 935.9264705882352,
+      "percent": 0.016049751836963232,
+      "self_insns": 62220,
+      "self_cycles": 318215,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "__strtol_internal",
+      "cycles_per_frame": 930.5764705882353,
+      "percent": 0.0159580072661811,
+      "self_insns": 163502,
+      "self_cycles": 316396,
+      "calls": 5638,
+      "tailcalls": 0
+    },
+    {
+      "function": "SCR_DrawFieldScaled",
+      "cycles_per_frame": 916.9058823529411,
+      "percent": 0.015723576939080854,
+      "self_insns": 91552,
+      "self_cycles": 311748,
+      "calls": 680,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_ActiveTexture",
+      "cycles_per_frame": 913.1176470588235,
+      "percent": 0.015658614318318137,
+      "self_insns": 215604,
+      "self_cycles": 310460,
+      "calls": 35934,
+      "tailcalls": 0
+    },
+    {
+      "function": "R_RotateForEntity",
+      "cycles_per_frame": 908.8470588235294,
+      "percent": 0.01558538005950799,
+      "self_insns": 181032,
+      "self_cycles": 309008,
+      "calls": 4764,
+      "tailcalls": 0
+    },
+    {
+      "function": "Netchan_Transmit",
+      "cycles_per_frame": 904.0147058823529,
+      "percent": 0.015502512368581635,
+      "self_insns": 63580,
+      "self_cycles": 307365,
+      "calls": 680,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_BindTexture",
+      "cycles_per_frame": 888.6970588235295,
+      "percent": 0.015239837423758465,
+      "self_insns": 163962,
+      "self_cycles": 302157,
+      "calls": 27327,
+      "tailcalls": 0
+    },
+    {
+      "function": "PerpendicularVector",
+      "cycles_per_frame": 865.6411764705882,
+      "percent": 0.014844463212454929,
+      "self_insns": 80910,
+      "self_cycles": 294318,
+      "calls": 1360,
+      "tailcalls": 0
+    },
+    {
+      "function": "RI_EndFrame",
+      "cycles_per_frame": 844.7882352941176,
+      "percent": 0.0144868661773558,
+      "self_insns": 32640,
+      "self_cycles": 287228,
+      "calls": 0,
+      "tailcalls": 340
+    },
+    {
+      "function": "vsnprintf",
+      "cycles_per_frame": 830.2470588235294,
+      "percent": 0.014237506552316294,
+      "self_insns": 172748,
+      "self_cycles": 282284,
+      "calls": 4546,
+      "tailcalls": 0
+    },
+    {
+      "function": "__ltdf2",
+      "cycles_per_frame": 815.8382352941177,
+      "percent": 0.013990416584058096,
+      "self_insns": 52457,
+      "self_cycles": 277385,
+      "calls": 1865,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_Translatef",
+      "cycles_per_frame": 809.9382352941177,
+      "percent": 0.013889240328429201,
+      "self_insns": 136100,
+      "self_cycles": 275379,
+      "calls": 5444,
+      "tailcalls": 0
+    },
+    {
+      "function": "CL_ExplosionParticles",
+      "cycles_per_frame": 797.7235294117647,
+      "percent": 0.013679776225923325,
+      "self_insns": 111820,
+      "self_cycles": 271226,
+      "calls": 4,
+      "tailcalls": 0
+    },
+    {
+      "function": "wrapper_cmp",
+      "cycles_per_frame": 733.4294117647058,
+      "percent": 0.012577227398382143,
+      "self_insns": 82442,
+      "self_cycles": 249366,
+      "calls": 82442,
+      "tailcalls": 0
+    },
+    {
+      "function": "memrchr",
+      "cycles_per_frame": 719.9117647058823,
+      "percent": 0.012345419785784741,
+      "self_insns": 119877,
+      "self_cycles": 244770,
+      "calls": 0,
+      "tailcalls": 3867
+    },
+    {
+      "function": "ofgl_Frustumf",
+      "cycles_per_frame": 683.2735294117647,
+      "percent": 0.011717128351901827,
+      "self_insns": 34680,
+      "self_cycles": 232313,
+      "calls": 0,
+      "tailcalls": 680
+    },
+    {
+      "function": "atanf",
+      "cycles_per_frame": 681.5264705882353,
+      "percent": 0.011687168882388585,
+      "self_insns": 39440,
+      "self_cycles": 231719,
+      "calls": 680,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_VertexPointer",
+      "cycles_per_frame": 666.3058823529411,
+      "percent": 0.011426158352538374,
+      "self_insns": 134298,
+      "self_cycles": 226544,
+      "calls": 22383,
+      "tailcalls": 0
+    },
+    {
+      "function": "MSG_WriteDeltaUsercmd",
+      "cycles_per_frame": 663.0176470588235,
+      "percent": 0.011369769990727257,
+      "self_insns": 81600,
+      "self_cycles": 225426,
+      "calls": 1020,
+      "tailcalls": 0
+    },
+    {
+      "function": "CL_AllocEntity",
+      "cycles_per_frame": 661.8294117647059,
+      "percent": 0.011349393516512863,
+      "self_insns": 119090,
+      "self_cycles": 225022,
+      "calls": 11909,
+      "tailcalls": 0
+    },
+    {
+      "function": "Pmove",
+      "cycles_per_frame": 645.2264705882353,
+      "percent": 0.011064677682502345,
+      "self_insns": 53712,
+      "self_cycles": 219377,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "__gtdf2",
+      "cycles_per_frame": 598.2264705882353,
+      "percent": 0.01025869734105184,
+      "self_insns": 52362,
+      "self_cycles": 203397,
+      "calls": 1865,
+      "tailcalls": 0
+    },
+    {
+      "function": "Netchan_Process",
+      "cycles_per_frame": 597.2676470588235,
+      "percent": 0.010242254938591709,
+      "self_insns": 49300,
+      "self_cycles": 203071,
+      "calls": 680,
+      "tailcalls": 0
+    },
+    {
+      "function": "__fixdfsi",
+      "cycles_per_frame": 588.9176470588235,
+      "percent": 0.010099064814099971,
+      "self_insns": 52220,
+      "self_cycles": 200232,
+      "calls": 1865,
+      "tailcalls": 0
+    },
+    {
+      "function": "RDraw_PicScaledCol",
+      "cycles_per_frame": 586.9029411764706,
+      "percent": 0.010064515594206755,
+      "self_insns": 57460,
+      "self_cycles": 199547,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "R_CullBox",
+      "cycles_per_frame": 584.2029411764706,
+      "percent": 0.01001821459586811,
+      "self_insns": 102176,
+      "self_cycles": 198629,
+      "calls": 2940,
+      "tailcalls": 0
+    },
+    {
+      "function": "strchrnul",
+      "cycles_per_frame": 579.9411764705883,
+      "percent": 0.00994513164751005,
+      "self_insns": 81600,
+      "self_cycles": 197180,
+      "calls": 2040,
+      "tailcalls": 0
+    },
+    {
+      "function": "SV_SendClientMessages",
+      "cycles_per_frame": 560.1735294117647,
+      "percent": 0.009606145798017631,
+      "self_insns": 39100,
+      "self_cycles": 190459,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "__floatscan",
+      "cycles_per_frame": 551.2,
+      "percent": 0.009452263068245073,
+      "self_insns": 30600,
+      "self_cycles": 187408,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "SCR_DrawConsole",
+      "cycles_per_frame": 546.8941176470588,
+      "percent": 0.009378423567626578,
+      "self_insns": 43860,
+      "self_cycles": 185944,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "R_FindPic",
+      "cycles_per_frame": 540.4764705882353,
+      "percent": 0.00926837043214191,
+      "self_insns": 64699,
+      "self_cycles": 183762,
+      "calls": 2813,
+      "tailcalls": 0
+    },
+    {
+      "function": "Con_CheckResize",
+      "cycles_per_frame": 529.0117647058823,
+      "percent": 0.009071767718063433,
+      "self_insns": 24140,
+      "self_cycles": 179864,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "R_SetGL2D",
+      "cycles_per_frame": 516.9411764705883,
+      "percent": 0.00886477501960831,
+      "self_insns": 24480,
+      "self_cycles": 175760,
+      "calls": 0,
+      "tailcalls": 340
+    },
+    {
+      "function": "MSG_ReadPos",
+      "cycles_per_frame": 509.16470588235296,
+      "percent": 0.008731420074502231,
+      "self_insns": 95247,
+      "self_cycles": 173116,
+      "calls": 1671,
+      "tailcalls": 0
+    },
+    {
+      "function": "tanf",
+      "cycles_per_frame": 498.5705882352941,
+      "percent": 0.008549746658363012,
+      "self_insns": 34680,
+      "self_cycles": 169514,
+      "calls": 1360,
+      "tailcalls": 0
+    },
+    {
+      "function": "SCR_StopCinematic",
+      "cycles_per_frame": 482.4117647058824,
+      "percent": 0.008272646783774209,
+      "self_insns": 8840,
+      "self_cycles": 164020,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "fread_unlocked",
+      "cycles_per_frame": 474.83235294117645,
+      "percent": 0.008142671105431409,
+      "self_insns": 38093,
+      "self_cycles": 161443,
+      "calls": 680,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_Clear",
+      "cycles_per_frame": 472.6,
+      "percent": 0.008104389561053377,
+      "self_insns": 37740,
+      "self_cycles": 160684,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "RI_RenderFrame",
+      "cycles_per_frame": 459.02647058823527,
+      "percent": 0.007871623648926088,
+      "self_insns": 5780,
+      "self_cycles": 156069,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "Cvar_CopyString",
+      "cycles_per_frame": 455.29411764705884,
+      "percent": 0.007807619327693254,
+      "self_insns": 27540,
+      "self_cycles": 154800,
+      "calls": 1020,
+      "tailcalls": 0
+    },
+    {
+      "function": "CL_BlasterTrail",
+      "cycles_per_frame": 445.71176470588233,
+      "percent": 0.007643296176726687,
+      "self_insns": 47880,
+      "self_cycles": 151542,
+      "calls": 40,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_PopMatrix",
+      "cycles_per_frame": 426.97058823529414,
+      "percent": 0.007321912776493732,
+      "self_insns": 70772,
+      "self_cycles": 145170,
+      "calls": 5444,
+      "tailcalls": 0
+    },
+    {
+      "function": "Com_sprintf",
+      "cycles_per_frame": 419.11764705882354,
+      "percent": 0.007187246474136231,
+      "self_insns": 77282,
+      "self_cycles": 142500,
+      "calls": 4546,
+      "tailcalls": 0
+    },
+    {
+      "function": "CL_SmokeAndFlash",
+      "cycles_per_frame": 404.59411764705885,
+      "percent": 0.0069381894700009,
+      "self_insns": 28161,
+      "self_cycles": 137562,
+      "calls": 204,
+      "tailcalls": 0
+    },
+    {
+      "function": "__shlim",
+      "cycles_per_frame": 401.61176470588236,
+      "percent": 0.006887046537195468,
+      "self_insns": 82134,
+      "self_cycles": 136548,
+      "calls": 6318,
+      "tailcalls": 0
+    },
+    {
+      "function": "strnlen",
+      "cycles_per_frame": 393.38823529411764,
+      "percent": 0.00674602519585031,
+      "self_insns": 61856,
+      "self_cycles": 133752,
+      "calls": 3866,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_LoadIdentity",
+      "cycles_per_frame": 390.34705882352944,
+      "percent": 0.006693873526697631,
+      "self_insns": 78302,
+      "self_cycles": 132718,
+      "calls": 2482,
+      "tailcalls": 0
+    },
+    {
+      "function": "OFQ2_ClearRect",
+      "cycles_per_frame": 369.57941176470587,
+      "percent": 0.00633773915930201,
+      "self_insns": 58480,
+      "self_cycles": 125657,
+      "calls": 680,
+      "tailcalls": 0
+    },
+    {
+      "function": "__towrite",
+      "cycles_per_frame": 355.18823529411765,
+      "percent": 0.006090951811947984,
+      "self_insns": 77282,
+      "self_cycles": 120764,
+      "calls": 4546,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_Disable",
+      "cycles_per_frame": 337.59411764705885,
+      "percent": 0.0057892387704863504,
+      "self_insns": 39449,
+      "self_cycles": 114782,
+      "calls": 4687,
+      "tailcalls": 0
+    },
+    {
+      "function": "RDraw_GetPicSize",
+      "cycles_per_frame": 332.32941176470587,
+      "percent": 0.005698956867407727,
+      "self_insns": 33696,
+      "self_cycles": 112992,
+      "calls": 1053,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_Orthof",
+      "cycles_per_frame": 321.74117647058824,
+      "percent": 0.005517384324903233,
+      "self_insns": 24480,
+      "self_cycles": 109392,
+      "calls": 680,
+      "tailcalls": 0
+    },
+    {
+      "function": "__floatsidf",
+      "cycles_per_frame": 316.18529411764706,
+      "percent": 0.005422109176905735,
+      "self_insns": 43520,
+      "self_cycles": 107503,
+      "calls": 1360,
+      "tailcalls": 0
+    },
+    {
+      "function": "Cbuf_Execute",
+      "cycles_per_frame": 305.2176470588235,
+      "percent": 0.005234030284961497,
+      "self_insns": 21080,
+      "self_cycles": 103774,
+      "calls": 680,
+      "tailcalls": 0
+    },
+    {
+      "function": "FS_FRead",
+      "cycles_per_frame": 299.72352941176473,
+      "percent": 0.00513981431012861,
+      "self_insns": 33320,
+      "self_cycles": 101906,
+      "calls": 680,
+      "tailcalls": 0
+    },
+    {
+      "function": "__divdi3",
+      "cycles_per_frame": 287.6058823529412,
+      "percent": 0.004932014622595688,
+      "self_insns": 18020,
+      "self_cycles": 97786,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "strrchr",
+      "cycles_per_frame": 286.2529411764706,
+      "percent": 0.004908813686609003,
+      "self_insns": 58005,
+      "self_cycles": 97326,
+      "calls": 3867,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_Color4f",
+      "cycles_per_frame": 277.45588235294116,
+      "percent": 0.0047579571658781855,
+      "self_insns": 53361,
+      "self_cycles": 94335,
+      "calls": 7283,
+      "tailcalls": 340
+    },
+    {
+      "function": "Qcommon_Init",
+      "cycles_per_frame": 267.00882352941176,
+      "percent": 0.004578805590607084,
+      "self_insns": 9520,
+      "self_cycles": 90783,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "decfloat",
+      "cycles_per_frame": 262.3058823529412,
+      "percent": 0.004498157119644672,
+      "self_insns": 34680,
+      "self_cycles": 89184,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_Enable",
+      "cycles_per_frame": 258.73823529411766,
+      "percent": 0.004436977260184129,
+      "self_insns": 32168,
+      "self_cycles": 87971,
+      "calls": 3225,
+      "tailcalls": 0
+    },
+    {
+      "function": "CL_BlasterParticles",
+      "cycles_per_frame": 254.60588235294117,
+      "percent": 0.004366113531790014,
+      "self_insns": 25068,
+      "self_cycles": 86566,
+      "calls": 6,
+      "tailcalls": 0
+    },
+    {
+      "function": "ClientEndServerFrames",
+      "cycles_per_frame": 241.78823529411764,
+      "percent": 0.004146309881724852,
+      "self_insns": 15300,
+      "self_cycles": 82208,
+      "calls": 0,
+      "tailcalls": 340
+    },
+    {
+      "function": "ofgl_clear_fb565",
+      "cycles_per_frame": 236.19411764705882,
+      "percent": 0.0040503790551016435,
+      "self_insns": 22440,
+      "self_cycles": 80306,
+      "calls": 340,
+      "tailcalls": 340
+    },
+    {
+      "function": "ofgl_Viewport",
+      "cycles_per_frame": 223.19411764705882,
+      "percent": 0.0038274483223600143,
+      "self_insns": 13260,
+      "self_cycles": 75886,
+      "calls": 1020,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_ColorPointer",
+      "cycles_per_frame": 210.03529411764706,
+      "percent": 0.0036017940014808182,
+      "self_insns": 28134,
+      "self_cycles": 71412,
+      "calls": 4689,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_noop",
+      "cycles_per_frame": 207.42352941176472,
+      "percent": 0.003557006107663043,
+      "self_insns": 13582,
+      "self_cycles": 70524,
+      "calls": 13582,
+      "tailcalls": 0
+    },
+    {
+      "function": "setjmp",
+      "cycles_per_frame": 202.1764705882353,
+      "percent": 0.003467026825488593,
+      "self_insns": 9520,
+      "self_cycles": 68740,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "VID_CheckChanges",
+      "cycles_per_frame": 200.56470588235294,
+      "percent": 0.0034393874495740203,
+      "self_insns": 3060,
+      "self_cycles": 68192,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_DepthRangef",
+      "cycles_per_frame": 192.66764705882352,
+      "percent": 0.003303964594956085,
+      "self_insns": 10200,
+      "self_cycles": 65507,
+      "calls": 1020,
+      "tailcalls": 0
+    },
+    {
+      "function": "CL_ParseTEnt",
+      "cycles_per_frame": 187.71764705882353,
+      "percent": 0.003219079431335234,
+      "self_insns": 11831,
+      "self_cycles": 63824,
+      "calls": 268,
+      "tailcalls": 0
+    },
+    {
+      "function": "__trunctfdf2",
+      "cycles_per_frame": 161.8294117647059,
+      "percent": 0.0027751345649117453,
+      "self_insns": 29240,
+      "self_cycles": 55022,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "strchr",
+      "cycles_per_frame": 148.2,
+      "percent": 0.0025414103532545715,
+      "self_insns": 30600,
+      "self_cycles": 50388,
+      "calls": 2040,
+      "tailcalls": 0
+    },
+    {
+      "function": "RDraw_CharScaled",
+      "cycles_per_frame": 133.2,
+      "percent": 0.002284182584706538,
+      "self_insns": 8865,
+      "self_cycles": 45288,
+      "calls": 207,
+      "tailcalls": 0
+    },
+    {
+      "function": "strtod",
+      "cycles_per_frame": 116.01764705882353,
+      "percent": 0.0019895306976756336,
+      "self_insns": 11900,
+      "self_cycles": 39446,
+      "calls": 0,
+      "tailcalls": 340
+    },
+    {
+      "function": "stpcpy",
+      "cycles_per_frame": 111.32352941176471,
+      "percent": 0.0019090335371653078,
+      "self_insns": 22780,
+      "self_cycles": 37850,
+      "calls": 1020,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_TexSubImage2D",
+      "cycles_per_frame": 102.24117647058823,
+      "percent": 0.0017532846451503417,
+      "self_insns": 16072,
+      "self_cycles": 34762,
+      "calls": 574,
+      "tailcalls": 0
+    },
+    {
+      "function": "strcpy",
+      "cycles_per_frame": 100.8529411764706,
+      "percent": 0.001729478467355308,
+      "self_insns": 10200,
+      "self_cycles": 34290,
+      "calls": 1020,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_MatrixMode",
+      "cycles_per_frame": 99.2764705882353,
+      "percent": 0.0017024443332490833,
+      "self_insns": 6800,
+      "self_cycles": 33754,
+      "calls": 3400,
+      "tailcalls": 0
+    },
+    {
+      "function": "MSG_ReadDir",
+      "cycles_per_frame": 96.76176470588236,
+      "percent": 0.001659320854404266,
+      "self_insns": 7656,
+      "self_cycles": 32899,
+      "calls": 264,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_DepthMask",
+      "cycles_per_frame": 90.3970588235294,
+      "percent": 0.0015501755816321196,
+      "self_insns": 3690,
+      "self_cycles": 30735,
+      "calls": 1230,
+      "tailcalls": 0
+    },
+    {
+      "function": "CL_AddMuzzleFlash",
+      "cycles_per_frame": 84.54705882352941,
+      "percent": 0.0014498567518983867,
+      "self_insns": 2786,
+      "self_cycles": 28746,
+      "calls": 13,
+      "tailcalls": 0
+    },
+    {
+      "function": "SV_SendPrepClientMessages",
+      "cycles_per_frame": 84.12058823529412,
+      "percent": 0.0014425434133808449,
+      "self_insns": 2040,
+      "self_cycles": 28601,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_LoadMatrixf",
+      "cycles_per_frame": 74.59705882352941,
+      "percent": 0.0012792289987615245,
+      "self_insns": 7480,
+      "self_cycles": 25363,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "fabsf",
+      "cycles_per_frame": 72.8264705882353,
+      "percent": 0.0012488660347093842,
+      "self_insns": 1360,
+      "self_cycles": 24761,
+      "calls": 680,
+      "tailcalls": 0
+    },
+    {
+      "function": "S_RegisterSound",
+      "cycles_per_frame": 66.22941176470589,
+      "percent": 0.0011357362533656117,
+      "self_insns": 1474,
+      "self_cycles": 22518,
+      "calls": 134,
+      "tailcalls": 0
+    },
+    {
+      "function": "___errno_location",
+      "cycles_per_frame": 61.36470588235294,
+      "percent": 0.0010523137574482689,
+      "self_insns": 1020,
+      "self_cycles": 20864,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "atof",
+      "cycles_per_frame": 48.01470588235294,
+      "percent": 0.0008233810434405191,
+      "self_insns": 680,
+      "self_cycles": 16325,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "__stdio_read",
+      "cycles_per_frame": 41.65294117647059,
+      "percent": 0.0007142862074857355,
+      "self_insns": 2961,
+      "self_cycles": 14162,
+      "calls": 63,
+      "tailcalls": 0
+    },
+    {
+      "function": "M_Draw",
+      "cycles_per_frame": 38.0,
+      "percent": 0.000651643680321685,
+      "self_insns": 1700,
+      "self_cycles": 12920,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "qsort",
+      "cycles_per_frame": 34.129411764705885,
+      "percent": 0.0005852688286728198,
+      "self_insns": 1360,
+      "self_cycles": 11604,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "RI_IsVSyncActive",
+      "cycles_per_frame": 34.0,
+      "percent": 0.000583049608708876,
+      "self_insns": 680,
+      "self_cycles": 11560,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_CullFace",
+      "cycles_per_frame": 34.0,
+      "percent": 0.000583049608708876,
+      "self_insns": 680,
+      "self_cycles": 11560,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "LongNoSwap",
+      "cycles_per_frame": 33.0,
+      "percent": 0.0005659010908056738,
+      "self_insns": 340,
+      "self_cycles": 11220,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_GetFloatv",
+      "cycles_per_frame": 27.0,
+      "percent": 0.0004630099833864604,
+      "self_insns": 6460,
+      "self_cycles": 9180,
+      "calls": 340,
+      "tailcalls": 0
+    },
+    {
+      "function": "__toread",
+      "cycles_per_frame": 15.16764705882353,
+      "percent": 0.00026010266713768804,
+      "self_insns": 1764,
+      "self_cycles": 5157,
+      "calls": 63,
+      "tailcalls": 0
+    },
+    {
+      "function": "__syscall_ret",
+      "cycles_per_frame": 9.061764705882354,
+      "percent": 0.00015539583429342968,
+      "self_insns": 630,
+      "self_cycles": 3081,
+      "calls": 63,
+      "tailcalls": 0
+    },
+    {
+      "function": "S_StartSound",
+      "cycles_per_frame": 7.897058823529412,
+      "percent": 0.00013542285461793532,
+      "self_insns": 63,
+      "self_cycles": 2685,
+      "calls": 21,
+      "tailcalls": 0
+    },
+    {
+      "function": "Mod_ForName",
+      "cycles_per_frame": 3.6882352941176473,
+      "percent": 6.324776897239883e-05,
+      "self_insns": 130,
+      "self_cycles": 1254,
+      "calls": 1,
+      "tailcalls": 0
+    },
+    {
+      "function": "acosf",
+      "cycles_per_frame": 1.8764705882352941,
+      "percent": 3.2178689477185376e-05,
+      "self_insns": 114,
+      "self_cycles": 638,
+      "calls": 6,
+      "tailcalls": 0
+    },
+    {
+      "function": "RI_RegisterModel",
+      "cycles_per_frame": 1.8058823529411765,
+      "percent": 3.096820586048874e-05,
+      "self_insns": 50,
+      "self_cycles": 614,
+      "calls": 1,
+      "tailcalls": 0
+    },
+    {
+      "function": "frandk",
+      "cycles_per_frame": 1.2705882352941176,
+      "percent": 2.178870510053931e-05,
+      "self_insns": 176,
+      "self_cycles": 432,
+      "calls": 2,
+      "tailcalls": 0
+    },
+    {
+      "function": "atan2f",
+      "cycles_per_frame": 1.2029411764705882,
+      "percent": 2.0628658301205044e-05,
+      "self_insns": 83,
+      "self_cycles": 409,
+      "calls": 3,
+      "tailcalls": 0
+    },
+    {
+      "function": "sqrtf",
+      "cycles_per_frame": 0.2647058823529412,
+      "percent": 4.539313562612356e-06,
+      "self_insns": 2,
+      "self_cycles": 90,
+      "calls": 1,
+      "tailcalls": 0
+    },
+    {
+      "function": "CL_ClearState",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "CL_LoadClientinfo",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "CL_Precache_f",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "CL_PrepRefresh",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "CL_RegisterSounds",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "CL_SendConnectPacket",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "CM_LoadMap",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Cbuf_AddEarlyCommands",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Cbuf_AddText",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Cbuf_InsertText",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "ClientConnect",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "ClientUserinfoChanged",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Cmd_AddCommand",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Cmd_Alias_f",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Cmd_Exec_f",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Cmd_ExecuteString",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Cmd_MacroExpandString",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Cmd_TokenizeString",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Com_DPrintf",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Com_Printf",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Com_VPrintf",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Cvar_AddToList",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Cvar_FullSet",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Cvar_Set",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Cvar_Set2",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Cvar_SetValue",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Cvar_SetVar",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Cvar_Set_f",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "DoMD4",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "FS_AddDirToRawPath",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "FS_AddDirToSearchPath",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "FS_BuildGenericSearchPath",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "FS_CreatePath",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "FS_DPrintf",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "FS_FCloseFile",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "FS_FOpenFile",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "FS_FreeFile",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "FS_ListFiles",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "FS_LoadFile",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "FS_LoadPAK",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "FS_LoadPK3",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "FS_Read",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "FS_SortPackCompare",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "FixFileExt",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "FloatNoSwap",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "FloodAreaConnections",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "GI_FreeTags",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "GI_TagMalloc",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "GLimp_InitGraphics",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "G_SpawnOptional",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "GetPCXPalette",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Info_SetValueForKey",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Info_ValueForKey",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "InitAllocations",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "InitGame",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Key_Bind_f",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Key_ReadConsoleHistory",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Key_Unbindall_f",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "LM_UploadBlock",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "LoadPCX",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "LoadSTB",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Menu_AdjustCursor",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Menu_Center",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Mod_SetParent",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Netchan_OutOfBand",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Netchan_OutOfBandPrint",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "OFQ2_TexCreate",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "OF_SaveFS_FindFirst",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "OF_SaveFS_Fopen",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "OGG_InitTrackList",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "OGG_PlayTrack",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "PF_Configstring",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "PF_dprintf",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "PerformMD4",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Q_fopen",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Q_strlcpy",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "RDraw_FindPic",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "RI_BeginRegistration",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "RI_EndRegistration",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "RI_EndWorldRenderpass",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "RI_GetDrawableSize",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "RI_GetProcAddress",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "RI_Init",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "RI_InitContext",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "RI_RegisterSkin",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "RI_SetPalette",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "RI_SetSky",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "R_FloodFillSkin",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "R_InitParticleTexture",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "R_LightScaleTexture",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "R_LoadPic",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "R_SubdividePolygon",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "R_SubdivideSurface",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "R_TextureMode",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "R_Upload32",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "R_Upload8",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "SCR_BeginLoadingPlaque",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "SCR_TouchPics",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "SVC_DirectConnect",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "SV_BeginDemoserver",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "SV_BroadcastCommand",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "SV_CheckForSavegame",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "SV_ClearWorld",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "SV_CreateAreaNode",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "SV_DemoMap_f",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "SV_InitGame",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "SV_Map",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "SV_Multicast",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "SV_New_f",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "SV_SpawnServer",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "SV_UserinfoChanged",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "SaveClientData",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "SetMode_impl",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "ShortNoSwap",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "ShortSwap",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "SpawnEntities",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Sys_Mkdir",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "VID_GetModeInfo",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "VID_LoadRenderer",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "VID_MenuInit",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "VID_RequestRestart",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "VID_ShutdownRenderer",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Z_Free",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Z_Malloc",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Z_TagMalloc",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "Z_TagRealloc",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__addtf3",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__copy_tls",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__divtf3",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__extenddftf2",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__floatsitf",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__floatunsitf",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__fmodeflags",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__fpclassifyl",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__fseeko_unlocked",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__ftello_unlocked",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__gttf2",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__init_libc",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__init_tp",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__isoc99_sscanf",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__isoc99_vfscanf",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__isoc99_vsscanf",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__libc_free",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__libc_malloc_impl",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__libc_realloc",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__libc_start_main",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__lock",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__lttf2",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__malloc_alloc_meta",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__malloc_allzerop",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__multf3",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__netf2",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__ofl_add",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__ofl_lock",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__ofl_unlock",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__overflow",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__set_thread_area",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__shgetc",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__stdio_close",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__stdio_seek",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__stdio_write",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__stdout_write",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__subtf3",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__syscall_cp",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__trunctfsf2",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__udivdi3",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__uflow",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__umoddi3",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "__unlock",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "_start",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "_start_c",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "alloc_slot",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "calcWarpPolySize",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "calloc",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "clock_gettime",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "close",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "closedir",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "copysignl",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "default_malloc",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "dummy",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "dummy1",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "fabsl",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "fclose",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "fdopen",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "fflush_unlocked",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "fmodl",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "fopen",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "fopen64_file_func",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "fputs_unlocked",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "free",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "fseek",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "fstatat",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "ftell",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "fwrite_unlocked",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "get_meta",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "getauxval",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "libc_start_init",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "libc_start_main_stage2",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "lseek",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "main",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "memmove",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "mkdir",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "mmap",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "munmap",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "nontrivial_free",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "of_runtime_init",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_ClearColor",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_GetString",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofgl_TexImage2D",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofs_preload_slots",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofs_resolve",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "ofs_split",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "open",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "opendir",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "pad",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "printf",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "putchar",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "puts",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "readdir",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "realloc",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "scalbn",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "scalbnl",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "sccp",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "setbuf",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "setvbuf",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "snprintf",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "stat",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "static_init_tls",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "stbi__convert_format",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "stbi__get16le",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "stbi__get32be",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "stbi__get_marker",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "stbi__load_and_postprocess_8bit",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "stbi__tga_load",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "strcasecmp",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "strcat",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "string_read",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "strncmp",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "strstr",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "time",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "tolower",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "twoway_strstr",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "unzOpenInternal",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    },
+    {
+      "function": "va",
+      "cycles_per_frame": 0.0,
+      "percent": 0.0,
+      "self_insns": 0,
+      "self_cycles": 0,
+      "calls": 0,
+      "tailcalls": 0
+    }
+  ],
+  "services": {
+    "svc:video_check_mode": 0,
+    "svc:input_poll": 340,
+    "svc:video_get_mode": 0,
+    "svc:cache_flush_range": 0,
+    "svc:video_init": 0,
+    "svc:video_flip": 340,
+    "svc:video_get_surface": 340,
+    "svc:video_set_mode": 0,
+    "svc:input_get_keyboard_state": 340,
+    "svc:input_get_state": 1020,
+    "svc:video_wait_flip": 0
+  },
+  "captures": {
+    "pixel_sha256": "3a037272bedee1893c456dc85b13e71586577d2625533434638d866f5f4db973",
+    "command_sha256": "785ee846bbc094e3df210a9ce4de6075661a107e7f7abc14cfded4cd11b3d247",
+    "command_count": 768864,
+    "full_frame_sha256": {
+      "0": "0c5cc90b079d0d9c1ded1376357d23a9782a704a83e01731f50ccd162e246492",
+      "1": "0c5cc90b079d0d9c1ded1376357d23a9782a704a83e01731f50ccd162e246492",
+      "2": "0c5cc90b079d0d9c1ded1376357d23a9782a704a83e01731f50ccd162e246492",
+      "3": "a65a89384cc24c9caeb66ec8ddee09a5c518db27416b9805e1131ae97626f9ca",
+      "4": "de01ddc9c24d2995d6c76bbad15266822ec719b8ff8714f7b4bc15a3806fae37",
+      "5": "de01ddc9c24d2995d6c76bbad15266822ec719b8ff8714f7b4bc15a3806fae37",
+      "6": "de01ddc9c24d2995d6c76bbad15266822ec719b8ff8714f7b4bc15a3806fae37",
+      "7": "de01ddc9c24d2995d6c76bbad15266822ec719b8ff8714f7b4bc15a3806fae37",
+      "8": "de01ddc9c24d2995d6c76bbad15266822ec719b8ff8714f7b4bc15a3806fae37",
+      "9": "de01ddc9c24d2995d6c76bbad15266822ec719b8ff8714f7b4bc15a3806fae37",
+      "10": "de01ddc9c24d2995d6c76bbad15266822ec719b8ff8714f7b4bc15a3806fae37",
+      "11": "de01ddc9c24d2995d6c76bbad15266822ec719b8ff8714f7b4bc15a3806fae37",
+      "12": "de01ddc9c24d2995d6c76bbad15266822ec719b8ff8714f7b4bc15a3806fae37",
+      "13": "de01ddc9c24d2995d6c76bbad15266822ec719b8ff8714f7b4bc15a3806fae37",
+      "14": "de01ddc9c24d2995d6c76bbad15266822ec719b8ff8714f7b4bc15a3806fae37",
+      "15": "de01ddc9c24d2995d6c76bbad15266822ec719b8ff8714f7b4bc15a3806fae37",
+      "16": "de01ddc9c24d2995d6c76bbad15266822ec719b8ff8714f7b4bc15a3806fae37",
+      "17": "de01ddc9c24d2995d6c76bbad15266822ec719b8ff8714f7b4bc15a3806fae37",
+      "18": "1537abc9464639da61beb6d58a5069b3f3f8de59db5227baa153ec8b8d972271",
+      "19": "1537abc9464639da61beb6d58a5069b3f3f8de59db5227baa153ec8b8d972271",
+      "20": "1537abc9464639da61beb6d58a5069b3f3f8de59db5227baa153ec8b8d972271",
+      "21": "1537abc9464639da61beb6d58a5069b3f3f8de59db5227baa153ec8b8d972271",
+      "22": "1537abc9464639da61beb6d58a5069b3f3f8de59db5227baa153ec8b8d972271",
+      "23": "1537abc9464639da61beb6d58a5069b3f3f8de59db5227baa153ec8b8d972271",
+      "24": "1537abc9464639da61beb6d58a5069b3f3f8de59db5227baa153ec8b8d972271",
+      "25": "1537abc9464639da61beb6d58a5069b3f3f8de59db5227baa153ec8b8d972271",
+      "26": "1537abc9464639da61beb6d58a5069b3f3f8de59db5227baa153ec8b8d972271",
+      "27": "1537abc9464639da61beb6d58a5069b3f3f8de59db5227baa153ec8b8d972271",
+      "28": "1537abc9464639da61beb6d58a5069b3f3f8de59db5227baa153ec8b8d972271",
+      "29": "1537abc9464639da61beb6d58a5069b3f3f8de59db5227baa153ec8b8d972271",
+      "30": "571558a2753b3a52df4a6eb1ce625795ce562d98cbff6c541c7b48562c2a98a4",
+      "31": "571558a2753b3a52df4a6eb1ce625795ce562d98cbff6c541c7b48562c2a98a4",
+      "32": "571558a2753b3a52df4a6eb1ce625795ce562d98cbff6c541c7b48562c2a98a4",
+      "33": "571558a2753b3a52df4a6eb1ce625795ce562d98cbff6c541c7b48562c2a98a4",
+      "34": "571558a2753b3a52df4a6eb1ce625795ce562d98cbff6c541c7b48562c2a98a4",
+      "35": "571558a2753b3a52df4a6eb1ce625795ce562d98cbff6c541c7b48562c2a98a4",
+      "36": "571558a2753b3a52df4a6eb1ce625795ce562d98cbff6c541c7b48562c2a98a4",
+      "37": "571558a2753b3a52df4a6eb1ce625795ce562d98cbff6c541c7b48562c2a98a4",
+      "38": "c5d85a78bd01911e628669fbd8cacedb032b6a749b7c025682b078120e87f8ce",
+      "39": "9fc29abb4378988fcd5cd972c9260100211ab00314c5a8020abf2e35e2419306",
+      "40": "9fc29abb4378988fcd5cd972c9260100211ab00314c5a8020abf2e35e2419306",
+      "41": "9fc29abb4378988fcd5cd972c9260100211ab00314c5a8020abf2e35e2419306",
+      "42": "83c970d3fa613e100d16cb8aca2509fffe27afb7a8b43980df3f998ad7c07fab",
+      "43": "229caf7cb2392832af3f361768459b15c5d346eb262a4250e5f3857f806e2178",
+      "44": "941a5a202df908e05a8dabdab6c0c1e1837687134ccd19bf52afafed09816610",
+      "45": "5d4bb3f5e66025f31c3e8d65f415f4e8f95236355ec3087bd7348c3803272859",
+      "46": "a9942b6982fba9840f7f43cd97a1748102a37f302917d4cb307fd7e5c17f1273",
+      "47": "a9942b6982fba9840f7f43cd97a1748102a37f302917d4cb307fd7e5c17f1273",
+      "48": "a9942b6982fba9840f7f43cd97a1748102a37f302917d4cb307fd7e5c17f1273",
+      "49": "a9942b6982fba9840f7f43cd97a1748102a37f302917d4cb307fd7e5c17f1273",
+      "50": "a9942b6982fba9840f7f43cd97a1748102a37f302917d4cb307fd7e5c17f1273",
+      "51": "a9942b6982fba9840f7f43cd97a1748102a37f302917d4cb307fd7e5c17f1273",
+      "52": "a9942b6982fba9840f7f43cd97a1748102a37f302917d4cb307fd7e5c17f1273",
+      "53": "a9942b6982fba9840f7f43cd97a1748102a37f302917d4cb307fd7e5c17f1273",
+      "54": "a9942b6982fba9840f7f43cd97a1748102a37f302917d4cb307fd7e5c17f1273",
+      "55": "a9942b6982fba9840f7f43cd97a1748102a37f302917d4cb307fd7e5c17f1273",
+      "56": "a9942b6982fba9840f7f43cd97a1748102a37f302917d4cb307fd7e5c17f1273",
+      "57": "a9942b6982fba9840f7f43cd97a1748102a37f302917d4cb307fd7e5c17f1273",
+      "58": "a9942b6982fba9840f7f43cd97a1748102a37f302917d4cb307fd7e5c17f1273",
+      "59": "a9942b6982fba9840f7f43cd97a1748102a37f302917d4cb307fd7e5c17f1273",
+      "60": "a9942b6982fba9840f7f43cd97a1748102a37f302917d4cb307fd7e5c17f1273",
+      "61": "a9942b6982fba9840f7f43cd97a1748102a37f302917d4cb307fd7e5c17f1273",
+      "62": "a9942b6982fba9840f7f43cd97a1748102a37f302917d4cb307fd7e5c17f1273",
+      "63": "a9942b6982fba9840f7f43cd97a1748102a37f302917d4cb307fd7e5c17f1273",
+      "64": "a9942b6982fba9840f7f43cd97a1748102a37f302917d4cb307fd7e5c17f1273",
+      "65": "a9942b6982fba9840f7f43cd97a1748102a37f302917d4cb307fd7e5c17f1273",
+      "66": "f7fd739c5f7a7424f9c4b2605e08e02b198c4d688b533c5e733857e5e949cc95",
+      "67": "137fd4180add3cb9b4f5fe064d94decbf223881b93aa372d1441c74cfb389c9b",
+      "68": "d003006bd1da00911407b4ec403567270db0c9dc86d9270e1d4e85af9617d155",
+      "69": "e828b895355853d02109bce8c0920b21098064448b6b5ccec51a6ac3af1e698a",
+      "70": "c7ae63fe1fac61289151700389eb858382c3887e29e8f6ba0a9fd89efe9646ab",
+      "71": "f3594ff5e493349d46af8301f46d0f09f3613091f6b269f5731b9f046afa17e6",
+      "72": "2bea0d810a05adac7f353204e402767e599bec78597271929f5768ad3203cdca",
+      "73": "2ff4125b4a69b56e3008d913f621dfc5a5f7724312937509bc21d832eccd30a8",
+      "74": "84d1b618b18c5a32fcce5c18e4e732747575cab3b47a59657c31e36790b4d558",
+      "75": "919663ce211de29784f49ce395d60ffb3cbeb79fbd22dedbbd9a2b1c00dfcda2",
+      "76": "8412819786d3d4018bdc7d00bec599f4934c16da3c6e8bec4bb0a4bfac43ee12",
+      "77": "a22b21d5bb8a195956f06fd72bdc0d9e0d24a8544542e781ccc17088378ebdf2",
+      "78": "a22b21d5bb8a195956f06fd72bdc0d9e0d24a8544542e781ccc17088378ebdf2",
+      "79": "a22b21d5bb8a195956f06fd72bdc0d9e0d24a8544542e781ccc17088378ebdf2",
+      "80": "a22b21d5bb8a195956f06fd72bdc0d9e0d24a8544542e781ccc17088378ebdf2",
+      "81": "a22b21d5bb8a195956f06fd72bdc0d9e0d24a8544542e781ccc17088378ebdf2",
+      "82": "a22b21d5bb8a195956f06fd72bdc0d9e0d24a8544542e781ccc17088378ebdf2",
+      "83": "a22b21d5bb8a195956f06fd72bdc0d9e0d24a8544542e781ccc17088378ebdf2",
+      "84": "41182f73199eac3f144bb7c5c03a1767fbc0fca5a4decba56e9c81ee3ca9020b",
+      "85": "41182f73199eac3f144bb7c5c03a1767fbc0fca5a4decba56e9c81ee3ca9020b",
+      "86": "41182f73199eac3f144bb7c5c03a1767fbc0fca5a4decba56e9c81ee3ca9020b",
+      "87": "41182f73199eac3f144bb7c5c03a1767fbc0fca5a4decba56e9c81ee3ca9020b",
+      "88": "41182f73199eac3f144bb7c5c03a1767fbc0fca5a4decba56e9c81ee3ca9020b",
+      "89": "41182f73199eac3f144bb7c5c03a1767fbc0fca5a4decba56e9c81ee3ca9020b",
+      "90": "dd50b4f38ffed454005bf876baf472145cf2a785c079eba321d7a18267609510",
+      "91": "de8c7d94e8c53150a7d1413f5a2335868fc85d47900382cb4e85a0ff927f212d",
+      "92": "c3995d763c306a9a041476764a61670a9ba04b6201f2ef5b3ec66161a15b8c10",
+      "93": "3012ddda9b8bab642a70863383cc44fe321c008f857550ab68f3864e10512682",
+      "94": "3012ddda9b8bab642a70863383cc44fe321c008f857550ab68f3864e10512682",
+      "95": "3012ddda9b8bab642a70863383cc44fe321c008f857550ab68f3864e10512682",
+      "96": "3012ddda9b8bab642a70863383cc44fe321c008f857550ab68f3864e10512682",
+      "97": "3012ddda9b8bab642a70863383cc44fe321c008f857550ab68f3864e10512682",
+      "98": "3012ddda9b8bab642a70863383cc44fe321c008f857550ab68f3864e10512682",
+      "99": "3012ddda9b8bab642a70863383cc44fe321c008f857550ab68f3864e10512682",
+      "100": "3012ddda9b8bab642a70863383cc44fe321c008f857550ab68f3864e10512682",
+      "101": "3012ddda9b8bab642a70863383cc44fe321c008f857550ab68f3864e10512682",
+      "102": "3012ddda9b8bab642a70863383cc44fe321c008f857550ab68f3864e10512682",
+      "103": "8b05596e30e9461e536fdaa8ab5c073ad465371d2c552987e4e3a607b81afdb9",
+      "104": "8b05596e30e9461e536fdaa8ab5c073ad465371d2c552987e4e3a607b81afdb9",
+      "105": "8b05596e30e9461e536fdaa8ab5c073ad465371d2c552987e4e3a607b81afdb9",
+      "106": "8b05596e30e9461e536fdaa8ab5c073ad465371d2c552987e4e3a607b81afdb9",
+      "107": "8b05596e30e9461e536fdaa8ab5c073ad465371d2c552987e4e3a607b81afdb9",
+      "108": "8b05596e30e9461e536fdaa8ab5c073ad465371d2c552987e4e3a607b81afdb9",
+      "109": "8b05596e30e9461e536fdaa8ab5c073ad465371d2c552987e4e3a607b81afdb9",
+      "110": "8b05596e30e9461e536fdaa8ab5c073ad465371d2c552987e4e3a607b81afdb9",
+      "111": "8b05596e30e9461e536fdaa8ab5c073ad465371d2c552987e4e3a607b81afdb9",
+      "112": "8b05596e30e9461e536fdaa8ab5c073ad465371d2c552987e4e3a607b81afdb9",
+      "113": "8b05596e30e9461e536fdaa8ab5c073ad465371d2c552987e4e3a607b81afdb9",
+      "114": "8b8b743118dad8e3f428073a03973912aed6f96f10b032fd79f38e213b015389",
+      "115": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "116": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "117": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "118": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "119": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "120": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "121": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "122": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "123": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "124": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "125": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "126": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "127": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "128": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "129": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "130": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "131": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "132": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "133": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "134": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "135": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "136": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "137": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "138": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "139": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "140": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "141": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "142": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "143": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "144": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "145": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "146": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "147": "55efdb41d0e6f802841dec1a888bffbd46d120f3c41df7ccfae3e794849a8a47",
+      "148": "8161a0c3c2978bc40125daa84e9582609e6e2f9ed46a75faf3fc7411452dd2c2",
+      "149": "8161a0c3c2978bc40125daa84e9582609e6e2f9ed46a75faf3fc7411452dd2c2",
+      "150": "8161a0c3c2978bc40125daa84e9582609e6e2f9ed46a75faf3fc7411452dd2c2",
+      "151": "8161a0c3c2978bc40125daa84e9582609e6e2f9ed46a75faf3fc7411452dd2c2",
+      "152": "8161a0c3c2978bc40125daa84e9582609e6e2f9ed46a75faf3fc7411452dd2c2",
+      "153": "8161a0c3c2978bc40125daa84e9582609e6e2f9ed46a75faf3fc7411452dd2c2",
+      "154": "8161a0c3c2978bc40125daa84e9582609e6e2f9ed46a75faf3fc7411452dd2c2",
+      "155": "8161a0c3c2978bc40125daa84e9582609e6e2f9ed46a75faf3fc7411452dd2c2",
+      "156": "8161a0c3c2978bc40125daa84e9582609e6e2f9ed46a75faf3fc7411452dd2c2",
+      "157": "8161a0c3c2978bc40125daa84e9582609e6e2f9ed46a75faf3fc7411452dd2c2",
+      "158": "8161a0c3c2978bc40125daa84e9582609e6e2f9ed46a75faf3fc7411452dd2c2",
+      "159": "8161a0c3c2978bc40125daa84e9582609e6e2f9ed46a75faf3fc7411452dd2c2",
+      "160": "8161a0c3c2978bc40125daa84e9582609e6e2f9ed46a75faf3fc7411452dd2c2",
+      "161": "421982693ca4c45425497abec5f213eda91f9ee22d338fb104bf7e9965a88959",
+      "162": "421982693ca4c45425497abec5f213eda91f9ee22d338fb104bf7e9965a88959",
+      "163": "421982693ca4c45425497abec5f213eda91f9ee22d338fb104bf7e9965a88959",
+      "164": "421982693ca4c45425497abec5f213eda91f9ee22d338fb104bf7e9965a88959",
+      "165": "421982693ca4c45425497abec5f213eda91f9ee22d338fb104bf7e9965a88959",
+      "166": "421982693ca4c45425497abec5f213eda91f9ee22d338fb104bf7e9965a88959",
+      "167": "421982693ca4c45425497abec5f213eda91f9ee22d338fb104bf7e9965a88959",
+      "168": "421982693ca4c45425497abec5f213eda91f9ee22d338fb104bf7e9965a88959",
+      "169": "421982693ca4c45425497abec5f213eda91f9ee22d338fb104bf7e9965a88959",
+      "170": "421982693ca4c45425497abec5f213eda91f9ee22d338fb104bf7e9965a88959",
+      "171": "421982693ca4c45425497abec5f213eda91f9ee22d338fb104bf7e9965a88959",
+      "172": "421982693ca4c45425497abec5f213eda91f9ee22d338fb104bf7e9965a88959",
+      "173": "421982693ca4c45425497abec5f213eda91f9ee22d338fb104bf7e9965a88959",
+      "174": "421982693ca4c45425497abec5f213eda91f9ee22d338fb104bf7e9965a88959",
+      "175": "421982693ca4c45425497abec5f213eda91f9ee22d338fb104bf7e9965a88959",
+      "176": "421982693ca4c45425497abec5f213eda91f9ee22d338fb104bf7e9965a88959",
+      "177": "421982693ca4c45425497abec5f213eda91f9ee22d338fb104bf7e9965a88959",
+      "178": "421982693ca4c45425497abec5f213eda91f9ee22d338fb104bf7e9965a88959",
+      "179": "b654081d78432c30cf757136dab6b756401f2dad736be14c475b0f856e12b014",
+      "180": "6ad394d16dc70343c5d9e429a331aad308aca8376dde27b0b5b76980c9b8d118",
+      "181": "0d7df5bcc1f7c4808ea255e0f7e28a7480df148e4e6e54ce576b994497676061",
+      "182": "d9a52209db3b3fa681d88f544338186a7684d4f931deaf70bcc4007829f18438",
+      "183": "a29ffc63fa4f25827c2302205b170075bb46912c01fc2e2ad6cfb96acc8f4368",
+      "184": "a29ffc63fa4f25827c2302205b170075bb46912c01fc2e2ad6cfb96acc8f4368",
+      "185": "a29ffc63fa4f25827c2302205b170075bb46912c01fc2e2ad6cfb96acc8f4368",
+      "186": "a29ffc63fa4f25827c2302205b170075bb46912c01fc2e2ad6cfb96acc8f4368",
+      "187": "a29ffc63fa4f25827c2302205b170075bb46912c01fc2e2ad6cfb96acc8f4368",
+      "188": "a29ffc63fa4f25827c2302205b170075bb46912c01fc2e2ad6cfb96acc8f4368",
+      "189": "a29ffc63fa4f25827c2302205b170075bb46912c01fc2e2ad6cfb96acc8f4368",
+      "190": "a29ffc63fa4f25827c2302205b170075bb46912c01fc2e2ad6cfb96acc8f4368",
+      "191": "a29ffc63fa4f25827c2302205b170075bb46912c01fc2e2ad6cfb96acc8f4368",
+      "192": "a29ffc63fa4f25827c2302205b170075bb46912c01fc2e2ad6cfb96acc8f4368",
+      "193": "a29ffc63fa4f25827c2302205b170075bb46912c01fc2e2ad6cfb96acc8f4368",
+      "194": "a29ffc63fa4f25827c2302205b170075bb46912c01fc2e2ad6cfb96acc8f4368",
+      "195": "a29ffc63fa4f25827c2302205b170075bb46912c01fc2e2ad6cfb96acc8f4368",
+      "196": "a29ffc63fa4f25827c2302205b170075bb46912c01fc2e2ad6cfb96acc8f4368",
+      "197": "3d1b4ab41e3aff6131b40cc198100a7a37ff96ec3e1b81ad277c52081ac0f3b3",
+      "198": "3d1b4ab41e3aff6131b40cc198100a7a37ff96ec3e1b81ad277c52081ac0f3b3",
+      "199": "3d1b4ab41e3aff6131b40cc198100a7a37ff96ec3e1b81ad277c52081ac0f3b3",
+      "200": "3d1b4ab41e3aff6131b40cc198100a7a37ff96ec3e1b81ad277c52081ac0f3b3",
+      "201": "3d1b4ab41e3aff6131b40cc198100a7a37ff96ec3e1b81ad277c52081ac0f3b3",
+      "202": "ec7c847b342088551222db2f8631596129bf985b19a604bfbeeedf4e7adacf8d",
+      "203": "593793b3ce3deaf9b617e18f52e10285f31faba6d1295cc2430fcd4ddb97aeff",
+      "204": "593793b3ce3deaf9b617e18f52e10285f31faba6d1295cc2430fcd4ddb97aeff",
+      "205": "593793b3ce3deaf9b617e18f52e10285f31faba6d1295cc2430fcd4ddb97aeff",
+      "206": "593793b3ce3deaf9b617e18f52e10285f31faba6d1295cc2430fcd4ddb97aeff",
+      "207": "06abe498b739472d1ff04d4ae1425b7dca3e8670b6740025259ecc029f2edb76",
+      "208": "685fa59994dade8fec06ebe8d3fc4cac875498d884a1ac8a480bae67ce3e6435",
+      "209": "685fa59994dade8fec06ebe8d3fc4cac875498d884a1ac8a480bae67ce3e6435",
+      "210": "85fbfaa6cf20c9e2183da9d6c4130aea339a848f3690329fc6c5a258772ac3b3",
+      "211": "85fbfaa6cf20c9e2183da9d6c4130aea339a848f3690329fc6c5a258772ac3b3",
+      "212": "85fbfaa6cf20c9e2183da9d6c4130aea339a848f3690329fc6c5a258772ac3b3",
+      "213": "8455f46ce5cdb3c2ad1c517abe20da2ad52dfb9c762d98bc5958d9d29572f029",
+      "214": "95bffdcce4ae5a21cf038fdb8ad22baffc9791e927580ba38397369657912672",
+      "215": "6c5134994776783f61302452b3b272836eb25f2e8b88c80be8f4197b19cf575d",
+      "216": "28807bfe816dc6c57eaba99643b5cf0d74cbafa836d7e781b57456edf440ea7a",
+      "217": "39b8abbae923605d73fd979bb662cfc88e970490800955dc666c7de480de21bb",
+      "218": "39b8abbae923605d73fd979bb662cfc88e970490800955dc666c7de480de21bb",
+      "219": "39b8abbae923605d73fd979bb662cfc88e970490800955dc666c7de480de21bb",
+      "220": "39b8abbae923605d73fd979bb662cfc88e970490800955dc666c7de480de21bb",
+      "221": "39b8abbae923605d73fd979bb662cfc88e970490800955dc666c7de480de21bb",
+      "222": "2497c8e4a1f6aef7157e1a915776b948b10117de4e3cb052662d33b0907ae900",
+      "223": "2497c8e4a1f6aef7157e1a915776b948b10117de4e3cb052662d33b0907ae900",
+      "224": "2497c8e4a1f6aef7157e1a915776b948b10117de4e3cb052662d33b0907ae900",
+      "225": "2497c8e4a1f6aef7157e1a915776b948b10117de4e3cb052662d33b0907ae900",
+      "226": "2497c8e4a1f6aef7157e1a915776b948b10117de4e3cb052662d33b0907ae900",
+      "227": "2497c8e4a1f6aef7157e1a915776b948b10117de4e3cb052662d33b0907ae900",
+      "228": "2497c8e4a1f6aef7157e1a915776b948b10117de4e3cb052662d33b0907ae900",
+      "229": "2497c8e4a1f6aef7157e1a915776b948b10117de4e3cb052662d33b0907ae900",
+      "230": "2497c8e4a1f6aef7157e1a915776b948b10117de4e3cb052662d33b0907ae900",
+      "231": "590c5bc551e5a096465e9f64bcfb60dce8dcc8bf6729f657bbb8c2a16ca9b5fb",
+      "232": "590c5bc551e5a096465e9f64bcfb60dce8dcc8bf6729f657bbb8c2a16ca9b5fb",
+      "233": "590c5bc551e5a096465e9f64bcfb60dce8dcc8bf6729f657bbb8c2a16ca9b5fb",
+      "234": "590c5bc551e5a096465e9f64bcfb60dce8dcc8bf6729f657bbb8c2a16ca9b5fb",
+      "235": "590c5bc551e5a096465e9f64bcfb60dce8dcc8bf6729f657bbb8c2a16ca9b5fb",
+      "236": "590c5bc551e5a096465e9f64bcfb60dce8dcc8bf6729f657bbb8c2a16ca9b5fb",
+      "237": "590c5bc551e5a096465e9f64bcfb60dce8dcc8bf6729f657bbb8c2a16ca9b5fb",
+      "238": "590c5bc551e5a096465e9f64bcfb60dce8dcc8bf6729f657bbb8c2a16ca9b5fb",
+      "239": "590c5bc551e5a096465e9f64bcfb60dce8dcc8bf6729f657bbb8c2a16ca9b5fb",
+      "240": "590c5bc551e5a096465e9f64bcfb60dce8dcc8bf6729f657bbb8c2a16ca9b5fb",
+      "241": "590c5bc551e5a096465e9f64bcfb60dce8dcc8bf6729f657bbb8c2a16ca9b5fb",
+      "242": "590c5bc551e5a096465e9f64bcfb60dce8dcc8bf6729f657bbb8c2a16ca9b5fb",
+      "243": "d1187b8f9d67dcfb0837d6c0226e33bf61ab754ec07c73ca431c75c961d3eeee",
+      "244": "d1187b8f9d67dcfb0837d6c0226e33bf61ab754ec07c73ca431c75c961d3eeee",
+      "245": "d1187b8f9d67dcfb0837d6c0226e33bf61ab754ec07c73ca431c75c961d3eeee",
+      "246": "d1187b8f9d67dcfb0837d6c0226e33bf61ab754ec07c73ca431c75c961d3eeee",
+      "247": "d1187b8f9d67dcfb0837d6c0226e33bf61ab754ec07c73ca431c75c961d3eeee",
+      "248": "d1187b8f9d67dcfb0837d6c0226e33bf61ab754ec07c73ca431c75c961d3eeee",
+      "249": "d1187b8f9d67dcfb0837d6c0226e33bf61ab754ec07c73ca431c75c961d3eeee",
+      "250": "d1187b8f9d67dcfb0837d6c0226e33bf61ab754ec07c73ca431c75c961d3eeee",
+      "251": "d1187b8f9d67dcfb0837d6c0226e33bf61ab754ec07c73ca431c75c961d3eeee",
+      "252": "d1187b8f9d67dcfb0837d6c0226e33bf61ab754ec07c73ca431c75c961d3eeee",
+      "253": "d1187b8f9d67dcfb0837d6c0226e33bf61ab754ec07c73ca431c75c961d3eeee",
+      "254": "d1187b8f9d67dcfb0837d6c0226e33bf61ab754ec07c73ca431c75c961d3eeee",
+      "255": "cbb35ce27c54fb9bec37cd529f46ff3b915539af1c66bd3f2a03b13c9d7c1ab7",
+      "256": "cbb35ce27c54fb9bec37cd529f46ff3b915539af1c66bd3f2a03b13c9d7c1ab7",
+      "257": "cbb35ce27c54fb9bec37cd529f46ff3b915539af1c66bd3f2a03b13c9d7c1ab7",
+      "258": "cbb35ce27c54fb9bec37cd529f46ff3b915539af1c66bd3f2a03b13c9d7c1ab7",
+      "259": "cbb35ce27c54fb9bec37cd529f46ff3b915539af1c66bd3f2a03b13c9d7c1ab7",
+      "260": "cbb35ce27c54fb9bec37cd529f46ff3b915539af1c66bd3f2a03b13c9d7c1ab7",
+      "261": "c0d7add9fce756dcc521165ee3f8dc1d4e3e9e4a1c3a7f8b6dc402b0b1e2d5ea",
+      "262": "c0d7add9fce756dcc521165ee3f8dc1d4e3e9e4a1c3a7f8b6dc402b0b1e2d5ea",
+      "263": "c0d7add9fce756dcc521165ee3f8dc1d4e3e9e4a1c3a7f8b6dc402b0b1e2d5ea",
+      "264": "c0d7add9fce756dcc521165ee3f8dc1d4e3e9e4a1c3a7f8b6dc402b0b1e2d5ea",
+      "265": "c0d7add9fce756dcc521165ee3f8dc1d4e3e9e4a1c3a7f8b6dc402b0b1e2d5ea",
+      "266": "c0d7add9fce756dcc521165ee3f8dc1d4e3e9e4a1c3a7f8b6dc402b0b1e2d5ea",
+      "267": "c0d7add9fce756dcc521165ee3f8dc1d4e3e9e4a1c3a7f8b6dc402b0b1e2d5ea",
+      "268": "c0d7add9fce756dcc521165ee3f8dc1d4e3e9e4a1c3a7f8b6dc402b0b1e2d5ea",
+      "269": "c0d7add9fce756dcc521165ee3f8dc1d4e3e9e4a1c3a7f8b6dc402b0b1e2d5ea",
+      "270": "c0d7add9fce756dcc521165ee3f8dc1d4e3e9e4a1c3a7f8b6dc402b0b1e2d5ea",
+      "271": "2fed928c9fd0912573d2eb0cf7d1c4ace75c28651cbc5f71ab3ca03a878c38a6",
+      "272": "2fed928c9fd0912573d2eb0cf7d1c4ace75c28651cbc5f71ab3ca03a878c38a6",
+      "273": "2fed928c9fd0912573d2eb0cf7d1c4ace75c28651cbc5f71ab3ca03a878c38a6",
+      "274": "2fed928c9fd0912573d2eb0cf7d1c4ace75c28651cbc5f71ab3ca03a878c38a6",
+      "275": "2fed928c9fd0912573d2eb0cf7d1c4ace75c28651cbc5f71ab3ca03a878c38a6",
+      "276": "2fed928c9fd0912573d2eb0cf7d1c4ace75c28651cbc5f71ab3ca03a878c38a6",
+      "277": "2fed928c9fd0912573d2eb0cf7d1c4ace75c28651cbc5f71ab3ca03a878c38a6",
+      "278": "2fed928c9fd0912573d2eb0cf7d1c4ace75c28651cbc5f71ab3ca03a878c38a6",
+      "279": "2fed928c9fd0912573d2eb0cf7d1c4ace75c28651cbc5f71ab3ca03a878c38a6",
+      "280": "2fed928c9fd0912573d2eb0cf7d1c4ace75c28651cbc5f71ab3ca03a878c38a6",
+      "281": "2fed928c9fd0912573d2eb0cf7d1c4ace75c28651cbc5f71ab3ca03a878c38a6",
+      "282": "2fed928c9fd0912573d2eb0cf7d1c4ace75c28651cbc5f71ab3ca03a878c38a6",
+      "283": "2fed928c9fd0912573d2eb0cf7d1c4ace75c28651cbc5f71ab3ca03a878c38a6",
+      "284": "2fed928c9fd0912573d2eb0cf7d1c4ace75c28651cbc5f71ab3ca03a878c38a6",
+      "285": "2fed928c9fd0912573d2eb0cf7d1c4ace75c28651cbc5f71ab3ca03a878c38a6",
+      "286": "2fed928c9fd0912573d2eb0cf7d1c4ace75c28651cbc5f71ab3ca03a878c38a6",
+      "287": "2fed928c9fd0912573d2eb0cf7d1c4ace75c28651cbc5f71ab3ca03a878c38a6",
+      "288": "2fed928c9fd0912573d2eb0cf7d1c4ace75c28651cbc5f71ab3ca03a878c38a6",
+      "289": "2fed928c9fd0912573d2eb0cf7d1c4ace75c28651cbc5f71ab3ca03a878c38a6",
+      "290": "6fb1da27e3c962c98713a1fb36d444f31a07aff17e0319d9b004972403518d70",
+      "291": "5bb23bae45f307677680dafc6b169166e9fb67e9ff585c55d7315cb80e20ef64",
+      "292": "10be07390cabbb418988f21f4c30e7a7e8cc9d050cbf4c9b7b46a1f56c10df7b",
+      "293": "6b033fae1ebefc7b5cf6e34a848bae6a1ac62e4b611d4bfc9a81f2fdc44317b7",
+      "294": "1cb73bbb940913a4985c1e7f6d4b9b07e6c25ac19c25ee66351da5ca3626919b",
+      "295": "52f726955a98ba0cef7e150a2547555c9a9bcdc0660df25ef824f8f688b42b96",
+      "296": "52f726955a98ba0cef7e150a2547555c9a9bcdc0660df25ef824f8f688b42b96",
+      "297": "52f726955a98ba0cef7e150a2547555c9a9bcdc0660df25ef824f8f688b42b96",
+      "298": "52f726955a98ba0cef7e150a2547555c9a9bcdc0660df25ef824f8f688b42b96",
+      "299": "52f726955a98ba0cef7e150a2547555c9a9bcdc0660df25ef824f8f688b42b96",
+      "300": "52f726955a98ba0cef7e150a2547555c9a9bcdc0660df25ef824f8f688b42b96",
+      "301": "52f726955a98ba0cef7e150a2547555c9a9bcdc0660df25ef824f8f688b42b96",
+      "302": "52f726955a98ba0cef7e150a2547555c9a9bcdc0660df25ef824f8f688b42b96",
+      "303": "52f726955a98ba0cef7e150a2547555c9a9bcdc0660df25ef824f8f688b42b96",
+      "304": "52f726955a98ba0cef7e150a2547555c9a9bcdc0660df25ef824f8f688b42b96",
+      "305": "52f726955a98ba0cef7e150a2547555c9a9bcdc0660df25ef824f8f688b42b96",
+      "306": "24e099d3f6e0cafc89ed3b41724b912c7bb9fed3195dd2e78ff5bff26c28d193",
+      "307": "24e099d3f6e0cafc89ed3b41724b912c7bb9fed3195dd2e78ff5bff26c28d193",
+      "308": "24e099d3f6e0cafc89ed3b41724b912c7bb9fed3195dd2e78ff5bff26c28d193",
+      "309": "24e099d3f6e0cafc89ed3b41724b912c7bb9fed3195dd2e78ff5bff26c28d193",
+      "310": "24e099d3f6e0cafc89ed3b41724b912c7bb9fed3195dd2e78ff5bff26c28d193",
+      "311": "85afcc9b5493cb978b1656c8dc69c4f01282e9b4ee97dd6b4f844baf1069e7a0",
+      "312": "6c4e48967ff17a5d8b50b3ce8ab2938d1e03dd2e143cf3b857e223e9148fec78",
+      "313": "575ed3b2e5aa0966e0f7ae5796faf7e7b20adedd6f4ec3354f37d41d809a5cf1",
+      "314": "47de375184c6a9302526dd124a993bea3b06c34d35aeac3c11476eff1fb59e9a",
+      "315": "943342064e6024ba34d44ca991f302cfc45b642b626b12073c04b5d2376309f2",
+      "316": "eff90df53fcd4c239e4216664948cfff3d57514591d1328727520372b7f00a74",
+      "317": "6c990b36ec0d9aa36f59554c94dbbaebb7cb06b8cee3b7c020ad02de0c030647",
+      "318": "8e6dbce878b762b89478f03bcfefdb15e0f287245db30c5fbcc1e5c6ca3d6ef8",
+      "319": "8e6dbce878b762b89478f03bcfefdb15e0f287245db30c5fbcc1e5c6ca3d6ef8",
+      "320": "8e6dbce878b762b89478f03bcfefdb15e0f287245db30c5fbcc1e5c6ca3d6ef8",
+      "321": "8e6dbce878b762b89478f03bcfefdb15e0f287245db30c5fbcc1e5c6ca3d6ef8",
+      "322": "8e6dbce878b762b89478f03bcfefdb15e0f287245db30c5fbcc1e5c6ca3d6ef8",
+      "323": "45d4f5eeaae76f2d24a5f0814899b00b09fbee90c3032384d57d0622c9e4a0d5",
+      "324": "45d4f5eeaae76f2d24a5f0814899b00b09fbee90c3032384d57d0622c9e4a0d5",
+      "325": "45d4f5eeaae76f2d24a5f0814899b00b09fbee90c3032384d57d0622c9e4a0d5",
+      "326": "45d4f5eeaae76f2d24a5f0814899b00b09fbee90c3032384d57d0622c9e4a0d5",
+      "327": "45d4f5eeaae76f2d24a5f0814899b00b09fbee90c3032384d57d0622c9e4a0d5",
+      "328": "d029c043cca8c3edff1e17efcbc89770a9923d6ac8f08cba0e296d286aca1f44",
+      "329": "e8e09db4344f392a289366bb4a98a8c947e1e9889ef6ce2663e2b1752b2f71b8",
+      "330": "e8e09db4344f392a289366bb4a98a8c947e1e9889ef6ce2663e2b1752b2f71b8",
+      "331": "61d49937aa8326304c8656ac9fc7cc556ff0b24f25cfb9ab73c33a7d3e6c8f6a",
+      "332": "076e37713b7baf4a508a768050214232fc520a0ac93036f305f049122cd2296f",
+      "333": "8b9851c3e0973f1d31d32b4047d419b6702cadd88276a962d9bc1e572a27f002",
+      "334": "8b9851c3e0973f1d31d32b4047d419b6702cadd88276a962d9bc1e572a27f002",
+      "335": "8b9851c3e0973f1d31d32b4047d419b6702cadd88276a962d9bc1e572a27f002",
+      "336": "1d2bc15137e44fc03706902466f0baf54e46e4cecb74bf31b6b16cea504f7734",
+      "337": "1d2bc15137e44fc03706902466f0baf54e46e4cecb74bf31b6b16cea504f7734",
+      "338": "1d2bc15137e44fc03706902466f0baf54e46e4cecb74bf31b6b16cea504f7734",
+      "339": "1d2bc15137e44fc03706902466f0baf54e46e4cecb74bf31b6b16cea504f7734",
+      "340": "1d2bc15137e44fc03706902466f0baf54e46e4cecb74bf31b6b16cea504f7734",
+      "341": "1d2bc15137e44fc03706902466f0baf54e46e4cecb74bf31b6b16cea504f7734",
+      "342": "1d2bc15137e44fc03706902466f0baf54e46e4cecb74bf31b6b16cea504f7734",
+      "343": "1d2bc15137e44fc03706902466f0baf54e46e4cecb74bf31b6b16cea504f7734",
+      "344": "1d2bc15137e44fc03706902466f0baf54e46e4cecb74bf31b6b16cea504f7734",
+      "345": "1d2bc15137e44fc03706902466f0baf54e46e4cecb74bf31b6b16cea504f7734",
+      "346": "1d2bc15137e44fc03706902466f0baf54e46e4cecb74bf31b6b16cea504f7734",
+      "347": "1d2bc15137e44fc03706902466f0baf54e46e4cecb74bf31b6b16cea504f7734",
+      "348": "1d2bc15137e44fc03706902466f0baf54e46e4cecb74bf31b6b16cea504f7734",
+      "349": "1d2bc15137e44fc03706902466f0baf54e46e4cecb74bf31b6b16cea504f7734",
+      "350": "1d2bc15137e44fc03706902466f0baf54e46e4cecb74bf31b6b16cea504f7734",
+      "351": "1d2bc15137e44fc03706902466f0baf54e46e4cecb74bf31b6b16cea504f7734",
+      "352": "1d2bc15137e44fc03706902466f0baf54e46e4cecb74bf31b6b16cea504f7734",
+      "353": "1d2bc15137e44fc03706902466f0baf54e46e4cecb74bf31b6b16cea504f7734",
+      "354": "1d2bc15137e44fc03706902466f0baf54e46e4cecb74bf31b6b16cea504f7734",
+      "355": "1d2bc15137e44fc03706902466f0baf54e46e4cecb74bf31b6b16cea504f7734",
+      "356": "fbfa04fc825ea6a89a1894f625565023acdda5365aacc1356bb35673bc00d566",
+      "357": "2ddaccec16d8fe46a67d97bc606c2b58f1a493d09c971e0cbe24f320157b565e",
+      "358": "4da046804d1e31712b266a742f5578b9e18bbfdafebbba2f025ac9817a365b35",
+      "359": "4da046804d1e31712b266a742f5578b9e18bbfdafebbba2f025ac9817a365b35"
+    },
+    "right_half_negative_control": true
+  },
+  "limits": [
+    "Scalar OS25-derived CPU/cache estimates with OS30 cache sizes; not Vexii measurements or Pocket FPS.",
+    "Fixed guest clock is 5000000 + ceil(flips*1000000/30), independent of instruction counts.",
+    "GPU functional model records 3D commands but does not rasterize them; full RGB565 capture covers CPU framebuffer output.",
+    "Physical GPU/audio/CPU/scanout contention and kernel timing are not modeled; sound services use functional stubs.",
+    "Main/sound use timedemo; live uses fixedtime33334 and +forward from demo1 spawn, not prolonged combat.",
+    "Texture uploads are instantaneous; identical commands and framebuffer bytes do not alone prove texture-memory equality.",
+    "Startup is excluded from CPU metrics; exact output checks include startup and trailing command records.",
+    "GPU-on and GPU-off commands differ; run completion and CPU framebuffer equality are not a geometry correctness gate. Separate RTL output validation is required."
+  ]
+}

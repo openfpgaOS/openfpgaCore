@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "make",
+    "-j4",
+    "USE_SDK_CONTAINER=0",
+    "OBJ_DIR=/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/baseline-obj",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/baseline-obj/app.elf"
+  ],
+  "cwd": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/baseline/src/quake2",
+  "compiler": "riscv64-elf-gcc (Arch Linux Repositories) 15.2.0\nCopyright (C) 2025 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\n"
+}

@@ -1,0 +1,180 @@
+{
+  "frame": 148,
+  "stride": 640,
+  "step": 2,
+  "cpu_cycles": 6221487,
+  "batches": [
+    {
+      "words": 4,
+      "first_write": 484,
+      "publish": 576
+    },
+    {
+      "words": 52,
+      "first_write": 2243863,
+      "publish": 2244386
+    },
+    {
+      "words": 565,
+      "first_write": 2274304,
+      "publish": 2278622
+    },
+    {
+      "words": 513,
+      "first_write": 2338951,
+      "publish": 2342731
+    },
+    {
+      "words": 539,
+      "first_write": 2381479,
+      "publish": 2385535
+    },
+    {
+      "words": 530,
+      "first_write": 2438486,
+      "publish": 2442485
+    },
+    {
+      "words": 1746,
+      "first_write": 2574163,
+      "publish": 2588293
+    },
+    {
+      "words": 636,
+      "first_write": 2607552,
+      "publish": 2612283
+    },
+    {
+      "words": 739,
+      "first_write": 2674811,
+      "publish": 2680255
+    },
+    {
+      "words": 625,
+      "first_write": 2733767,
+      "publish": 2738613
+    },
+    {
+      "words": 545,
+      "first_write": 2773322,
+      "publish": 2777342
+    },
+    {
+      "words": 638,
+      "first_write": 2848496,
+      "publish": 2853643
+    },
+    {
+      "words": 642,
+      "first_write": 2933913,
+      "publish": 2938645
+    },
+    {
+      "words": 237,
+      "first_write": 2974315,
+      "publish": 2976163
+    },
+    {
+      "words": 409,
+      "first_write": 3049704,
+      "publish": 3053213
+    },
+    {
+      "words": 183,
+      "first_write": 3082223,
+      "publish": 3083604
+    },
+    {
+      "words": 183,
+      "first_write": 3119043,
+      "publish": 3120418
+    },
+    {
+      "words": 3312,
+      "first_write": 3466635,
+      "publish": 3491113
+    },
+    {
+      "words": 633,
+      "first_write": 3553793,
+      "publish": 3558556
+    },
+    {
+      "words": 165,
+      "first_write": 3584057,
+      "publish": 3585303
+    },
+    {
+      "words": 183,
+      "first_write": 3602323,
+      "publish": 3603692
+    },
+    {
+      "words": 183,
+      "first_write": 3620474,
+      "publish": 3621843
+    },
+    {
+      "words": 165,
+      "first_write": 3635479,
+      "publish": 3636725
+    },
+    {
+      "words": 1512,
+      "first_write": 3846504,
+      "publish": 3857775
+    },
+    {
+      "words": 1245,
+      "first_write": 4028930,
+      "publish": 4038822
+    },
+    {
+      "words": 1836,
+      "first_write": 4149053,
+      "publish": 4163017
+    },
+    {
+      "words": 2250,
+      "first_write": 4419371,
+      "publish": 4435882
+    },
+    {
+      "words": 4086,
+      "first_write": 4792550,
+      "publish": 4822664
+    },
+    {
+      "words": 4086,
+      "first_write": 5180526,
+      "publish": 5210465
+    },
+    {
+      "words": 4086,
+      "first_write": 5795325,
+      "publish": 5825315
+    },
+    {
+      "words": 3366,
+      "first_write": 6016471,
+      "publish": 6041204
+    },
+    {
+      "words": 2,
+      "first_write": 6054011,
+      "publish": 6054096
+    }
+  ],
+  "raw_vector_sha256": "cca73e242c199db0c3468b4c42327dbc4adbac300baca638bdb8c7eba3bbe252",
+  "vector_sha256": "7630e53e151858aaf12e1e05170679944ea33942cb17802c265c920ec699b7da",
+  "paced_vector_sha256": "aa1b29dc1b01b52e7a1328bad9f479e1e144e3a245036cee6739bbd7216edfd0",
+  "removed_next_frame_clear": [
+    285212675,
+    1343225856,
+    41943280,
+    41943040
+  ],
+  "timeline_sha256": "8d0fca223081a313a513bfb50e586392ef67d554ecede838a2c89ed5e3110e2f",
+  "recovered_frame_start_clear": null,
+  "limits": "Attach observed CPU work and fence points to immutable GPU command batches.\n\nEach captured MMIO command batch is published at its observed CPU work offset.\nThe real RTL ring reservation and fences add elapsed time without erasing CPU\nwork. Word writes may be packed at the end of a batch's CPU submission interval:\nthe GPU cannot consume unpublished words, so publication timing is preserved.\nCPU framebuffer writes are excluded by the established independent raster gate;\nthis is a producer/backpressure model, not a complete CPU memory-coherency model.\n"
+}

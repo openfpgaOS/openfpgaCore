@@ -1,0 +1,26 @@
+{
+  "passed": true,
+  "checks": {
+    "package inventory, prepared pins, full fit-input pins and forward/reverse patch": true,
+    "fresh stage and all staged source pins": true,
+    "existing stage refused without mutation": true,
+    "changed staged source rejected": true,
+    "changed package payload rejected": true,
+    "omitted without-mixer transformation rejected": true,
+    "changed non-QSF fit input pin rejected": true,
+    "unknown and duplicate build flags rejected": true,
+    "missing and repeated mixer macro rejected": true,
+    "unsafe paths rejected": true,
+    "actual build recipe derives every recorded fit input hash without running Quartus": true,
+    "all worker test inputs match already executed narrowed-mux receipt": true
+  },
+  "manifest_sha256": "3c89b2a398aded2ef27e921a1ae04fd7f6b60fdaaead41d08bfd30f6c8922cea",
+  "build_args": [
+    "--without-mixer"
+  ],
+  "fit_input_count": 127,
+  "worker_sha256": "829827085023e6bf62832595e8f75ee57558d232e478640a6e65b4c728abdca5",
+  "source_only": true,
+  "qualification": "PENDING: narrowed-output-mux silent-core fit and physical timing selection incomplete; no bitstream selected or deployed.",
+  "physical_fit_or_deployment_performed": false
+}

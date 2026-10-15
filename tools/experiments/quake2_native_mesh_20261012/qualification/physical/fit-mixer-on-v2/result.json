@@ -1,0 +1,31 @@
+{
+  "fit": "/tmp/quake2-native-mesh-20261012/fit-mixer-on-v2",
+  "phase_returncodes": {
+    "map": 0,
+    "fit": 3
+  },
+  "configured_clock_MHz": 100,
+  "seed": 2,
+  "constrained_timing_passed": false,
+  "source_recipe_sha256": "2dad1a814a6478bfd6aa2bf152e959bdf180c4bfbdeeba65b9de57fa2de8beb2",
+  "report_sha256": {
+    "build-receipt.json": "a0d342bf7c2a3553ad85aa78aeea3f92e474e02e238c6373ac76977c7795b384",
+    "fit.log": "26670aeb839d231bf981c930d67b99537e7e29745d6350c21eb5190007cd80b7",
+    "src/fpga/targets/pocket/output_files/ap_core.map.summary": "33f1134dfc7dd66ce973bbcff436c22e6d58b7cd584d04cfb74a227b5e55f5dc",
+    "src/fpga/targets/pocket/output_files/ap_core.fit.summary": "217c26dd51574d9e167ceeb7d17ebb38771abadec0d3ee05d5de9f744e168a30"
+  },
+  "deployed": false,
+  "fit_successful": false,
+  "ALMs": {
+    "used": 18308,
+    "available": 18480
+  },
+  "M10Ks": {
+    "used": 0,
+    "available": 308
+  },
+  "DSPs": {
+    "used": 45,
+    "available": 66
+  }
+}

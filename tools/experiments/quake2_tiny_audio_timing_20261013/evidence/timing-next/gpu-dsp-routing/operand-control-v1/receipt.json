@@ -1,0 +1,14 @@
+{
+  "passed": true,
+  "candidate_sha256": "57258b3a4a76c75f3619661dd052fdc5c3ae5716f455c8830eafe00234a1f72e",
+  "actual_shadow_sha256": "08fb1f0a4604f58f15155c108d48c07e5e157b7641e13c9fe8e54958f865fc21",
+  "control_vectors": 33554432,
+  "mirrored_actual_a_sites": 26,
+  "limitation": "Finite control-space check plus reproducible actual-RTL operand shadow.\n\nNo synthesis or formal-tool claim. The independent launch decoder follows\nthe eight original PSS B write sites, while A's write predicate is extracted\nverbatim from the candidate. Random full-width data varies across all control\ncases. The separate full GPU shadow checks actual assignments every clock.\n",
+  "result": "PASS 33554432 exhaustive-control vectors, arbitrary full-width operands, original A predicate versus independent B launch decoder\n",
+  "inputs": {
+    "check_operands.py": "f5d5a945cb1110a1520cd7643adf5bb5b3e7d4854b965d8e050bd399eb83f277",
+    "operand_control.v": "71d621a9db4dee1fba2936e41afd5a88a4bfcc38524b63baeded8da8db4d7b87",
+    "main.cpp": "f6a09b4283bf1de99d241ff0fc6b626472785417fc16c6d8793290acf4d7d0f8"
+  }
+}

@@ -1,0 +1,139 @@
+{
+  "status": "PASS_EXACT_F24_COMMAND_ADJACENCY",
+  "phases": {
+    "1": {
+      "CPU_VTX_calls": 354,
+      "reference_raw_LOADs": 326,
+      "structural_reasons": {
+        "mutable_command": 27,
+        "candidate": 320,
+        "no_TRI": 7
+      },
+      "candidate_triangles": 2479,
+      "dead_suffix_candidates": 146,
+      "dead_suffix_reasons": {
+        "overwritten": 146,
+        "state_or_list_0xdf": 164,
+        "state_or_list_0xdc": 2,
+        "state_or_list_0xd7": 6,
+        "state_or_list_0xfd": 2
+      },
+      "candidate_chain_count": 111,
+      "candidate_chain_length_histogram": {
+        "1": 55,
+        "2": 24,
+        "3": 8,
+        "4": 9,
+        "5": 4,
+        "6": 2,
+        "7": 2,
+        "10": 1,
+        "11": 1,
+        "16": 1,
+        "17": 3,
+        "23": 1
+      },
+      "max_candidate_chain_loads": 23,
+      "max_candidate_chain_triangles": 212,
+      "accepted_jobs": 98,
+      "accepted_triangles": 772,
+      "accepted_chain_count": 21,
+      "accepted_chain_length_histogram": {
+        "1": 9,
+        "2": 2,
+        "3": 1,
+        "4": 1,
+        "6": 1,
+        "7": 2,
+        "8": 1,
+        "9": 2,
+        "12": 1,
+        "20": 1
+      },
+      "accepted_identical_context_material_chains": 21,
+      "submission_count_reduction_existing_admission": 77,
+      "max_accepted_chain_loads": 20,
+      "max_accepted_chain_triangles": 176,
+      "dead_proven_chain_prefix_loads": 125,
+      "dead_proven_nonempty_chain_prefixes": 32
+    },
+    "2": {
+      "CPU_VTX_calls": 354,
+      "reference_raw_LOADs": 326,
+      "structural_reasons": {
+        "mutable_command": 27,
+        "candidate": 320,
+        "no_TRI": 7
+      },
+      "candidate_triangles": 2479,
+      "dead_suffix_candidates": 146,
+      "dead_suffix_reasons": {
+        "overwritten": 146,
+        "state_or_list_0xdf": 164,
+        "state_or_list_0xdc": 2,
+        "state_or_list_0xd7": 6,
+        "state_or_list_0xfd": 2
+      },
+      "candidate_chain_count": 111,
+      "candidate_chain_length_histogram": {
+        "1": 55,
+        "2": 24,
+        "3": 8,
+        "4": 9,
+        "5": 4,
+        "6": 2,
+        "7": 2,
+        "10": 1,
+        "11": 1,
+        "16": 1,
+        "17": 3,
+        "23": 1
+      },
+      "max_candidate_chain_loads": 23,
+      "max_candidate_chain_triangles": 212,
+      "accepted_jobs": 76,
+      "accepted_triangles": 571,
+      "accepted_chain_count": 27,
+      "accepted_chain_length_histogram": {
+        "1": 13,
+        "2": 4,
+        "3": 2,
+        "4": 3,
+        "6": 2,
+        "7": 1,
+        "9": 2
+      },
+      "accepted_identical_context_material_chains": 27,
+      "submission_count_reduction_existing_admission": 49,
+      "max_accepted_chain_loads": 9,
+      "max_accepted_chain_triangles": 51,
+      "dead_proven_chain_prefix_loads": 125,
+      "dead_proven_nonempty_chain_prefixes": 32
+    }
+  },
+  "limits": [
+    "Dynamic call order is exact native F24; command and vertex bytes are immutable ELF inputs.",
+    "All structural chains stop on every state/list command; no cross-call or mutable graph is assumed.",
+    "Reference consumed raw context is identical within each chain; accepted chains additionally match all28 context words and material/cull/alpha.",
+    "Structural candidates are not material or numeric eligibility claims. Repair hints and warm material scope must be joined separately.",
+    "Context/source preparation remains cold work; fewer CPU submissions is not a measured cycle or FPS gain.",
+    "Direct ELF vertex pointers were verified for this trace only; generic segmented pointers need explicit resolution.",
+    "A terminal legacy LOAD or proven suffix must restore/discard every deferred canonical slot before a CPU reader."
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/span-coverage-v1/analyze.py": "5defd8059aa379c568780855281bad0ea41a033b010b1e17338408d6e982ca82",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app-v2/.obj/sm64-priority-mesh-v2-perfdiag/app.elf": "0c2a1a8d2b1359c0b3b51ab78f81117be9b53173e5dd674d8f3978d0da35db28",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app-v2/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "20d5461d5d587fff296433f755c169c8cf039fbcbba85a0119f2df5ce4ebb8d9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2/run/vtx-calls.tsv": "87388d60e8489f0975af173572037fa77fe0f044314f97591790645fa2c2963e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/control-v2/run/vtx-calls.tsv": "3bc4f149417d469b65acf0f0fee678a5d6b271a966e13019577dd9a371eae256",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2/run/mmio.tsv": "8aa845ab5b0faf58c8f8b2e1ea70fb4015b2a64868da2df2acb53dfd09c140bc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/control-v2/run/mmio.tsv": "d7b304278e2dbcc071c5586ebe3e51e56a1615c5e3be3d1f2113c4e886deb64d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2/run/boundaries.tsv": "ac3f282d9206bd0d35a78a9c056c6712f9ef69dbe3c6b060b43b520ec4cd994a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2/run/commands.bin": "4a10353d7d6f80fc0d28f672214c3de95489b0f12c140544688f59e3df3ef8f8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2/build.json": "d5321811cf31106f58439a74e921edd6ea7a074d0e595ac048c857956701ac14",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/control-v2/build.json": "6eef1c23012d6a8ff3877849deed81ea5eeda4e394f23a9188764ae2ac7db107",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/fixture-v2/capture/run-reference/snapshot/geometry-registers.bin": "7b6436b0c98f62380866d9432c2af0ee08ce16a171bda6951aecd95ee1307d61",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2/check-independent-v2.json": "40eaeb862177f104a3e54a9dbfc3df808155332d7e31c7d19961cbdc55c38eb9"
+  },
+  "ledger_sha256": "5c6e7738604939eca3b644d3e8fbcd45f5f32231ac3bb4039ce81aff5bb61d0f"
+}

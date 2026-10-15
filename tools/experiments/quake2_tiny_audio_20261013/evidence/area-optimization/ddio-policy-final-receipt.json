@@ -1,0 +1,21 @@
+{
+  "schema": "all-corner raw+used cross_setup.tsv, exact48-node ddio_proof.tsv, twelve ddio_checks.tsv queries",
+  "offline_tests_passed": 25,
+  "constraints_changed": false,
+  "classification": "Only16 routed-proved disconnected SDRAM high DDIO sinks may be excluded from additional used-crossing/input queries; all raw negatives retained and100MHzclosure remainsraw. All other crossings and used falling captures remain strict.",
+  "files": {
+    "sweep-tooling/sweep.py": "325f7e585c1b34b0e0c11b8d9c7dfcc1e37191ac16a9183dd63826754a1338db",
+    "sweep-tooling/results.py": "192828cad6b134c0f6cacfd484611e1ec9db5ab27cf379974bd737296d4f110b",
+    "sweep-tooling/report_sweep_timing.tcl": "2c66004df7b54c2e62a0c47ae976cf7c61da684ec034a169cb077ca00cdca34e",
+    "sweep-tooling/test_sweep.py": "33bad0c9b5dcf0810daf349b09a381896f086687395f60720ae88dd00fbf8d99",
+    "sweep-tooling/README.txt": "a93ed7a3286531d8c80d28d322bcbb64a751afe81a47994440903685df2bbd8b",
+    "area-optimization/ddio-policy-final-tests.log": "9081d7c2d579651b94e31ba5882c95d4dbcc1fa574f5ac781fe3971cbdfa6260",
+    "area-optimization/global-area/corners-v4-run.json": "a5da985a0ec08c58ce925e40f34b51ff0d2b45da1dcddced111cc1b64547c8b1",
+    "area-optimization/global-area/qualification-results-v4.json": "8f93820e35e3206983df5c5640f0013960008638a5b71f197d55f22c48712adf",
+    "area-optimization/native6-interface-check/source-pins.json": "fabeeb47695da5f51229bf74701d5578af185d0d663524b8f717f481808a1d93",
+    "area-optimization/native6-interface-check/corners-v4-run.json": "86d7efccd0be998bbbc5c458937dd6d2c538b95edaf2d88293eb7e081f1e9dba",
+    "area-optimization/native6-interface-check/qualification-results-v4.json": "b9761c59a82b4d744978f68b699584eb83bfc47ef52590e17b5175ca6ab2870e",
+    "timing-audit/ddio-connectivity.tcl": "8a3c340b3070d9b3d1180e2aa82349f013ef0f646dea681f722faf4d86e9440f",
+    "timing-audit/global-area-ddio-v2/connectivity.tsv": "e93cb397273e078965cc30c6318bd48d2e5db4bbb2e7e14fdb3b817e3e53ecc0"
+  }
+}

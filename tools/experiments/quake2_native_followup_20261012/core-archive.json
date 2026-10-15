@@ -1,0 +1,8 @@
+{
+  "archive": "core.tar.gz",
+  "archive_sha256": "ac100b4a1e2b1ed70c674548bda0275f3cf8917f89c672c78d9546073abdd318",
+  "manifest_sha256": "a80a8107274831ed4c8d3fbf3ba9c84a7809d4e91b77d252f31d3a750694ee68",
+  "artifact_sha256": "542029e588e2a646f20fc98f1dbaf89a667ced48c75de9e89354df74da8622b6",
+  "source_file_count": 127,
+  "game_assets_included": false
+}

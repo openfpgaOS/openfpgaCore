@@ -1,0 +1,165 @@
+{
+  "frame": 180,
+  "stride": 640,
+  "step": 2,
+  "cpu_cycles": 3733556,
+  "batches": [
+    {
+      "words": 4,
+      "first_write": 568,
+      "publish": 655
+    },
+    {
+      "words": 610,
+      "first_write": 1394844,
+      "publish": 1399545
+    },
+    {
+      "words": 552,
+      "first_write": 1463947,
+      "publish": 1468063
+    },
+    {
+      "words": 536,
+      "first_write": 1505082,
+      "publish": 1509252
+    },
+    {
+      "words": 695,
+      "first_write": 1585575,
+      "publish": 1590714
+    },
+    {
+      "words": 1181,
+      "first_write": 1677116,
+      "publish": 1686060
+    },
+    {
+      "words": 754,
+      "first_write": 1694545,
+      "publish": 1700108
+    },
+    {
+      "words": 609,
+      "first_write": 1746902,
+      "publish": 1751585
+    },
+    {
+      "words": 704,
+      "first_write": 1803829,
+      "publish": 1809115
+    },
+    {
+      "words": 875,
+      "first_write": 1879987,
+      "publish": 1887134
+    },
+    {
+      "words": 656,
+      "first_write": 1954906,
+      "publish": 1959726
+    },
+    {
+      "words": 480,
+      "first_write": 2022314,
+      "publish": 2026131
+    },
+    {
+      "words": 600,
+      "first_write": 2091794,
+      "publish": 2096326
+    },
+    {
+      "words": 370,
+      "first_write": 2167821,
+      "publish": 2171059
+    },
+    {
+      "words": 183,
+      "first_write": 2200305,
+      "publish": 2201710
+    },
+    {
+      "words": 183,
+      "first_write": 2224106,
+      "publish": 2225475
+    },
+    {
+      "words": 183,
+      "first_write": 2250623,
+      "publish": 2251992
+    },
+    {
+      "words": 183,
+      "first_write": 2275570,
+      "publish": 2276939
+    },
+    {
+      "words": 2376,
+      "first_write": 2535668,
+      "publish": 2555686
+    },
+    {
+      "words": 1854,
+      "first_write": 2694670,
+      "publish": 2708434
+    },
+    {
+      "words": 183,
+      "first_write": 2736211,
+      "publish": 2737580
+    },
+    {
+      "words": 183,
+      "first_write": 2753883,
+      "publish": 2755252
+    },
+    {
+      "words": 165,
+      "first_write": 2768260,
+      "publish": 2769506
+    },
+    {
+      "words": 1710,
+      "first_write": 2970162,
+      "publish": 2982893
+    },
+    {
+      "words": 615,
+      "first_write": 3033966,
+      "publish": 3038514
+    },
+    {
+      "words": 828,
+      "first_write": 3131748,
+      "publish": 3137936
+    },
+    {
+      "words": 2648,
+      "first_write": 3373598,
+      "publish": 3393317
+    },
+    {
+      "words": 1515,
+      "first_write": 3484857,
+      "publish": 3496102
+    },
+    {
+      "words": 92,
+      "first_write": 3525043,
+      "publish": 3525884
+    }
+  ],
+  "raw_vector_sha256": "aba5416a71f085b5c2414605c12e20473876215f6657a5cb654abede8617a2fe",
+  "vector_sha256": "fa979217e0163631bc1f731a925cd3d97c6f109750318b2c90bd16b98b36e090",
+  "paced_vector_sha256": "562a3c4d8dab033fb57d2eb48974f8d70777e54dccbe6589e9a05b73b8b97ac7",
+  "removed_next_frame_clear": [
+    285212675,
+    1344274432,
+    41943280,
+    41943040
+  ],
+  "timeline_sha256": "12e3a97592728a027344ccfc2c337ddb109933d1fcfc79f321898ea6c3a8b337",
+  "recovered_frame_start_clear": null,
+  "limits": "Attach observed CPU work and fence points to immutable GPU command batches.\n\nEach captured MMIO command batch is published at its observed CPU work offset.\nThe real RTL ring reservation and fences add elapsed time without erasing CPU\nwork. Word writes may be packed at the end of a batch's CPU submission interval:\nthe GPU cannot consume unpublished words, so publication timing is preserved.\nCPU framebuffer writes are excluded by the established independent raster gate;\nthis is a producer/backpressure model, not a complete CPU memory-coherency model.\n"
+}

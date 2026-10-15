@@ -1,0 +1,7 @@
+{
+  "passed": true,
+  "candidate_sha256": "e0f4ffbd20f2a20ab416543a0e9d830d7ec6b4d8d55df094479428b67f933fbb",
+  "parent_sha256": "ec474a5e04a8053fc0eea8c1034cc18f4580aeabb21816ce7acc2f700b24fd15",
+  "register_declaration_lines_exact": true,
+  "all_four_parent_lockstep_transcripts_and_cycles_exact": true
+}

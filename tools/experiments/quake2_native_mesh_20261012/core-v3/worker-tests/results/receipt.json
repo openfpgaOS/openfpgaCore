@@ -1,0 +1,52 @@
+{
+  "source_sha256": {
+    "gpu_geometry_worker.v": "61933f99a779ebb64ffe52e22d79c1905975218db58d043971014e49818a7781",
+    "geometry_worker_tb.v": "f5d2ec49343c2693edf9b7aaffd01afb9623338ae1ec1fa59a6fa2183170b655",
+    "geometry_worker.cpp": "1e19d21c43b6d964ea2c0691802d1f0bf5bece4eb1efe9155478ef75ad3f1267",
+    "legacy-disabled/geometry_worker_tb.v": "5d28431ddf8c17e3769f740dc390aba4db97d7c4102d2bd0f98c4236c87deb5a",
+    "legacy-disabled/geometry_worker.cpp": "97832457de13eb3cd40c667ee82ae6ccac8096c72394fd03c9ad738329aeeebd"
+  },
+  "version": "Verilator 5.052 2026-09-05 rev v5.052",
+  "commands": [
+    [
+      "verilator",
+      "--cc",
+      "--exe",
+      "--build",
+      "-j",
+      "4",
+      "-Wno-fatal",
+      "--top-module",
+      "geometry_worker_tb",
+      "--Mdir",
+      "/tmp/quake2-native-mesh-20261012/worker-tests/repro-v2-final/native/obj",
+      "/tmp/quake2-native-mesh-20261012/worker-tests/v2-source/geometry_worker_tb.v",
+      "/tmp/quake2-native-mesh-20261012/worker-tests/v2-source/gpu_geometry_worker.v",
+      "/tmp/quake2-native-mesh-20261012/worker-tests/v2-source/geometry_worker.cpp"
+    ],
+    [
+      "/tmp/quake2-native-mesh-20261012/worker-tests/repro-v2-final/native/obj/Vgeometry_worker_tb"
+    ],
+    [
+      "verilator",
+      "--cc",
+      "--exe",
+      "--build",
+      "-j",
+      "4",
+      "-Wno-fatal",
+      "--top-module",
+      "geometry_worker_tb",
+      "--Mdir",
+      "/tmp/quake2-native-mesh-20261012/worker-tests/repro-v2-final/legacy-disabled/obj",
+      "/tmp/quake2-native-mesh-20261012/worker-tests/v2-source/legacy-disabled/geometry_worker_tb.v",
+      "/tmp/quake2-native-mesh-20261012/worker-tests/v2-source/gpu_geometry_worker.v",
+      "/tmp/quake2-native-mesh-20261012/worker-tests/v2-source/legacy-disabled/geometry_worker.cpp"
+    ],
+    [
+      "/tmp/quake2-native-mesh-20261012/worker-tests/repro-v2-final/legacy-disabled/obj/Vgeometry_worker_tb"
+    ]
+  ],
+  "scope": "Synthetic exact-output reference: native MD2 transform/projection/palette/indices; mixed legacy; malformed descriptors; queue stalls/wrap; paused compute; soft/ring/media reset while request/response outstanding. Does not establish full-game parity, physical timing, or FPS.",
+  "passed": true
+}

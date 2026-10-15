@@ -1,0 +1,6 @@
+{
+  "passed": true,
+  "elf_sha256": "661df2c2d20963c1793878baa2e5abab0931b03add01afd956d01d5dc2ac942a",
+  "command_sha256": "0b68f168fbabbf38a8fe6110956c09019aa243a44d277896bdd882cc0e914101",
+  "limits": "Four exact command-composed color/depth RTL samples; no coupled CPU timing."
+}

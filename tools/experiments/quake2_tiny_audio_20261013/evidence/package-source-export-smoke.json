@@ -1,0 +1,26 @@
+{
+  "passed": true,
+  "checks": [
+    "all30-unqualified-results-reparse-with-failed-seed-and-bad-hold",
+    "default-qualified-audit-still-rejects-null-selection",
+    "default-final-assembler-still-rejects-null-selection",
+    "source-only-refuses-incomplete-sweep",
+    "actual-source-only-assembly-has-null-selection-no-release-core-no-fpga-binaries",
+    "all128-source-files-stage-exactly",
+    "portable-source-only-prepare-command-passes",
+    "portable-source-only-build-cannot-produce-release-artifact",
+    "all30-selection-and-raw-evidence-retained-and-verified"
+  ],
+  "real_sweep_modified": false,
+  "quartus_launched": false,
+  "scope": "Synthetic timing outcomes with actual frozen128 source and app, assembled only in disposable temporary directories.",
+  "recipe_sha256": "227836c27713dfdfd8197092ac54be21c08e6b7d76003df19ddef584d3003bd5",
+  "assembler_sha256": "51ec2ac0c51bc40e0671fa7592246995c0995eae426ff072a34bb0240bf0102f",
+  "toolkit_sha256": {
+    "package.py": "a75be47998af65041c0c78568f528e6f27b650b0924dbbb5bc5ae3ce830e705b",
+    "audit_sweep.py": "c4354055f82fae19dc3c3ea712b04b0af82b277d48294f759f0147e6e0cd43ab",
+    "build.py": "0b5f1b302a49ca21dc668b8f606a9ab07e816ea9382fba39c5eb6740eab8d314",
+    "run_tests.py": "92794cf33d466532da0b3f3a17868329fceaf3156769db6c74e23f956e506e33",
+    "timing_results.py": "192828cad6b134c0f6cacfd484611e1ec9db5ab27cf379974bd737296d4f110b"
+  }
+}

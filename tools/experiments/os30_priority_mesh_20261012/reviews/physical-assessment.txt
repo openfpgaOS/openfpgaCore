@@ -1,0 +1,37 @@
+AJ02 snapshot v2 isolated physical preparation — no compile
+
+This candidate changes raw-bank arbitration so a pending legacy CPU request can
+acquire the bank at the next complete context/job boundary. It does not wait for
+all older queued jobs. Each job now carries an immutable full 28-word context;
+framing and order checks prevent a lease from splitting that context from its
+job. True completed-job sequence remains the source-lifetime fence.
+
+The physical source comes from native-v2 and is mapped into the exact qualified
+90 MHz, seed 3, placement effort 3 project. Existing clocks, pins, timing
+exceptions, memory controllers, firmware and QSF settings are preserved. No
+Quartus database or checkpoint is copied. No compile, deployment or production
+mutation is performed by this preparation.
+
+Qualified baseline, not an AJ02 fit:
+  ALMs 18,169 / 18,480; M10Ks 304 / 308; DSPs 45 / 66
+  Main-clock Fmax 90.28 MHz; worst setup slack 0.033 ns.
+
+Snapshot v2 reuses the survivor M10K as512x16:64 triangle indices and
+32 vertices with13 converted halfwords each,480 used entries total. After full
+validation, packet publication reads only this store, allowing a legacy CPU
+LOAD to reuse raw/FMA while the previous packet drains. No extra M10K or FPU
+is added versus AJ02 v1; actual resource packing remains unqualified. The whole asynchronous architecture still adds a 512-word common
+output FIFO (source estimate 2 M10Ks) and a survivor-list RAM (1 M10K) compared
+with the qualified baseline. Source estimate is 307 M10Ks; actual inference,
+ALM use and timing have not been qualified. Only 311 baseline ALMs are spare.
+The integer packet converter, additional raw-port arbitration, context capture
+and exact-cull scheduling remain potential area/timing costs.
+
+A priority lease waits until the current raw-dependent conversion snapshot
+is committed, or the current CPU repair is complete. It no longer waits for
+converted packet words to enter the output FIFO. The next asynchronous job
+still waits for the previous packet to finish; there is one snapshot bank. Software must materialize/drop
+lazy rows and release a legacy lease before every wait requiring queued work to
+progress. Focused tests verify those ownership rules; full-frame native A/B is
+required to decide whether one physical fit is justified. No AJ02 speed claim
+is made here.

@@ -1,0 +1,19 @@
+{
+  "passed": true,
+  "staged_elf_sha256": "13c8f43af0ca9ea84b84cf1cd9e824bd6f0c1d39eb2b65dc01337408102862a0",
+  "expected_elf_sha256": "13c8f43af0ca9ea84b84cf1cd9e824bd6f0c1d39eb2b65dc01337408102862a0",
+  "byte_identical": true,
+  "source_date_epoch": 1791806400,
+  "compiler": "riscv64-elf-gcc (Arch Linux Repositories) 15.2.0",
+  "fresh_build": true,
+  "renderer_host_groups": 22,
+  "geometry_host_pass": true,
+  "texture_host_pass": true,
+  "artifact_included": false,
+  "logs": {
+    "staged-build.log": "74b3e038d9e87d7e813f790d479a1e699b6c3e8bed005ee82c0c59eb519d7f31",
+    "staged-renderer.log": "07c61085192386787133dbf4537e862f486f49f7e34166dba1af6a88460ee3e0",
+    "staged-geometry.log": "1487b3a8b72238f85df5663fe6e4c751470ec67f23ece9c5d858313184969203",
+    "staged-textures.log": "3d94081f0b9775a1e0170d5bef17e79a33f843a2c037c2daf49f038d2c1fc4f1"
+  }
+}

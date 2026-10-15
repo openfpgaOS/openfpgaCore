@@ -1,0 +1,2 @@
+PASS: native status dependency, atomic shared allocation, bounds, exact 164-word snapshot, legacy object invalidation and no per-model fence
+PASS: real geometry capability dependencies; worker 3..32-vertex packet batching; inline three-vertex limit; fan ordering/culling/payloads; invalid state; unchanged clip uploads

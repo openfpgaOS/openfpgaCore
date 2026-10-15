@@ -1,0 +1,83 @@
+--- a/src/sm64/pocket/perf_pocket.c
++++ b/src/sm64/pocket/perf_pocket.c
+@@ -381,7 +381,7 @@
+ #if SM64_PERF_DETAILS
+     print_text(12,210,"PERF P3 VERT");
+ #else
+-    print_text(12,210,"PERF F21 JOB2");
++    print_text(12,210,"PERF F22 JOB3");
+ #endif
+     if(!s->valid) {
+         print_text(12,178,"WAIT 5 SECONDS IN LEVEL");
+--- a/src/sm64/sm64/src/pc/gfx/gfx_gpu.c
++++ b/src/sm64/sm64/src/pc/gfx/gfx_gpu.c
+@@ -427,6 +427,7 @@
+         ++gfx_async_stats[14];async_servicing=0;return;
+     }
+     BRAM_GEO_REGS[0x2a]=1;
++    gfx_async_note_repair(job.commands);
+     async_finished_repair_token=sink.token;async_finished_repair_valid=1;
+     ++gfx_async_stats[7];gfx_async_stats[8]+=result.emitted_words;
+     gfx_async_stats[9]+=result.recomputed_vertices;
+--- a/src/sm64/sm64/src/pc/gfx/gfx_gpu.h
++++ b/src/sm64/sm64/src/pc/gfx/gfx_gpu.h
+@@ -136,6 +136,9 @@
+ /* AJ01 owns only immutable raw inputs and dead canonical slots. Material and
+  * viewport commands precede each job in the same ordered ingress stream. */
+ int gfx_gpu_async_supported(void);
++/* Conservative topology routing feedback after a completed async repair. */
++void gfx_async_note_repair(const void *commands);
++extern uint32_t gfx_async_hint_stats[4];
+ void gfx_gpu_async_service(void);
+ void gfx_gpu_async_drain(void);
+ int gfx_gpu_async_raw_acquire(void);
+--- a/src/sm64/sm64/src/pc/gfx/gfx_pc.c
++++ b/src/sm64/sm64/src/pc/gfx/gfx_pc.c
+@@ -1115,9 +1115,30 @@
+     const Gfx *source;
+     Gfx *next;
+     uint16_t commands, triangles;
+-    unsigned dead_after;
++    uint16_t dead_after, prefer_legacy;
+ };
+ static struct MeshTask mesh_tasks[512];
++/* callbacks, exact cache-key matches, first marks, future route rejections.
++ * This is only a performance hint: later geometry is never inferred from it. */
++uint32_t gfx_async_hint_stats[4];
++void gfx_async_note_repair(const void *commands) {
++    ++gfx_async_hint_stats[0];
++    const uintptr_t p=(uintptr_t)commands,end=(uintptr_t)__EH_FRAME_BEGIN__;
++    if((p&7u)||p<(uintptr_t)&_start+sizeof(Gfx)||p>end-sizeof(Gfx))return;
++    const Gfx *source=(const Gfx *)(p-sizeof(Gfx));
++    const unsigned h=(((uintptr_t)source>>3)^((uintptr_t)source>>13))&511u;
++    for(unsigned probe=0;probe<16;++probe) {
++        struct MeshTask *entry=&mesh_tasks[(h+probe)&511u];
++        if(entry->source==source) {
++            if(entry->next&&entry->commands) {
++                ++gfx_async_hint_stats[1];
++                if(!entry->prefer_legacy) {entry->prefer_legacy=1;++gfx_async_hint_stats[2];}
++            }
++            return;
++        }
++        if(!entry->source)return;
++    }
++}
+ static const struct MeshTask *mesh_armed,*async_armed;
+ static unsigned async_submitted;
+ static int gfx_async_try_load(unsigned count,unsigned first,const Vtx *vertices,
+@@ -1186,6 +1207,7 @@
+     }
+     if(!entry)return NULL;
+     entry->source=cmd;
++    entry->prefer_legacy=0;
+     const unsigned count=(cmd->words.w0>>12)&255u;
+     const unsigned limit=(cmd->words.w0>>1)&127u;
+     if(!count||count>32||limit!=count)return NULL; /* initial dest0 scope */
+@@ -3303,6 +3325,7 @@
+ static __attribute__((noinline)) int gfx_async_try_load(unsigned count,unsigned first,
+         const Vtx *vertices,float aspect,int eager_fog) {
+     ++gfx_async_stats[0];
++    if(async_armed->prefer_legacy){++gfx_async_hint_stats[3];return 0;}
+     if(!async_armed->dead_after){++gfx_async_stats[1];return 0;}
+     if(!triangle_material_ready||!triangle_vc_elig){++gfx_async_stats[2];return 0;}
+     const uintptr_t p=(uintptr_t)vertices,end=(uintptr_t)__EH_FRAME_BEGIN__;

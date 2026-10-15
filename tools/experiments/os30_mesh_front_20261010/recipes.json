@@ -1,0 +1,85 @@
+{
+  "packet": {
+    "kind": "verilator",
+    "top": "geometry_mesh_packet",
+    "sources": [
+      "rtl/geometry_mesh_packet.v",
+      "rtl/geometry_import_convert.v",
+      "tests/test_packet.cpp"
+    ],
+    "scope": "Clocked synchronous-RAM packet consumer; independent host float/RNE packet oracle, backpressure, captured context and zero-output fallback. No complete-frame performance or physical fit claim."
+  },
+  "fetch": {
+    "kind": "verilator",
+    "top": "geometry_mesh_command_fetch",
+    "sources": [
+      "rtl/geometry_mesh_command_fetch.v",
+      "tests/test_fetch.cpp"
+    ],
+    "scope": "Standalone two-word AXI prefetcher. Bounded original command fetch, captured source/count, address and command backpressure, error handling and cancellation drain. Shared-master arbitration remains integration work."
+  },
+  "engine": {
+    "kind": "verilator",
+    "top": "geometry_mesh_task_engine",
+    "sources": [
+      "rtl/geometry_mesh_task_ctrl.v",
+      "rtl/geometry_mesh_raw_frontend.v",
+      "rtl/geometry_mesh_task_engine.v",
+      "rtl/geometry_float_cull_mem.v",
+      "rtl/geometry_raw_load.v",
+      "rtl/geometry_transform_light.v",
+      "rtl/GeometryFmaProbe.v",
+      "rtl/phase10_raw_vtx_dma.v",
+      "rtl/geometry_float_batch_recip.v",
+      "rtl/phase10_float_recip2.v",
+      "rtl/geometry_color_rtz.v",
+      "tests/test_engine.cpp"
+    ],
+    "scope": "Actual baseline raw LOAD, DMA, transform/light, reciprocal and shared exact culler under bounded controller; synthetic contexts; no GPU/frame timing claim."
+  },
+  "chain": {
+    "kind": "verilator",
+    "top": "geometry_mesh_chain",
+    "sources": [
+      "rtl/geometry_mesh_task_ctrl.v",
+      "rtl/geometry_mesh_raw_frontend.v",
+      "rtl/geometry_mesh_task_engine.v",
+      "rtl/geometry_float_cull_mem.v",
+      "rtl/geometry_raw_load.v",
+      "rtl/geometry_transform_light.v",
+      "rtl/GeometryFmaProbe.v",
+      "rtl/phase10_raw_vtx_dma.v",
+      "rtl/geometry_float_batch_recip.v",
+      "rtl/phase10_float_recip2.v",
+      "rtl/geometry_color_rtz.v",
+      "tests/geometry_mesh_chain.v",
+      "rtl/geometry_mesh_packet.v",
+      "rtl/geometry_import_convert.v",
+      "tests/test_chain.cpp"
+    ],
+    "scope": "Actual baseline LOAD/DMA/shared FMA/culler plus actual packet converter, synthetic contexts, original TRI input, ordinary GPU packets with randomized backpressure; no GPU raster/frame timing or live-scene context claim."
+  },
+  "stream-control": {
+    "kind": "verilator",
+    "top": "geometry_mesh_stream",
+    "sources": [
+      "rtl/geometry_mesh_task_ctrl.v",
+      "rtl/geometry_mesh_raw_frontend.v",
+      "rtl/geometry_mesh_task_engine.v",
+      "rtl/geometry_float_cull_mem.v",
+      "rtl/geometry_raw_load.v",
+      "rtl/geometry_transform_light.v",
+      "rtl/GeometryFmaProbe.v",
+      "rtl/phase10_raw_vtx_dma.v",
+      "rtl/geometry_float_batch_recip.v",
+      "rtl/phase10_float_recip2.v",
+      "rtl/geometry_color_rtz.v",
+      "rtl/geometry_mesh_stream.v",
+      "rtl/geometry_mesh_command_fetch.v",
+      "rtl/geometry_mesh_packet.v",
+      "rtl/geometry_import_convert.v",
+      "tests/test_stream_control.cpp"
+    ],
+    "scope": "Actual baseline LOAD/DMA/shared FMA/culler plus actual packet converter, directed sequential-AXI ownership/cancel/prefetch-drain/late-RLAST/recovery tests. No GPU raster/frame timing claim."
+  }
+}

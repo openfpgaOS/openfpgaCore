@@ -1,0 +1,9 @@
+{
+  "passed": true,
+  "all128_file_hashes_exact": true,
+  "trial_fingerprint": "427e9d12469a49d2be340326318cf943d59f5ee12800d85379502c711a78fbf8",
+  "trial_json_encoding": "json.dumps(files, sort_keys=True)",
+  "canonical_sweep_fingerprint": "f63613efe348448c45af303972d6804a41d15724ac3a716f17eff4b40e6eb2d3",
+  "canonical_json_encoding": "json.dumps(files, sort_keys=True, separators=(',', ':'))",
+  "sweep_manifest_sha256": "3996ae6170fdb0cb9f3ba47c6d136639a2462a0114868935a03ee68607fd7af5"
+}

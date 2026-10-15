@@ -1,0 +1,66 @@
+{
+  "schema": 1,
+  "status": "COMPONENT_TESTS_PASS_NATIVE_V7_PENDING",
+  "software_abi": "MTF2 unchanged; ABI-v2, same appv2",
+  "delta_from_native_v6": [
+    "Single-packet512word buffer becomes variable-length committed multi-packet FIFO in same dual-port RAM.",
+    "Exact payload length accumulated during existing numeric validation scan; no extra pass or new popcount tree.",
+    "Wrapper starts raw copy against producer fill token, not older queued head token."
+  ],
+  "queue_contract": {
+    "physical_words": 512,
+    "pointer_bits": 10,
+    "descriptor_words": 5,
+    "descriptor": [
+      "serial",
+      "flags",
+      "uofs",
+      "vofs",
+      "payload_count"
+    ],
+    "max_payload": 416,
+    "max_record": 421,
+    "producer": "One exact-sized reservation and incomplete fill at a time. Filling writes do not advance committed pointer until producer_done and exact count.",
+    "consumer": "Head descriptor read from committed records. Headers free credits after latching, payload words only after accepted GPU handshakes. Independent fill/drain may overlap.",
+    "reset": "Consumer reset discards every queued/partial packet together with GPU bridge, cancels/drains current mesh DMA; unrelated legacy raw DMA survives.",
+    "fault": "Wrong length or extra producer data halts without committing partial tail; no partial tail becomes visible. Full marker context must match decoded head.",
+    "known_protocol_delay": "When new ARM reserves behind old READY head, a wrong new marker can have mismatch suppressed for the reservation cycle; next cycle faults without acceptance. wrapper-v7b proves bounded rejection. Optional !queue_busy hardening deferred per parent to preserve measurement."
+  },
+  "resources": {
+    "incremental_M10K_intended": 4,
+    "private_packet": 2,
+    "survivors": 1,
+    "merge128": 1,
+    "qualification": "No Quartus/fit/timing result;311 baseline ALM spare remains serious risk."
+  },
+  "tests": [
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/tests/wrapper-v7/manifest.json",
+      "sha256": "dbf070496419b0b9ca747f25dc7c8663c9ac449f8304a96afc2aeb3faddd2750",
+      "status": "PASS"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/tests/wrapper-v7b/manifest.json",
+      "sha256": "87bdace13014562bcd93cacf464cd44f0fc6225f41b671d51d36314cf3627b1c",
+      "status": "PASS"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/tests/scene-split-v7/manifest.json",
+      "sha256": "427903111ccaf5470d1e5344da3026b11bb8689aab57866ec484c7e23cf45918",
+      "status": "PASS"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/queue-test-v3/manifest.json",
+      "sha256": "e9adca9c1bf31e335a95c69a410408bae480efd2798ebd144eb2540da6be4f61",
+      "status": "PASS"
+    }
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/frozen/src/fpga/common/phase10_load_alias.v": "322bea9ab96131f84d13edf6448f490e7190519b38a2dfa1ba027fa31fae116d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/frozen/src/fpga/common/geometry_mesh_queue.v": "a3ac412006c503332f4a6d8895155d869f367bb39924e8a6a4c4245d1ff230e4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/frozen/src/fpga/common/geometry_mesh_packet.v": "493c6618a9e7962de6e171d3730e85df0725edae20658fb457b86522a8b2d4b8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/frozen/src/fpga/common/geometry_mesh_stream.v": "c437aa11c859757493764e6c243da4cb1238c585a8c65ff7330a8f4017aedc28",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/frozen/src/fpga/common/gpu_mesh_bridge.v": "8c02f8dacee2e4ff57d568bc9b968bb8b4109aa622739e3bf33804d39dc9cad9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/frozen/src/fpga/common/gpu_core.v": "f5483ea84933b3f02b953c147ec16e6ba0622cd76886dd3072e8f13f8f49e5ff"
+  }
+}

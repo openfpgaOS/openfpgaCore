@@ -1,0 +1,101 @@
+AJ02 priority access and independent packet snapshot: measured result
+
+The CPU can now reuse raw geometry BRAM while an older GPU packet is still
+draining. The hardware and application are implemented and pass exact native
+validation. This removes most ordinary output-induced ownership waiting, but
+the complete application still does not outperform the qualified control.
+The experiment is retained separately; production sources, game folders and
+the SD card were not changed. No physical fit, seed sweep or deployment ran.
+
+Measured cycles (lower is better)
+
+                                     Cold interval   Warm interval
+F23 on qualified control                 4,218,023       4,551,344
+F23 on priority native-v1                 4,647,402       4,794,375
+F23 on snapshot native-v2                 4,624,527       4,657,010
+F24 on qualified control                 4,186,769       4,536,880
+F24 on snapshot native-v2                 4,619,218       4,591,166
+
+The isolated hardware comparison uses identical F23 ELF and initial state.
+Snapshotting cuts warm pending lease cycles from 204,231 to 8,372 (95.90%)
+and reduces the complete warm interval by 137,365 cycles (2.865%). That is a
+real reduction against the previous priority experiment, not a speedup over
+the qualified control. With the final F24 app the remaining warm lease wait
+is 9,805 cycles, while the whole warm interval remains 54,286 cycles slower
+than its identical-ELF control (+1.197%). Combined cold/warm cost is +5.579%.
+
+What changed
+
+1. The CPU gets priority at a safe raw-task boundary, without waiting for all
+   previously submitted jobs. Each asynchronous job carries a complete
+   immutable 28-word context immediately followed by its descriptor. The
+   42-word bundle is reserved and committed atomically; context handoff
+   cannot split it. Completed serial still means actual ordered output has
+   been stored, not merely that the CPU has been granted raw access.
+
+2. The existing survivor-list M10K is repacked as 512 x 16 bits. Locations
+   0..63 hold triangle indices; 64..479 hold 13 converted halfword planes for
+   up to 32 vertices. Validation commits the whole snapshot before any
+   publication. Packet emission subsequently reads only that frozen store.
+   Raw/FMA completion and output completion have independent lifetimes, so
+   the CPU may overwrite matrix/scalar/raw data without altering the old
+   packet. No additional BRAM or FPU is introduced by this snapshot step.
+   The full candidate's physical area and timing are not yet qualified.
+
+3. The app materializes lazy raw results and releases ownership before any
+   GPU-dependent wait. Acquisition occurs after source preparation/pending
+   submission, so no dependent wait interrupts an unregistered raw result.
+   Source recycling still waits for true output completion. F24 also caches
+   immutable source offsets with pool-generation invalidation, removes
+   duplicate context copying and avoids redundant checks while a held lease
+   has been proven quiescent. Cold repair and the exact fallback hint remain.
+
+Correctness and real overlap
+
+The final independent native checks verify full color/depth and buffer
+history, effective draw/material/viewport order, Surface pool, integer and
+FP state/FCSR, all 708 original VTX calls and all 652 consumed raw contexts.
+The existing known s5 timing-sample normalization remains documented in the
+strict receipts; no new rendering or ownership mismatch was waived.
+
+The actual final trace contains 124 committed snapshots, 12,151 physical RAM
+writes, 56 lease grants before the old snapshot packet completes, and 40
+legacy raw loads starting while that output is still pending. The checker
+binds pre-edge write enables to actual post-edge RAM words and verifies every
+emitted payload against the immutable store. Eleven deliberately corrupted
+witnesses are rejected. Focused RTL tests cover maximum 32-vertex/64-triangle
+packets, all stored material combinations, full queues, context/raw overwrite,
+repair, and reset during concurrent legacy DMA. Actual-C tests cover ownership,
+atomic bundles, source-cache generations/wrap, partial vertices and all waits.
+
+Interpretation and limits
+
+The CPU/GPU overlap is now demonstrated. A larger output FIFO would not fix
+the remaining host admission, context construction, lookup and service costs;
+most output stalls can now proceed without owning the CPU's raw bank. Cold
+clipping/numeric repair still requires CPU work and is not eliminated here.
+Function attribution is diagnostic: its preceding-retirement gaps are not
+exclusive function time and cannot be added into projected savings.
+
+The next performance investigation should reduce per-job CPU work or admit
+larger useful tasks, measured against the same qualified control. This result
+does not justify spending the remaining FPGA resources or replacing the
+deployed core. The current experiment has no sustained Pocket FPS claim:
+measurements cover two bounded native intervals, synthetic scan/audio and
+bounded guest services in one captured scene, not all levels or Quake2.
+
+Evidence entry points
+
+analysis/conclusion-v1.json and analysis/conclude_v1.py
+analysis/native-v1.json, native-v2-f23.json, native-v2.json, phases-v2.json
+analysis/app-review-v2.json
+validation/{control-v2,candidate-v2,candidate-v2-f23-a2}/check-independent-v2.json
+validation/lifetime-negative-v2/result.json
+work-core-v2/rtl-ready-v1.json
+work-app-v2/evidence/app-build-v2/build-result.json
+physical/review-v2.json (prepared only, not compiled)
+
+All predecessor frozen inputs, results and source bundles remain unchanged.
+The initial supplemental observer-build attempt failed before binding because
+Verilator merged a signal alias. The final passive observer maps that alias
+and independently records actual physical RAM writes; RTL was not changed.

@@ -1,0 +1,10 @@
+{
+  "passed": true,
+  "variant": "native-v1",
+  "fresh_stage": "/tmp/q2-native-package-rebuild-20261012",
+  "elf_sha256": "ba4dfc7a60e20a9a19971aaa03c43dc4d9c0997b7f7c29fde4b1cd09aa1f4eaf",
+  "source_date_epoch": 1791806400,
+  "compiler": "riscv64-elf-gcc (Arch Linux Repositories) 15.2.0",
+  "renderer_host": "PASS16groups",
+  "geometry_host": "PASS"
+}

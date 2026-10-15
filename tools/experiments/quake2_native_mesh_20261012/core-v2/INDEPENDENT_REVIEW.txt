@@ -1,0 +1,48 @@
+Independent read-only review of native core v1 and application v1
+
+Reviewed physical QSF selection, native worker state, memory arbitration,
+reset/drain ownership, descriptor bounds, old viewport/matrix preservation,
+app eligibility, integer projection, palette ownership, GPU asset allocation,
+model lifetime and build provenance. This is review evidence, not a test pass
+or physical qualification claim.
+
+Confirmed:
+- The physical QSF selects common/os30/gpu_core.v and the shared changed worker.
+- Native state does not overwrite the legacy matrix/viewport. Queue ordering
+  preserves surface commands and generated vertex-cache writes/triangles.
+- The fetcher holds accepted/in-progress memory ownership across client reset
+  and drains/discards it independently of the worker's media/ring reset.
+- Palette contents are inline and draw-owned. Mesh/frame references point at
+  uploaded immutable CRAM copies; freeing the CPU model is not a GPU UAF.
+- Vertex/frame/mesh bounds and UV/position-seam identity have explicit checks.
+- Full-object fallback avoids mixing native and CPU projection within a model.
+- The strict timing recipe preserves failures; copied parent timing reports
+  are not prototype timing evidence.
+
+Application v1 findings sent to the root/app agent for correction:
+1. of_gl1.c:2677-2706 caches only one skin width/height residency per model.
+   Alternating differently sized skins reuploads every animation frame and
+   fences the GPU repeatedly, then exhausts the bump allocator. Minimal fix:
+   same-generation dimension mismatch falls back without reallocating.
+2. Native allocations share the texture upward bump allocator and are not
+   reclaimed at GL1 map registration. GL1 has no OFQ2_TexReset caller; native
+   dead assets therefore consume CRAM across levels. A naive reset plus invalid
+   texture handles is UNSAFE because fast texture CPU pixels are freed after
+   upload (of_gl1.c:3458-3462), so cached images cannot lazily recreate them.
+   Recommended minimal fix: textures allocate upward, native assets downward
+   by lowering the SDK texture ceiling; a fenced map reset restores that
+   ceiling and bumps a separate native generation, retaining all texture
+   addresses/flat texture/colormap. Keep a positive ceiling because the SDK
+   also uses it as the fast-memory presence flag. The app agent owns this fix.
+
+Remaining performance limitation: first accepted drawing of a model uploads
+all animation frames and drains preceding GPU work. In the input pak0, native
+tank frames are 476280 bytes, soldier 431300 and berserk 314272. The functional
+CPU benchmark models texture uploads instantaneously; its steady-state savings
+do not measure this real cold-upload latency. Precache at load time can address
+it later. Existing texture lifetime/arena behavior is separate from the new
+native lifetime fix.
+
+No additional proven RTL correctness blocker was found in the reviewed normal
+path. Floating-versus-fixed image comparison and physical timing were still
+being completed by the root/validation agents at this review point.

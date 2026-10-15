@@ -1,0 +1,730 @@
+--- a/src/fpga/common/os30/geometry_bram_import.v
++++ b/src/fpga/common/os30/geometry_bram_import.v
+@@ -0,0 +1,114 @@
++// Read an immutable leased LOAD result directly into the GPU clip payload.
++// The owner grants a synchronous BRAM port; PRIME is required after grant
++// because the shared-port address mux changes on that edge. No cache write
++// happens here: the GPU commits only a complete, validated result.
++module geometry_bram_import (
++    input wire clk,
++    input wire reset,
++    input wire start,
++    input wire [31:0] token,
++    input wire [4:0] source_slot,
++    input wire [31:0] u_offset, v_offset, context_flags,
++    output wire busy,
++    output reg done, error,
++    output wire view_req,
++    output reg [31:0] view_token,
++    output reg [4:0] view_source,
++    output wire [7:0] view_addr,
++    output reg view_done,
++    input wire view_grant, view_error,
++    input wire [31:0] view_data,
++    output reg [31:0] clip_x, clip_y, clip_w, tex_u, tex_v, depth,
++    output reg [15:0] rgb565
++);
++    localparam IDLE=2'd0, REQUEST=2'd1, PRIME=2'd2, CAPTURE=2'd3;
++    reg [1:0] state;
++    reg [2:0] row;
++    reg [31:0] held_u_offset, held_v_offset, held_flags;
++    wire [31:0] converted;
++    wire conversion_error;
++    wire signed [31:0] raw_u = {{16{view_data[15]}}, view_data[15:0]};
++    wire signed [31:0] raw_v = {{16{view_data[31]}}, view_data[31:16]};
++    wire signed [31:0] u_units = raw_u - $signed(held_u_offset) + (held_flags[17] ? 32'sd16 : 32'sd0);
++    wire signed [31:0] v_units = raw_v - $signed(held_v_offset) + (held_flags[17] ? 32'sd16 : 32'sd0);
++    wire invalid_context = context_flags[31:19] != 0 ||
++        (context_flags[16] && (u_offset > 32'd524280 || v_offset > 32'd524280 ||
++                              u_offset[2:0] != 0 || v_offset[2:0] != 0));
++    wire bad_capture = ((row == 0 || row == 1 || row == 3 || row == 4) && conversion_error) ||
++        (row == 3 && (view_data[31] || view_data[30:0] == 0 || view_data >= 32'h46fffe00)) ||
++        (row == 7 && view_data != 0);
++    assign busy = state != IDLE;
++    assign view_req = state == REQUEST;
++    assign view_addr = {row, view_source};
++    geometry_import_convert convert (.value(view_data), .depth_mode(row == 4),
++        .result(converted), .error(conversion_error));
++    always @(posedge clk) begin
++        done <= 0;
++        error <= 0;
++        view_done <= 0;
++        if (reset) begin
++            state <= IDLE;
++            row <= 0;
++            view_token <= 0;
++            view_source <= 0;
++            held_u_offset <= 0;
++            held_v_offset <= 0;
++            held_flags <= 0;
++            clip_x <= 0; clip_y <= 0; clip_w <= 0;
++            tex_u <= 0; tex_v <= 0; depth <= 0; rgb565 <= 0;
++        end else case (state)
++            IDLE: if (start) begin
++                if (invalid_context) begin
++                    done <= 1;
++                    error <= 1;
++                end else begin
++                    view_token <= token;
++                    view_source <= source_slot;
++                    held_u_offset <= u_offset;
++                    held_v_offset <= v_offset;
++                    held_flags <= context_flags;
++                    row <= 0;
++                    state <= REQUEST;
++                end
++            end
++            REQUEST: begin
++                if (view_error) begin
++                    done <= 1;
++                    error <= 1;
++                    state <= IDLE;
++                end else if (view_grant) state <= PRIME;
++            end
++            PRIME: state <= CAPTURE;
++            CAPTURE: begin
++                if (bad_capture) begin
++                    view_done <= 1;
++                    done <= 1;
++                    error <= 1;
++                    state <= IDLE;
++                end else begin
++                    case (row)
++                        0: clip_x <= converted;
++                        1: clip_y <= converted;
++                        3: clip_w <= converted;
++                        4: depth <= converted;
++                        5: begin
++                            tex_u <= held_flags[16] ? (u_units << 11) : 32'd0;
++                            tex_v <= held_flags[16] ? (v_units << 11) : 32'd0;
++                        end
++                        6: rgb565 <= held_flags[18] ? {view_data[7:3], view_data[15:10], view_data[23:19]} : held_flags[15:0];
++                        default: ;
++                    endcase
++                    if (row == 7) begin
++                        view_done <= 1;
++                        done <= 1;
++                        state <= IDLE;
++                    end else begin
++                        row <= row + 1'b1;
++                        state <= PRIME;
++                    end
++                end
++            end
++            default: state <= IDLE;
++        endcase
++    end
++endmodule
+--- a/src/fpga/common/os30/geometry_import_convert.v
++++ b/src/fpga/common/os30/geometry_import_convert.v
+@@ -0,0 +1,50 @@
++// Direct LOAD-result import: binary32 power-of-two scale and signed RNE.
++// This is the existing app's FE_TONEAREST contract, not a general FPU.
++// Unsupported nonfinite and nonzero subnormal inputs fail before cache writes.
++module geometry_import_convert (
++    input wire [31:0] value,
++    input wire depth_mode,
++    output reg [31:0] result,
++    output reg error
++);
++    reg [23:0] mantissa;
++    reg [32:0] magnitude, remainder, half;
++    integer shift_count, right_count;
++    always @* begin
++        result = 0;
++        error = 0;
++        mantissa = {1'b1, value[22:0]};
++        magnitude = 0;
++        remainder = 0;
++        half = 0;
++        shift_count = 0;
++        right_count = 0;
++        if (value[30:23] == 8'hff ||
++            (value[30:23] == 0 && value[22:0] != 0)) begin
++            error = 1;
++        end else if (depth_mode && (value[31] || value[30:0] <= 31'h30800000)) begin
++            result = 32'd1;
++        end else if (depth_mode && value[30:0] >= 31'h3fffffff) begin
++            result = 32'h7fffff80;
++        end else if (value[30:23] != 0) begin
++            // value = mantissa * 2^(exponent - 150).
++            shift_count = {24'd0, value[30:23]} + (depth_mode ? 30 : 8) - 150;
++            if (shift_count >= 0) begin
++                if (shift_count > 8) error = 1;
++                else magnitude = {9'd0, mantissa} << shift_count;
++            end else begin
++                right_count = -shift_count;
++                if (right_count <= 24) begin
++                    magnitude = {9'd0, mantissa} >> right_count;
++                    remainder = {9'd0, mantissa} & ((33'd1 << right_count) - 1'b1);
++                    half = 33'd1 << (right_count - 1);
++                    if (remainder > half || (remainder == half && magnitude[0]))
++                        magnitude = magnitude + 1'b1;
++                end
++            end
++            if ((!value[31] && magnitude > 33'h07fffffff) ||
++                (value[31] && magnitude > 33'h080000000)) error = 1;
++            result = value[31] ? -magnitude[31:0] : magnitude[31:0];
++        end
++    end
++endmodule
+--- a/src/fpga/common/os30/geometry_import_view.v
++++ b/src/fpga/common/os30/geometry_import_view.v
+@@ -0,0 +1,147 @@
++// BIM2: two immutable snapshots decouple the raw LOAD producer from GPU work.
++// One synchronous raw-result port fills bank A; an independent RAM port feeds
++// the GPU. The source lease ends after copying, not after ordered GPU release.
++module geometry_import_view (
++ input wire clk, reset, consumer_reset,
++ input wire result_success, result_valid, producer_active,
++ input wire [5:0] result_count,
++ input wire claim, clear_error, producer_rejected,
++ input wire [31:0] claim_token,
++ output reg [31:0] generation,
++ output wire leased,
++ output reg error,
++ output reg [31:0] claim_result,
++ output wire [1:0] free_banks,
++ input wire cpu_view_active,
++ input wire [7:0] cpu_view_addr,
++ output wire cpu_view_block,
++ output wire [7:0] result_addr,
++ input wire [31:0] result_data,
++ input wire gpu_req,
++ input wire [31:0] gpu_token,
++ input wire [4:0] gpu_src,
++ input wire [7:0] gpu_addr,
++ output wire gpu_grant, gpu_error,
++ output wire [31:0] gpu_data,
++ input wire gpu_read_done, gpu_release, gpu_fault,
++ input wire [31:0] gpu_release_token,
++ output reg owner
++);
++ localparam COPY_IDLE=2'd0, COPY_WAIT_CPU=2'd1, COPY_PRIME=2'd2, COPY_RUN=2'd3;
++ reg [1:0] copy_state;
++ reg copy_bank, gpu_read_bank;
++ reg [7:0] copy_issue_addr, copy_capture_addr;
++ reg [1:0] bank_valid, bank_ready;
++ reg [31:0] bank_token [0:1];
++ reg [5:0] bank_count [0:1];
++ // 512x32 uses two Cyclone V M10Ks. Port A writes snapshots; port B is
++ // synchronous and independent of the producer/canonical CPU result view.
++ (* ramstyle = "M10K, no_rw_check" *) reg [31:0] snapshot_mem [0:511];
++ reg [31:0] snapshot_q;
++ assign gpu_data = snapshot_q;
++ assign leased = copy_state != COPY_IDLE;
++ assign free_banks = ~bank_valid;
++ assign cpu_view_block = leased;
++ wire copy_owns_raw_port = copy_state == COPY_PRIME || copy_state == COPY_RUN;
++ assign result_addr = copy_owns_raw_port ? copy_issue_addr : cpu_view_addr;
++
++ wire gpu_match0 = bank_valid[0] && bank_token[0] == gpu_token;
++ wire gpu_match1 = bank_valid[1] && bank_token[1] == gpu_token;
++ wire gpu_match = gpu_match0 || gpu_match1;
++ wire gpu_bank = gpu_match1;
++ wire gpu_source_valid = {1'b0,gpu_src} < bank_count[gpu_bank];
++ wire reject_request = gpu_req && !owner && (!gpu_match || !gpu_source_valid);
++ wire accept_request = gpu_req && !owner && gpu_match && gpu_source_valid && bank_ready[gpu_bank];
++ assign gpu_grant = !reset && !consumer_reset && (owner || accept_request);
++ assign gpu_error = !reset && !consumer_reset && reject_request;
++
++ wire duplicate_claim = (bank_valid[0] && bank_token[0] == claim_token) ||
++                        (bank_valid[1] && bank_token[1] == claim_token);
++ wire invalid_claim = !result_valid || producer_active || result_success ||
++                      claim_token != generation || result_count == 0 || result_count > 32;
++ wire no_free_bank = &bank_valid;
++ wire claim_bank = bank_valid[0]; // Prefer bank0; called only when one is free.
++ wire accept_claim = claim && !leased && !invalid_claim && !duplicate_claim && !no_free_bank;
++ wire release_match0 = bank_valid[0] && bank_token[0] == gpu_release_token;
++ wire release_match1 = bank_valid[1] && bank_token[1] == gpu_release_token;
++ wire release_match = release_match0 || release_match1;
++ wire release_bank = release_match1;
++ wire release_safe = release_match && bank_ready[release_bank] &&
++                     !(owner && gpu_read_bank == release_bank) &&
++                     !(gpu_req && gpu_token == gpu_release_token);
++
++ always @(posedge clk) begin
++  if (!reset && !consumer_reset && copy_state == COPY_RUN)
++   snapshot_mem[{copy_bank,copy_capture_addr}] <= result_data;
++  // Ownership changes after the grant edge. The existing GPU importer PRIME
++  // state supplies the extra edge before consuming this synchronous output.
++  snapshot_q <= snapshot_mem[{gpu_read_bank,gpu_addr}];
++ end
++
++ always @(posedge clk) begin
++  if (reset) begin
++   generation <= 0;
++   copy_state <= COPY_IDLE;
++   copy_bank <= 0; gpu_read_bank <= 0;
++   copy_issue_addr <= 0; copy_capture_addr <= 0;
++   bank_valid <= 0; bank_ready <= 0;
++   bank_token[0] <= 0; bank_token[1] <= 0;
++   bank_count[0] <= 0; bank_count[1] <= 0;
++   owner <= 0; error <= 0; claim_result <= 0;
++  end else begin
++   // Raw generations advance even while old snapshots are queued/consumed.
++   if (result_success) generation <= generation + 1'b1;
++   if (consumer_reset) begin
++    copy_state <= COPY_IDLE;
++    bank_valid <= 0; bank_ready <= 0;
++    owner <= 0; error <= 0; claim_result <= 0;
++   end else begin
++    if (clear_error) error <= 0;
++    if (accept_request) begin owner <= 1; gpu_read_bank <= gpu_bank; end
++    if (gpu_read_done) owner <= 0;
++    if (reject_request || gpu_fault || producer_rejected) error <= 1;
++    if (gpu_release) begin
++     if (release_safe) begin bank_valid[release_bank] <= 0; bank_ready[release_bank] <= 0; end
++     else error <= 1;
++    end
++    case (copy_state)
++     COPY_WAIT_CPU: if (!cpu_view_active) begin
++      // Switch the address mux only after the accepted CPU burst drains.
++      copy_issue_addr <= 0;
++      copy_state <= COPY_PRIME;
++     end
++     COPY_PRIME: begin
++      // This edge issues raw word0. First capture is the next edge.
++      copy_capture_addr <= 0;
++      copy_issue_addr <= 1;
++      copy_state <= COPY_RUN;
++     end
++     COPY_RUN: begin
++      if (copy_capture_addr == 8'hff) begin
++       bank_ready[copy_bank] <= 1;
++       copy_state <= COPY_IDLE;
++      end else begin
++       copy_capture_addr <= copy_issue_addr;
++       if (copy_issue_addr != 8'hff) copy_issue_addr <= copy_issue_addr + 1'b1;
++      end
++     end
++     default: ;
++    endcase
++    if (claim) begin
++     // Rejection is expected flow control, not a protocol fault. A new
++     // attempt always replaces the mailbox; stale success cannot survive.
++     claim_result <= {26'd0,leased,invalid_claim,no_free_bank,duplicate_claim,2'b00};
++     if (accept_claim) begin
++      claim_result <= {30'd0,claim_bank,1'b1};
++      bank_valid[claim_bank] <= 1;
++      bank_ready[claim_bank] <= 0;
++      bank_token[claim_bank] <= claim_token;
++      bank_count[claim_bank] <= result_count;
++      copy_bank <= claim_bank;
++      copy_state <= COPY_WAIT_CPU;
++     end
++    end
++   end
++  end
++ end
++endmodule
+--- a/src/fpga/common/os30/gpu_core.v
++++ b/src/fpga/common/os30/gpu_core.v
+@@ -341,6 +341,21 @@
+     output reg  [1:0]  gpu_swap_idx,
+ 
+     input  wire        slave_swap_pending,    // CMD_FLIP backpressure from display slave
++`ifdef INCLUDE_GPU_BRAM_IMPORT
++    // Ordered direct import from the leased geometry LOAD result BRAM.
++    output wire        import_req,
++    output wire [31:0] import_token,
++    output wire [4:0]  import_src,
++    output wire [7:0]  import_addr,
++    output wire        import_read_done,
++    input  wire        import_grant,
++    input  wire        import_error,
++    input  wire [31:0] import_data,
++    output reg         import_release,
++    output reg  [31:0] import_release_token,
++    output reg         import_fault,
++    output wire        import_cancel,
++`endif
+ `ifdef INCLUDE_GPU_RENDER_CACHE
+     // Render cache barrier (gpu_color_depth_cache between the m_rd/m_wr ports
+     // and the arbiter): fences, flips and clears wait for memory_barrier_done
+@@ -3374,6 +3389,10 @@
+ localparam S_VCWRITE          = 6'd19; // Serialize six packed vertex words
+ localparam S_PAY_WAIT         = 6'd18; // Worker output may pause inside a payload
+ 
++`ifdef INCLUDE_GPU_BRAM_IMPORT
++localparam S_IMPORT_WAIT      = 6'd20;
++localparam S_IMPORT_FAULT     = 6'd21; // Visible halt; only reset can recover.
++`endif
+ reg [5:0] state;
+ 
+ // Command decoding
+@@ -3440,6 +3459,35 @@
+ localparam [4:0] CMDCLS_LOAD_VERT_CLIP   = 5'd19;  // 0x56
+ localparam [4:0] CMDCLS_GEOMETRY         = 5'd20;  // 0x59
+ localparam [4:0] CMDCLS_PROJECTED        = 5'd21;  // internal worker cache load
++`ifdef INCLUDE_GPU_BRAM_IMPORT
++localparam [4:0] CMDCLS_IMPORT_CONTEXT   = 5'd22;  // 0x5D, three words
++localparam [4:0] CMDCLS_IMPORT_VERTEX    = 5'd23;  // 0x5E, token + slots
++localparam [4:0] CMDCLS_IMPORT_RELEASE   = 5'd24;  // 0x5F, token
++localparam [4:0] CMDCLS_IMPORT_INVALID   = 5'd25;
++reg [31:0] import_u_offset, import_v_offset, import_context_flags;
++reg import_context_valid;
++reg [31:0] import_command_token, import_descriptor;
++reg import_start;
++wire importer_done, importer_error;
++wire [31:0] imported_x, imported_y, imported_w, imported_u, imported_v, imported_depth;
++wire [15:0] imported_rgb;
++wire import_context_bad = import_context_flags[31:19] != 0 ||
++    (import_context_flags[16] &&
++        (import_u_offset > 32'd524280 || import_v_offset > 32'd524280 ||
++         import_u_offset[2:0] != 0 || import_v_offset[2:0] != 0));
++assign import_cancel = soft_reset || ring_reset;
++geometry_bram_import vertex_importer (
++    .clk(clk), .reset(!reset_n || import_cancel), .start(import_start),
++    .token(import_command_token), .source_slot(import_descriptor[4:0]),
++    .u_offset(import_u_offset), .v_offset(import_v_offset), .context_flags(import_context_flags),
++    .busy(), .done(importer_done), .error(importer_error),
++    .view_req(import_req), .view_token(import_token), .view_source(import_src),
++    .view_addr(import_addr), .view_done(import_read_done),
++    .view_grant(import_grant), .view_error(import_error), .view_data(import_data),
++    .clip_x(imported_x), .clip_y(imported_y), .clip_w(imported_w),
++    .tex_u(imported_u), .tex_v(imported_v), .depth(imported_depth), .rgb565(imported_rgb)
++);
++`endif
+ reg [4:0] cmd_class;
+ reg [1:0] geometry_cull;  // indexed word bits 15=front, 16=back; screen winding
+ reg geometry_sort_odd;
+@@ -6354,6 +6402,11 @@
+     reg        z_src_pending_applied;
+     reg        acc_drain_done;
+ 
++`ifdef INCLUDE_GPU_BRAM_IMPORT
++    import_start <= 1'b0;
++    import_release <= 1'b0;
++    import_fault <= 1'b0;
++`endif
+     spanprod_pl_origin_we = 1'b0;
+     spanprod_pl_origin_wa = 4'd0;
+     spanprod_pl_origin_wd = 0;
+@@ -6488,6 +6541,15 @@
+         tri_fill_idx <= 3'd0;
+         cmd_is_flip <= 0;
+         cmd_class <= CMDCLS_NONE;
++`ifdef INCLUDE_GPU_BRAM_IMPORT
++        import_u_offset <= 0;
++        import_v_offset <= 0;
++        import_context_flags <= 0;
++        import_context_valid <= 0;
++        import_command_token <= 0;
++        import_descriptor <= 0;
++        import_release_token <= 0;
++`endif
+         geometry_cull <= 2'b00;
+         geometry_sort_odd <= 1'b0;
+         spanprod_compact_direct <= 1'b0;
+@@ -6677,7 +6739,15 @@
+         end
+ 
+         // Soft reset: return FSM to idle, deassert all bus signals
+-        if (soft_reset) begin
++        if (soft_reset
++`ifdef INCLUDE_GPU_BRAM_IMPORT
++            || (ring_reset && (state == S_IMPORT_WAIT || state == S_IMPORT_FAULT ||
++                (state != S_IDLE && cmd_class >= CMDCLS_IMPORT_CONTEXT && cmd_class <= CMDCLS_IMPORT_INVALID)))
++`endif
++        ) begin
++`ifdef INCLUDE_GPU_BRAM_IMPORT
++            import_context_valid <= 1'b0;
++`endif
+ `ifdef INCLUDE_SPAN_LOOKAHEAD
+             span_la <= LA_IDLE;
+             span_la_chunk <= 1'b0;
+@@ -7241,6 +7311,15 @@
+                                       || cmd_payload_words == 13'd10
+                                       || cmd_payload_words == 13'd15))
+                                ? CMDCLS_GEOMETRY : CMDCLS_NONE;
++`ifdef INCLUDE_GPU_BRAM_IMPORT
++                8'h5D: cmd_class <= (cmd_payload_words == 13'd3)
++                    ? CMDCLS_IMPORT_CONTEXT : CMDCLS_IMPORT_INVALID;
++                8'h5E: cmd_class <= (!GEOMETRY_WORKER && INCLUDE_VTX_CACHE && INCLUDE_XFORM_RGB
++                                    && SINGLE_CLIP_VERTEX && cmd_payload_words == 13'd2)
++                    ? CMDCLS_IMPORT_VERTEX : CMDCLS_IMPORT_INVALID;
++                8'h5F: cmd_class <= (cmd_payload_words == 13'd1)
++                    ? CMDCLS_IMPORT_RELEASE : CMDCLS_IMPORT_INVALID;
++`endif
+                 default:         cmd_class <= CMDCLS_NONE;
+             endcase
+ 
+@@ -7636,6 +7715,23 @@
+                     default: ;
+                 endcase
+             end
++`ifdef INCLUDE_GPU_BRAM_IMPORT
++            CMDCLS_IMPORT_CONTEXT: begin
++                case (pay_idx)
++                    0: import_u_offset <= ring_rd_data;
++                    1: import_v_offset <= ring_rd_data;
++                    2: import_context_flags <= ring_rd_data;
++                    default: ;
++                endcase
++            end
++            CMDCLS_IMPORT_VERTEX: begin
++                if (pay_idx == 0) import_command_token <= ring_rd_data;
++                if (pay_idx == 1) import_descriptor <= ring_rd_data;
++            end
++            CMDCLS_IMPORT_RELEASE: begin
++                if (pay_idx == 0) import_release_token <= ring_rd_data;
++            end
++`endif
+             CMDCLS_LOAD_VERTS,
+             CMDCLS_LOAD_VERT_CLIP: begin
+                 // T3 0x53/0x56: one vert (raw {x,y,z} for 0x53, clip {x,y,w}
+@@ -8071,6 +8167,36 @@
+                     state <= S_IDLE;
+                 end
+             end
++`ifdef INCLUDE_GPU_BRAM_IMPORT
++            CMDCLS_IMPORT_CONTEXT: begin
++                if (import_context_bad) begin
++                    import_context_valid <= 1'b0;
++                    import_fault <= 1'b1;
++                    state <= S_IMPORT_FAULT;
++                end else begin
++                    import_context_valid <= 1'b1;
++                    state <= S_IDLE;
++                end
++            end
++            CMDCLS_IMPORT_VERTEX: begin
++                if (!import_context_valid || !tri_state_valid || import_descriptor[31:10] != 0) begin
++                    import_fault <= 1'b1;
++                    state <= S_IMPORT_FAULT;
++                end else begin
++                    xf_load_slot <= import_descriptor[9:5];
++                    import_start <= 1'b1;
++                    state <= S_IMPORT_WAIT;
++                end
++            end
++            CMDCLS_IMPORT_RELEASE: begin
++                import_release <= 1'b1;
++                state <= S_IDLE;
++            end
++            CMDCLS_IMPORT_INVALID: begin
++                import_fault <= 1'b1;
++                state <= S_IMPORT_FAULT;
++            end
++`endif
+             CMDCLS_LOAD_VERT_CLIP: begin
+                 // T3 0x56: park ONE pre-transformed clip-space vert in the cache.
+                 // Same wire as 0x53 but w1-3 are CPU-computed M*v clip {x,y,w};
+@@ -9048,6 +9174,43 @@
+         // Serialize the remainder of a cache write from the existing projection
+         // staging registers.  No next command is consumed until all six words
+         // are committed, preserving immediate LOAD -> DRAW and repeated slots.
++`ifdef INCLUDE_GPU_BRAM_IMPORT
++        S_IMPORT_WAIT: begin
++            if (importer_done) begin
++                if (importer_error) begin
++                    import_fault <= 1'b1;
++                    state <= S_IMPORT_FAULT;
++                end else begin
++                    // Exactly the 0x56 staging and reciprocal/projection entry.
++                    // A failed or partial read never changes the vertex cache.
++                    xf_camx <= imported_x;
++                    xf_camy <= imported_y;
++                    xf_camz <= imported_w;
++                    dv_szi[0] <= imported_u;
++                    dv_tzi[0] <= imported_v;
++                    xf_load_depth <= imported_depth;
++                    vt_rrow[0] <= imported_rgb[15:11];
++                    vt_lrow[0] <= imported_rgb[10:5];
++                    vt_brow[0] <= imported_rgb[4:0];
++                    xf_vtx <= 2'd0;
++                    xf_row <= 2'd0;
++                    xf_idx <= 2'd0;
++                    xf_behind <= 2'd0;
++                    xf_to_cache <= 1'b1;
++                    xf_lit <= 1'b0;
++                    xf_clip <= 1'b1;
++                    xf_last_vtx <= 2'd0;
++                    xf_state <= XF_RECIP_INIT;
++                    state <= S_XFORM;
++                end
++            end
++        end
++        S_IMPORT_FAULT: begin
++            // Hold busy and stop consuming commands. Fabric/soft/ring reset
++            // also cancels the external lease and synchronous-port ownership.
++            state <= S_IMPORT_FAULT;
++        end
++`endif
+         S_VCWRITE: begin
+             case (vcw_cnt)
+                 3'd1: vc_mem[{3'd1, xf_load_slot}] <= vt_zi[0];
+@@ -11632,6 +11795,14 @@
+                          : 2'd0] <= 1'b0;
+         end  // closes the housekeeping `begin` introduced for m_wr_inflight + gpu_swap_req auto-clear
+     end
++`ifdef INCLUDE_GPU_BRAM_IMPORT
++    // Reset wins even if a queued context/import/release executes on this edge.
++    if (import_cancel) begin
++        import_context_valid <= 1'b0;
++        import_start <= 1'b0;
++        import_release <= 1'b0;
++    end
++`endif
+     if (spanprod_pl_origin_we)
+         spanprod_pl_origin[spanprod_pl_origin_wa] <= spanprod_pl_origin_wd;
+     if (spanprod_pl_du_we)
+--- a/src/fpga/common/os30/phase10_load_alias.v
++++ b/src/fpga/common/os30/phase10_load_alias.v
+@@ -1,8 +1,18 @@
+ // Private LOD5: completed native LOAD remains in BRAM. CPU copies the
+ // read-only, cacheable 32-byte raw view into its ordinary LoadedVertex slots.
+-// All hardware jobs use dest0. No result DMA, persistent ownership or counters.
++// All hardware jobs use dest0. BIM2 snapshots let GPU imports overlap later LOADs.
+ module geometry_load_alias (
+  input wire clk,reset,
++`ifdef INCLUDE_GPU_BRAM_IMPORT
++ input wire import_reset, import_req,
++ input wire [31:0] import_token,
++ input wire [4:0] import_src,
++ input wire [7:0] import_addr,
++ output wire import_grant, import_error,
++ output wire [31:0] import_data,
++ input wire import_read_done, import_release, import_fault,
++ input wire [31:0] import_release_token,
++`endif
+  input wire reg_wr,input wire [9:0] reg_addr,
+  input wire [31:0] reg_wdata,input wire [3:0] reg_wstrb,
+  output reg [31:0] reg_rdata,
+@@ -22,10 +32,36 @@
+  wire [1:0] dma_error;
+  wire write_idle=reg_wr && reg_wstrb==4'hf && !active;
+  wire start_request=write_idle && reg_addr==10'h002 && reg_wdata[0];
+- wire raw_start=pending && !view_active && !raw_busy;
++ wire import_leased, import_owner, import_view_block;
++ wire [7:0] raw_view_addr;
++ wire raw_start=pending && !view_active && !import_leased && !raw_busy;
+  wire matrix_we=write_idle && reg_addr[9:4]==6'h04;
+  // Give START priority over accepting a new alias burst on the same edge.
+- assign view_block=active || start_request;
++ assign view_block=active || start_request || import_view_block;
++`ifdef INCLUDE_GPU_BRAM_IMPORT
++ wire [31:0] import_generation, import_claim_result;
++ wire [1:0] import_free_banks;
++ wire import_sticky_error;
++ geometry_import_view import_view (
++  .clk(clk), .reset(reset), .consumer_reset(import_reset),
++  .result_success(raw_done && !unsupported && dma_error==0),
++  .result_valid(view_valid && completed && success), .producer_active(active), .result_count(view_count),
++  .claim(reg_wr && reg_wstrb==4'hf && reg_addr==10'h00f), .claim_token(reg_wdata),
++  .clear_error(write_idle && reg_addr==10'h002 && reg_wdata[1]),
++  .producer_rejected(start_request && import_leased),
++  .generation(import_generation), .leased(import_leased), .error(import_sticky_error),
++  .claim_result(import_claim_result), .free_banks(import_free_banks),
++  .cpu_view_active(view_active), .cpu_view_addr(view_read_addr),
++  .cpu_view_block(import_view_block), .result_addr(raw_view_addr), .result_data(view_read_data),
++  .gpu_req(import_req), .gpu_token(import_token), .gpu_src(import_src), .gpu_addr(import_addr),
++  .gpu_grant(import_grant), .gpu_error(import_error), .gpu_data(import_data),
++  .gpu_read_done(import_read_done), .gpu_release(import_release), .gpu_fault(import_fault),
++  .gpu_release_token(import_release_token), .owner(import_owner)
++ );
++`else
++ assign import_leased=1'b0, import_owner=1'b0, import_view_block=1'b0;
++ assign raw_view_addr=view_read_addr;
++`endif
+  geometry_raw_load #(.CAPTURE_CONTEXT(0),.ENABLE_INVALIDATE(0),
+   .SOURCE_MIN_ADDRESS(32'h00000000),.SOURCE_END_ADDRESS(33'h001000000)) load(
+   .clk(clk),.reset(reset),.slot_invalidate(1'b0),.invalidate_mask(32'b0),
+@@ -39,7 +75,7 @@
+   .dma_request_start(),.dma_request_base(),.dma_request_words(),
+   .dma_response_busy(1'b0),.dma_response_done(1'b0),.dma_response_error(2'b0),
+   .dma_response_word_valid(1'b0),.dma_response_word_index(8'b0),.dma_response_word_data(32'b0),
+-  .output_addr(view_read_addr),.output_data(view_read_data),
++  .output_addr(raw_view_addr),.output_data(view_read_data),
+   .busy(raw_busy),.done(raw_done),.unsupported(unsupported),.dma_error(dma_error),
+   .all_inside(all_inside),.cycles(),.valid_slots(),.compute_cycles(),
+   .fma_request_valid(),.fma_request_a(),.fma_request_b(),.fma_request_c(),.fma_request_multiply(),
+@@ -50,7 +86,19 @@
+   reg_rdata=0;
+   case(reg_addr)
+    10'h000:reg_rdata=32'h4c4f4405;
+-   10'h001:reg_rdata={23'b0,&matrix_valid,config_error,dma_error,all_inside,unsupported,success,completed,active};
++   10'h001:begin
++    reg_rdata={23'b0,&matrix_valid,config_error,dma_error,all_inside,unsupported,success,completed,active};
++`ifdef INCLUDE_GPU_BRAM_IMPORT
++    reg_rdata[9]=import_leased;
++    reg_rdata[10]=import_sticky_error;
++    reg_rdata[12:11]=import_free_banks;
++`endif
++   end
++`ifdef INCLUDE_GPU_BRAM_IMPORT
++   10'h00d:reg_rdata=32'h42494d32;
++   10'h00e:reg_rdata=import_generation;
++   10'h010:reg_rdata=import_claim_result;
++`endif
+    default:reg_rdata=0;
+   endcase
+  end
+@@ -71,7 +119,7 @@
+     case(reg_addr)
+      10'h002:begin
+       if(reg_wdata[1])begin completed<=0;success<=0;config_error<=0;end
+-      if(reg_wdata[0])begin
++      if(reg_wdata[0] && !import_leased)begin
+        completed<=!(&matrix_valid);success<=0;config_error<=!(&matrix_valid);
+        if(&matrix_valid)begin active<=1;pending<=1;end
+       end
+--- a/src/fpga/targets/pocket/os30/core_top.v
++++ b/src/fpga/targets/pocket/os30/core_top.v
+@@ -2811,7 +2811,7 @@
+     );
+ 
+     // Private LOD5 results: cacheable BRAM view at reserved0x13f80000.
+-    // No result DMA and no GPU command ingress. CPU copies completed results.
++    // CPU alias and optional ordered GPU import share the completed result BRAM.
+     wire geometry_reg_wr;
+     wire [9:0] geometry_reg_addr;
+     wire [31:0] geometry_reg_wdata,geometry_reg_rdata;
+@@ -2824,6 +2824,13 @@
+     wire [31:0] geometry_view_data;
+     wire geometry_view_active,geometry_view_block,geometry_view_valid;
+     wire [5:0] geometry_view_count;
++`ifdef INCLUDE_GPU_BRAM_IMPORT
++    wire geometry_import_req, geometry_import_grant, geometry_import_error;
++    wire geometry_import_read_done, geometry_import_release, geometry_import_fault, geometry_import_cancel;
++    wire [31:0] geometry_import_token, geometry_import_data, geometry_import_release_token;
++    wire [4:0] geometry_import_src;
++    wire [7:0] geometry_import_addr;
++`endif
+     // Only startup/fabric reset cancels the independent M2 source read.
+     // CPU-only reset discards only local alias responses, never raw LOAD DMA.
+     reg [2:0] geometry_startup = 3'b000;
+@@ -2850,6 +2857,16 @@
+     wire geometry_cpu_sdram_bvalid;
+     wire [1:0] geometry_cpu_sdram_bresp;
+     geometry_load_alias geometry_load (
++`ifdef INCLUDE_GPU_BRAM_IMPORT
++        .import_req(geometry_import_req), .import_token(geometry_import_token),
++        .import_src(geometry_import_src), .import_addr(geometry_import_addr),
++        .import_grant(geometry_import_grant), .import_error(geometry_import_error),
++        .import_data(geometry_import_data), .import_read_done(geometry_import_read_done),
++        .import_release(geometry_import_release), .import_release_token(geometry_import_release_token),
++        .import_fault(geometry_import_fault),
++        // Both consumer reset replicas cancel local ownership only; raw DMA drains.
++        .import_reset(!reset_n_cpu_core || !reset_n_cpu_media || geometry_import_cancel),
++`endif
+         .clk(clk_cpu),.reset(geometry_reset),
+         .reg_wr(geometry_reg_wr),.reg_addr(geometry_reg_addr),
+         .reg_wdata(geometry_reg_wdata),.reg_wstrb(geometry_reg_wstrb),.reg_rdata(geometry_reg_rdata),
+@@ -4044,6 +4061,15 @@
+     // the internal write combiner in front of it only costs time and RAM.
+     .GPU_WRITE_COMBINE(`ifdef INCLUDE_GPU_RENDER_CACHE 0 `else 1 `endif)
+ ) gpu (
++`ifdef INCLUDE_GPU_BRAM_IMPORT
++        .import_req(geometry_import_req), .import_token(geometry_import_token),
++        .import_src(geometry_import_src), .import_addr(geometry_import_addr),
++        .import_grant(geometry_import_grant), .import_error(geometry_import_error),
++        .import_data(geometry_import_data), .import_read_done(geometry_import_read_done),
++        .import_release(geometry_import_release), .import_release_token(geometry_import_release_token),
++        .import_fault(geometry_import_fault),
++        .import_cancel(geometry_import_cancel),
++`endif
+     .clk(clk_cpu),
+     .reset_n(reset_n_cpu_media),
+     .gpu_enable(1'b1),

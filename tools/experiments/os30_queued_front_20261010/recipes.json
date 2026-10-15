@@ -1,0 +1,289 @@
+{
+  "scope": "Exact archived source recipes; original layout/toolchains/baselines/user game data required.",
+  "evidence_root": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1",
+  "recipes": {
+    "build_model.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/build_model.py",
+      "sha256": "9e5ffe962f9e7ed1e9084b8a060e7a5e587b493d6acc8a302c462b6561bab626"
+    },
+    "prepare_physical.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/prepare_physical.py",
+      "sha256": "2a4ccb8d3d97527f64170aa9fad878dc5b31f228573a7b6d97faddcdc5873571"
+    },
+    "prepare_fixture.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/prepare_fixture.py",
+      "sha256": "ab9cba8e6499a272b888668d20bac094680b312a295aaa1e060b4a1f79c5fd7e"
+    },
+    "prepare_fixture_v2.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/prepare_fixture_v2.py",
+      "sha256": "5631076d9f962f9ebc8450fb22a65eb5741ae608498bc6c7a8a949f2da0c6997"
+    },
+    "replay.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/replay.py",
+      "sha256": "834cd35e43ce01842412bec8a78b16ad488eb756212162803df4bd24d8563a7d"
+    },
+    "replay_v2.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/replay_v2.py",
+      "sha256": "66ba443716b8540f27c17def5725a4761036c12b3f1ecab06cb2c12070b3df26"
+    },
+    "replay_v3.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/replay_v3.py",
+      "sha256": "af925ae44ef4df8c13d0b9812c86515f0f102c3daf6dc4cffca50651af1dd952"
+    },
+    "analyze.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/analyze.py",
+      "sha256": "99f566f43d1aab21ccf71b77fab68e265757b34c1b01f0e8008b19d5cbb9b88f"
+    },
+    "check_replays.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/check_replays.py",
+      "sha256": "0b136a3a7d377af3e1268975d33995380fba9a5e275dbfdc2cd8e01497f70ba3"
+    },
+    "build_large_fifo.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/build_large_fifo.py",
+      "sha256": "b26a649de7428b2aeabb338211282231fdf109f118a4b005f38978abc4aecc25"
+    },
+    "observer-v2/gpu_observer.hpp": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/observer-v2/gpu_observer.hpp",
+      "sha256": "1f87213e11e8ed5460677fb9c1796846465365be46f3af1c62a3add4a4bc45d2"
+    },
+    "review/audit_native_v1.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/review/audit_native_v1.py",
+      "sha256": "1fca1e774a6c6d8ff5a9d28467a77fccfa175de2e3ee9443fc618e7066621da1"
+    },
+    "review/analyze-queue-pressure-v2.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/review/analyze-queue-pressure-v2.py",
+      "sha256": "61af870616c9cca9f85f7908dd146d9bef117d9b97a5c5b5701e8da5e7483daa"
+    },
+    "app-build/build_app.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/app-build/build_app.py",
+      "sha256": "f43fb3eaabe5bdb1d058832a30ef51fb99b88c1d4d2676b594508e3bb8cbf8b6"
+    },
+    "app-build-v2/build_app.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/app-build-v2/build_app.py",
+      "sha256": "2b76977b3663d3c3976ab064d646169ace4c56d7ebfba95ddcf05890f587ce82"
+    },
+    "tests/run_worker.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/run_worker.py",
+      "sha256": "dc5da1c844df544f1cad1052a95cdd5242de042eeb8d90266ef482f5f72d6364"
+    },
+    "tests/run_wrapper.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/run_wrapper.py",
+      "sha256": "7355c5eac313ccdafaf304e7613ba2c3f88a0f6d81dd41749fde3f7d68bf28f7"
+    },
+    "tests/run_metadata.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/run_metadata.py",
+      "sha256": "80e12a3f69bf95f22a656f905dd4ca5d4745bc8e756d9021789734428814b151"
+    },
+    "tests/run_repair_cpu.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/run_repair_cpu.py",
+      "sha256": "6e65e5454f8903fbef7c207910da187156fc04b26d7c9ac0371837fa5bda1c5f"
+    },
+    "tests/check_admission.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/check_admission.py",
+      "sha256": "2e020e4554ba2a4031aa8356f672365811df686cfd7c1ccf65136739059505f5"
+    },
+    "tests/check_lazy.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/check_lazy.py",
+      "sha256": "5f643bf41ce45260c707b1ba4f82b536b5a1c254b2157212434281f3779bb37b"
+    },
+    "tests/tb_queued_front.v": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/tb_queued_front.v",
+      "sha256": "29f84ab7d15d7ffeeb92549a07ba1742dcf9a3b2a2c1b51a2ee9de71f4b81f7e"
+    },
+    "tests/test_queued_front.cpp": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/test_queued_front.cpp",
+      "sha256": "2a055b998da9da726c8ade819937d4c3a21c06043d0eb6fd81798bfd865d4d37"
+    },
+    "tests/tb_metadata.v": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/tb_metadata.v",
+      "sha256": "a91b5d043ec07f83cc99841b810567de363b87edc6aab3c61151eb0122db3c74"
+    },
+    "tests/test_metadata.cpp": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/test_metadata.cpp",
+      "sha256": "2f6a0b6d8bf804bdc18fe9916c1790f62d542659f2575fff1db0a53039942115"
+    },
+    "tests/test_queue_wrapper.cpp": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/test_queue_wrapper.cpp",
+      "sha256": "90f75cc2a8f983c0ae92ecdf958f14ce7451b9c9b562c48895839fb4bd05e872"
+    },
+    "tests/raw_transaction_stub_body.vh": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/raw_transaction_stub_body.vh",
+      "sha256": "a7d9fe5fa9de2b1ee608200d1c2a6f8729f81ebd756ff2d49a7a2359dd5893fb"
+    },
+    "tests/admission_tail.c": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/admission_tail.c",
+      "sha256": "9f2384bd3914aa51db53883b18795043ae963d432ba9e5bc77639a814f436b2d"
+    },
+    "tests/run_worker_large.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/run_worker_large.py",
+      "sha256": "c974094e0b307eb4ea1c5f03455070b93f39b3af37a4f446312d7c7582fb820c"
+    },
+    "tests/tb_queued_front_large.v": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/tb_queued_front_large.v",
+      "sha256": "ea15e31561a4904dae6a7144c30bc44b5ebc7d048b632482a16353864bcce8e6"
+    },
+    "tests/test_queued_front_large.cpp": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/test_queued_front_large.cpp",
+      "sha256": "9029ba0f2057a0e39cf08e2b10747deec79d9ed1babd43fa2c60e32aa2f7a92c"
+    },
+    "physical-v1/run_candidate.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/physical-v1/run_candidate.py",
+      "sha256": "5c2aa536d26bd5fe8c3081bfd08b080169a029673abfd85e962886baefed71c7"
+    }
+  },
+  "app_build_commands": {
+    "v1": [
+      "bash",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64/tools/sdk-container.sh",
+      "-C",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64/src/sm64",
+      "make",
+      "-j4",
+      "PROFILE=0",
+      "PERF_DIAG=1",
+      "GEOMETRY=1",
+      "GEOMETRY_REFERENCE=0",
+      "OBJ_DIR=/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64/.obj/sm64-queued-front-perfdiag",
+      "APP_LD=../sdk/app-sdram-staging.ld",
+      "LDFLAGS=-Wl,--defsym=__of_sdram_staging=1",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64/.obj/sm64-queued-front-perfdiag/app.elf"
+    ],
+    "v2": [
+      "bash",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64-v2/tools/sdk-container.sh",
+      "-C",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64-v2/src/sm64",
+      "make",
+      "-j4",
+      "PROFILE=0",
+      "PERF_DIAG=1",
+      "GEOMETRY=1",
+      "GEOMETRY_REFERENCE=0",
+      "OBJ_DIR=/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64-v2/.obj/sm64-queued-front-v2-perfdiag",
+      "APP_LD=../sdk/app-sdram-staging.ld",
+      "LDFLAGS=-Wl,--defsym=__of_sdram_staging=1",
+      "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64-v2/.obj/sm64-queued-front-v2-perfdiag/app.elf"
+    ]
+  },
+  "model_build_command": [
+    "verilator",
+    "-j",
+    "3",
+    "--assert",
+    "--timing",
+    "-DINCLUDE_VERT_TRI",
+    "-DINCLUDE_DIRECT_COLOR",
+    "-DINCLUDE_COMBINE",
+    "-DINCLUDE_Z_BURST",
+    "-DVEXII_CPU_OS30",
+    "-DINCLUDE_HW_MIXER",
+    "-DINCLUDE_TEX_MEM",
+    "-DINCLUDE_CB_WINDOW2",
+    "-DINCLUDE_VI_FILTER",
+    "-DINCLUDE_XFORM",
+    "-DEXCLUDE_GPU_LIGHT",
+    "-DEXCLUDE_CLIP_TRI",
+    "-DEXCLUDE_GPU_XFORM_MAC",
+    "-DINCLUDE_CPU_RING",
+    "-DEXCLUDE_GPU_COMMAND_DMA",
+    "-DEXCLUDE_GPU_PARAM_SPAN_LIST",
+    "-DINCLUDE_XFORM_VERTEX_RAM",
+    "-DINCLUDE_XFORM_RATIO_PIPE",
+    "-DINCLUDE_GPU_CLAMP_PIPE",
+    "-DINCLUDE_Z_COMPARE_PARALLEL",
+    "-DINCLUDE_CB_SPLIT_MULT",
+    "-DINCLUDE_PSS_SPECULATIVE_STEP",
+    "-DINCLUDE_SPAN_DEDICATED_MULT",
+    "-DINCLUDE_TEX_QUEUE_RAM",
+    "-DINCLUDE_TEX_QUEUE_MLAB",
+    "-DINCLUDE_EW_STEP_PREDECODE",
+    "-DINCLUDE_EARLY_Z_CAPTURE",
+    "-DEXCLUDE_SYSREG_DIAG_READBACK",
+    "-DINCLUDE_Z_WINDOW8",
+    "-DINCLUDE_GPU_RENDER_CACHE",
+    "-DINCLUDE_DERIVE_PARALLEL_SCALE",
+    "-DINCLUDE_Z_EARLY_RESTART",
+    "-DINCLUDE_GPU_CLAMP_FLAGS_PIPE",
+    "-DINCLUDE_GPU_WQ16",
+    "-DINCLUDE_Z_WINDOW_PREDECODE",
+    "-DINCLUDE_SPAN_LOOKAHEAD",
+    "-DOF_EXPERIMENT_SDRAM_STAGING",
+    "-DINCLUDE_CLK90",
+    "-DOF_EXPERIMENT_PSRAM32",
+    "-DINCLUDE_GPU_BRAM_IMPORT",
+    "-DINCLUDE_GPU_QUEUED_FRONT",
+    "--cc",
+    "--build",
+    "-Wall",
+    "-Wno-fatal",
+    "-Wno-BADVLTPRAGMA",
+    "-CFLAGS",
+    "-std=c++17 -O2",
+    "-I../targets/pocket/third_party/analogizer",
+    "-Wno-WIDTHEXPAND",
+    "-Wno-WIDTHTRUNC",
+    "-Wno-CASEINCOMPLETE",
+    "-Wno-SYNCASYNCNET",
+    "-Wno-UNOPTFLAT",
+    "-Wno-STMTDLY",
+    "-Wno-PINMISSING",
+    "-Wno-UNUSEDSIGNAL",
+    "-Wno-UNDRIVEN",
+    "-Wno-UNUSEDPARAM",
+    "-Wno-CASEOVERLAP",
+    "-Wno-SELRANGE",
+    "-Wno-WIDTHCONCAT",
+    "-Wno-MULTIDRIVEN",
+    "-Wno-LATCH",
+    "-Wno-IMPLICIT",
+    "-Wno-ASCRANGE",
+    "--top-module",
+    "tb_system",
+    "--Mdir",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/native-v1/obj",
+    "-I../common",
+    "-I../targets/pocket",
+    "-I.",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/native-v1/frozen/docs/measurements/os30-dual-20261004/validation/baseline128/tb_irq.v",
+    "bram_model.v",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/native-v1/frozen/docs/measurements/os30-dual-20261004/validation/baseline128/io_sdram_pocket_test.v",
+    "sdram_model_full.v",
+    "../common/cpu_system.v",
+    "../common/cpu_target_port.v",
+    "../common/cpu_target_port_per.v",
+    "../common/axi_register_slice.v",
+    "../common/axi_sdram_arbiter.v",
+    "../common/axi_sdram_slave.v",
+    "../common/axi_periph_slave.v",
+    "../common/sync_fifo.v",
+    "../targets/pocket/snac_shifter.v",
+    "../common/gpu_core.v",
+    "../common/gpu_edge_walker.v",
+    "../common/gpu_tex_cache.v",
+    "../targets/pocket/apf/common.v",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/native-v1/frozen/src/fpga/vendor/vexriscv/VexiiRiscv/VexiiRiscv_os30.v",
+    "../common/phase10_bram_alias.v",
+    "../common/phase10_load_alias.v",
+    "../common/phase10_float_recip2.v",
+    "../common/phase10_raw_vtx_dma.v",
+    "../common/GeometryFmaProbe.v",
+    "../common/geometry_lighting_batch.v",
+    "../common/geometry_color_rtz.v",
+    "../common/geometry_float_batch_recip.v",
+    "../common/geometry_transform_light.v",
+    "../common/geometry_raw_load.v",
+    "../common/phase10_cram1_read_arbiter.v",
+    "../common/gpu_color_depth_cache.sv",
+    "../common/psram32_controller.sv",
+    "../common/psram32_axi_adapter.sv",
+    "psram32_pin_model.sv",
+    "../common/geometry_import_view.v",
+    "../common/geometry_import_convert.v",
+    "../common/geometry_bram_import.v",
+    "../common/geometry_float_cull_mem.v",
+    "../common/gpu_queued_front.v"
+  ],
+  "physical_stage": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/physical-v1",
+  "physical_launch_is_separate": true,
+  "no_binaries_or_game_assets": true
+}

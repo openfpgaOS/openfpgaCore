@@ -1,0 +1,9 @@
+{
+  "intent": "Release raw/FMA to priority legacy work after complete immutable converted snapshot; preserve ordered output completion and separate legacy raw generation.",
+  "baseline": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1",
+  "ABI": "AJ02",
+  "capability": "0x414a3032",
+  "production_unchanged_until_qualification": true,
+  "full_sweep": false,
+  "implementation_revision": "snapshot-v2"
+}

@@ -1,0 +1,52 @@
+{
+  "passed": true,
+  "rows": [
+    {
+      "name": "parent-on",
+      "passed": true,
+      "palette": 1,
+      "command": [
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/timing-next/feature-cuts/palette-disabled-shadow/mmio-tests-v2/parent-on/obj/Vtb_gpu",
+        "1"
+      ],
+      "gpu_sha256": "87c75d462db6bbb08635f10ccc8fdf021a7a68cfcb12358bffa594c2d533f6d3",
+      "source_pins_sha256": "00f279d7a089f68d57f90983944d4c396cecda3613a2e27831a53dc9b98941bf",
+      "transcript": "[0] -Info: cram1_phy.sv:202: TOP.tb_gpu.texture_memory.ctrl.phy: Instantiated PSRAM with the following settings:\n[0] -Info: cram1_phy.sv:203: TOP.tb_gpu.texture_memory.ctrl.phy:   Clock speed: 100.000000 MHz with period 10.000000 ns\n[0] -Info: cram1_phy.sv:204: TOP.tb_gpu.texture_memory.ctrl.phy:   Writes:\n[0] -Info: cram1_phy.sv:205: TOP.tb_gpu.texture_memory.ctrl.phy:     STATE_WRITE_ADV_END:           1\n[0] -Info: cram1_phy.sv:206: TOP.tb_gpu.texture_memory.ctrl.phy:     STATE_WRITE_ADDR_LATCH_END:           2\n[0] -Info: cram1_phy.sv:207: TOP.tb_gpu.texture_memory.ctrl.phy:     STATE_WRITE_DATA_START:           3\n[0] -Info: cram1_phy.sv:208: TOP.tb_gpu.texture_memory.ctrl.phy:     STATE_WRITE_DATA_END:           9\n[0] -Info: cram1_phy.sv:209: TOP.tb_gpu.texture_memory.ctrl.phy\n[0] -Info: cram1_phy.sv:210: TOP.tb_gpu.texture_memory.ctrl.phy:   Total write time:           8 cycles\n[0] -Info: cram1_phy.sv:211: TOP.tb_gpu.texture_memory.ctrl.phy:   Config write:\n[0] -Info: cram1_phy.sv:212: TOP.tb_gpu.texture_memory.ctrl.phy:     STATE_CONFIG_START:          50\n[0] -Info: cram1_phy.sv:213: TOP.tb_gpu.texture_memory.ctrl.phy:     STATE_CONFIG_ADV_END:          50\n[0] -Info: cram1_phy.sv:214: TOP.tb_gpu.texture_memory.ctrl.phy:     STATE_CONFIG_HOLD_END:          58\n[0] -Info: cram1_phy.sv:215: TOP.tb_gpu.texture_memory.ctrl.phy:   Sync burst:\n[0] -Info: cram1_phy.sv:216: TOP.tb_gpu.texture_memory.ctrl.phy:     SYNC_LATENCY:           4\nPASS palette=1 palette_writes=8201 reads=397504 cycles=77952 digest=cd91fce45ce07e2d\n",
+      "transcript_sha256": "13b834481185825136f590956a6e4a4db30c5d75e1c6e5b20bcdae6885b9f0b2"
+    },
+    {
+      "name": "candidate-on",
+      "passed": true,
+      "palette": 1,
+      "command": [
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/timing-next/feature-cuts/palette-disabled-shadow/mmio-tests-v2/candidate-on/obj/Vtb_gpu",
+        "1"
+      ],
+      "gpu_sha256": "3b4ddc4d614a569dc9e031856b020f1633bb276c2f4a185df5bbd0bb3c2f6895",
+      "source_pins_sha256": "2fe484ae3b732d64ea1c3f0d5bf63ac1605c6957ff5382c1dee9b4616f5c1bb9",
+      "transcript": "[0] -Info: cram1_phy.sv:202: TOP.tb_gpu.texture_memory.ctrl.phy: Instantiated PSRAM with the following settings:\n[0] -Info: cram1_phy.sv:203: TOP.tb_gpu.texture_memory.ctrl.phy:   Clock speed: 100.000000 MHz with period 10.000000 ns\n[0] -Info: cram1_phy.sv:204: TOP.tb_gpu.texture_memory.ctrl.phy:   Writes:\n[0] -Info: cram1_phy.sv:205: TOP.tb_gpu.texture_memory.ctrl.phy:     STATE_WRITE_ADV_END:           1\n[0] -Info: cram1_phy.sv:206: TOP.tb_gpu.texture_memory.ctrl.phy:     STATE_WRITE_ADDR_LATCH_END:           2\n[0] -Info: cram1_phy.sv:207: TOP.tb_gpu.texture_memory.ctrl.phy:     STATE_WRITE_DATA_START:           3\n[0] -Info: cram1_phy.sv:208: TOP.tb_gpu.texture_memory.ctrl.phy:     STATE_WRITE_DATA_END:           9\n[0] -Info: cram1_phy.sv:209: TOP.tb_gpu.texture_memory.ctrl.phy\n[0] -Info: cram1_phy.sv:210: TOP.tb_gpu.texture_memory.ctrl.phy:   Total write time:           8 cycles\n[0] -Info: cram1_phy.sv:211: TOP.tb_gpu.texture_memory.ctrl.phy:   Config write:\n[0] -Info: cram1_phy.sv:212: TOP.tb_gpu.texture_memory.ctrl.phy:     STATE_CONFIG_START:          50\n[0] -Info: cram1_phy.sv:213: TOP.tb_gpu.texture_memory.ctrl.phy:     STATE_CONFIG_ADV_END:          50\n[0] -Info: cram1_phy.sv:214: TOP.tb_gpu.texture_memory.ctrl.phy:     STATE_CONFIG_HOLD_END:          58\n[0] -Info: cram1_phy.sv:215: TOP.tb_gpu.texture_memory.ctrl.phy:   Sync burst:\n[0] -Info: cram1_phy.sv:216: TOP.tb_gpu.texture_memory.ctrl.phy:     SYNC_LATENCY:           4\nPASS palette=1 palette_writes=8201 reads=397504 cycles=77952 digest=cd91fce45ce07e2d\n",
+      "transcript_sha256": "13b834481185825136f590956a6e4a4db30c5d75e1c6e5b20bcdae6885b9f0b2"
+    },
+    {
+      "name": "candidate-off",
+      "passed": true,
+      "palette": 0,
+      "command": [
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/timing-next/feature-cuts/palette-disabled-shadow/mmio-tests-v2/candidate-off/obj/Vtb_gpu",
+        "0"
+      ],
+      "gpu_sha256": "3b4ddc4d614a569dc9e031856b020f1633bb276c2f4a185df5bbd0bb3c2f6895",
+      "source_pins_sha256": "2fe484ae3b732d64ea1c3f0d5bf63ac1605c6957ff5382c1dee9b4616f5c1bb9",
+      "transcript": "[0] -Info: cram1_phy.sv:202: TOP.tb_gpu.texture_memory.ctrl.phy: Instantiated PSRAM with the following settings:\n[0] -Info: cram1_phy.sv:203: TOP.tb_gpu.texture_memory.ctrl.phy:   Clock speed: 100.000000 MHz with period 10.000000 ns\n[0] -Info: cram1_phy.sv:204: TOP.tb_gpu.texture_memory.ctrl.phy:   Writes:\n[0] -Info: cram1_phy.sv:205: TOP.tb_gpu.texture_memory.ctrl.phy:     STATE_WRITE_ADV_END:           1\n[0] -Info: cram1_phy.sv:206: TOP.tb_gpu.texture_memory.ctrl.phy:     STATE_WRITE_ADDR_LATCH_END:           2\n[0] -Info: cram1_phy.sv:207: TOP.tb_gpu.texture_memory.ctrl.phy:     STATE_WRITE_DATA_START:           3\n[0] -Info: cram1_phy.sv:208: TOP.tb_gpu.texture_memory.ctrl.phy:     STATE_WRITE_DATA_END:           9\n[0] -Info: cram1_phy.sv:209: TOP.tb_gpu.texture_memory.ctrl.phy\n[0] -Info: cram1_phy.sv:210: TOP.tb_gpu.texture_memory.ctrl.phy:   Total write time:           8 cycles\n[0] -Info: cram1_phy.sv:211: TOP.tb_gpu.texture_memory.ctrl.phy:   Config write:\n[0] -Info: cram1_phy.sv:212: TOP.tb_gpu.texture_memory.ctrl.phy:     STATE_CONFIG_START:          50\n[0] -Info: cram1_phy.sv:213: TOP.tb_gpu.texture_memory.ctrl.phy:     STATE_CONFIG_ADV_END:          50\n[0] -Info: cram1_phy.sv:214: TOP.tb_gpu.texture_memory.ctrl.phy:     STATE_CONFIG_HOLD_END:          58\n[0] -Info: cram1_phy.sv:215: TOP.tb_gpu.texture_memory.ctrl.phy:   Sync burst:\n[0] -Info: cram1_phy.sv:216: TOP.tb_gpu.texture_memory.ctrl.phy:     SYNC_LATENCY:           4\nPASS palette=0 palette_writes=8201 reads=397504 cycles=77952 digest=6d6e1a3b05adf703\n",
+      "transcript_sha256": "43b6dad925fab13acf58db7db32d2eb9fbf0784d238389d9d4420c3ab6c4b1c7"
+    }
+  ],
+  "palette_enabled_mmio_exact": true,
+  "enabled_source_identity": true,
+  "recipe_sha256": "d2860914efabada09802025e4e8fd0889e7ad271749596e8e7a9abced77548c9",
+  "driver_sha256": "f38b9d835dfda5d4a082a1963b765a0dbf41ac67e18a7268fe08439060c964b8",
+  "candidate_sha256": "3b4ddc4d614a569dc9e031856b020f1633bb276c2f4a185df5bbd0bb3c2f6895",
+  "unchanged_ack_adapter_sha256": "2ad87cc989af89b56492fa898d3f51dea55029fe6b8947c7e385e0859a100444",
+  "acknowledgement_proof": "Unchanged axi_periph_slave GPU write arm drives the write strobe/data and completes its write response independently of GPU readback. gpu_core has no write acknowledgement output.",
+  "limitation": "Recompile the actual GPU in a pinned full integration fixture, palette on/off.\n\nOn tests must give identical complete MMIO transcripts to the parent. Off tests\nrequire zero palette readback after reset, writes, soft/ring resets and flushes.\nThe peripheral bus adapter is unchanged: GPU writes have no return/ack signal.\nThis test covers the GPU register strobe interface, not a new AXI bridge model.\n"
+}

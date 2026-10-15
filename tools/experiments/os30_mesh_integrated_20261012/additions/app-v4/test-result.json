@@ -1,0 +1,31 @@
+{
+  "pass": true,
+  "cases": 655360,
+  "checks": 1966080,
+  "wrap_cases": 66656,
+  "command": [
+    "gcc",
+    "-std=c11",
+    "-O2",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-fsanitize=address,undefined",
+    "-fno-omit-frame-pointer",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/evidence/adaptive-feed-v1/actual_feed_test.c",
+    "-o",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/evidence/adaptive-feed-v1/actual_feed_test"
+  ],
+  "stderr": "",
+  "unchanged_v3_wait_sha256": "93f046f9610b1a1db124a01d9dce1d675c5d1a485a25026d0132c8140ff0c00f",
+  "prior_status_test": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/evidence/batching-liveness-v1/result.json",
+  "prior_status_test_sha256": "227e2570157d12c920e8b872f4b56514b6567f5e957d864b5681a59752f0131e",
+  "limitation": "Actual publication C tail/SDK kicks with mocked MMIO/flush. All logical positions, selected valid occupancies, both backend choices and sync paths. No full native timing claim.",
+  "input_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "5944f0d2b983418eddc1711a1b39ae6be6ebc0ea4cfcc4c954402d23d805492d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/src/sdk/include/of_gpu.h": "7e4b105e444b7307b36010da87749eff445650b6983283eeab9223e6af3dc01d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "36ff1e0e20da4c6eab7112e67fa4bf565aae69c9f41f41d1b5dfc8d3910c3b83",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/evidence/adaptive-feed-v1/test_feed.py": "6755708f584848f7e4549bdd957267b247daf6aa25218a7e6e1f4b50898f1685",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/evidence/adaptive-feed-v1/actual_feed_test.c": "fced40751818036a3902eba8e079d0f7054dd455d63657285e0c03d27cdbd17a"
+  }
+}

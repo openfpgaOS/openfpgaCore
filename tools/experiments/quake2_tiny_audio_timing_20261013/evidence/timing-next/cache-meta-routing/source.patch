@@ -1,0 +1,47 @@
+--- staged/gpu_color_depth_cache.sv
++++ cache-meta-routing/gpu_color_depth_cache.sv
+@@ -336,9 +336,12 @@
+ always @* begin
+     data_we=0; data_wa={slot,word_index}; data_w=data_q;
+     data_ra={slot,word_index};
+-    meta_we=0; meta_wa=slot; meta_w=0;
++    // Payload is meaningful only with meta_we. Keep acceptance/state/strobe
++    // qualification on WE, off the tag-RAM data cone. Clear/allocation writes
++    // below override this normal dirty-line payload without adding a cycle.
++    meta_we=0; meta_wa=slot; meta_w={tag,new_last,new_first,2'b11};
+     case(state)
+-        INIT: begin meta_we=reset_n; meta_wa=walk; end
++        INIT: begin meta_we=reset_n; meta_wa=walk; meta_w=0; end
+         IDLE: data_ra={(SPECULATE_WRITE_HOT0 && (REGISTER_READ_LOOKUP || s_awvalid))
+                        ? hot0_slot : hot_slot,lookup_addr[2+:WORD_BITS]};
+         // R_ACCEPT owns addr. Do not route the live IDLE address mux
+@@ -356,7 +359,7 @@
+                 data_w[35:32]=word_valid|s_wstrb;
+                 for(integer b=0;b<4;b=b+1) if(s_wstrb[b])
+                     data_w[b*8+:8]=s_wdata[b*8+:8];
+-                if(s_wstrb!=0) begin meta_we=1; meta_w={tag,new_last,new_first,2'b11}; end
++                if(s_wstrb!=0) begin meta_we=1; end
+                 if(left!=1 && same_line) data_ra={slot,word_index+WORD_BITS'(1)};
+             end
+         end
+@@ -381,14 +384,18 @@
+         WB_FIRST: data_ra={slot,dirty_first};
+         WB_AW: data_ra={slot,wb_pos};
+         WB_DATA: begin
++            meta_w=0; // The only metadata write here invalidates a drained line.
+             data_ra={slot,wb_pos};
+             if(m_wready && wb_pos!=wb_last) data_ra={slot,wb_pos+WORD_BITS'(1)};
+         end
+-        MAINT: if(!walk_meta[1] || !walk_meta[0]) begin meta_we=1; meta_wa=walk; end
++        MAINT: begin
++            meta_w=0;
++            if(!walk_meta[1] || !walk_meta[0]) begin meta_we=1; meta_wa=walk; end
++        end
+         default: ;
+     endcase
+     if(state==WB_DATA && m_wready && wb_pos==wb_last && wb_last==dirty_last && maintenance) begin
+-        meta_we=1; meta_wa=walk; meta_w=0;
++        meta_we=1; meta_wa=walk;
+     end
+ end
+ 

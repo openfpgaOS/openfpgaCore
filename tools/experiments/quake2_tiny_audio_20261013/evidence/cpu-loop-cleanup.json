@@ -1,0 +1,6 @@
+{
+  "before": "3bbbab4ac1ccee10484471a2d294c25af44c610223cb9b799a27fa4b1cfe912e",
+  "after": "64ee4a7a7c646f49c7cef1d5b90cd17f1ca37be6bff0589a0eb3e58213caf1f0",
+  "change": "Remove only unused integer and empty reset loop. No signals, assignments, or logic changed.",
+  "prior_equivalence": "area-extra/cpu-last-metadata/receipt.json"
+}

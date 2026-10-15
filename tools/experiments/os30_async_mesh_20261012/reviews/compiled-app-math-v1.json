@@ -1,0 +1,35 @@
+{
+  "status": "PASS",
+  "sources_sha256": {
+    "docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/evidence/app-build-v4/app.dis": "bf7a9e5152639719b282563e1a84f24faae19bdc36eee43a3d10bfa58d02c238",
+    "docs/measurements/os30-psram32-20261009/async-mesh-v1/work-app/evidence/app-build-v1/app.dis": "0c4511f34f4342bebffa28ff2ec7f259cd369f70e8e7a35fd2dad32384e8d7c8"
+  },
+  "functions": {
+    "gfx_clip_triangle.constprop.0": {
+      "instruction_count": 95,
+      "differences": [],
+      "assessment": "Exact FP instructions match, except the direct path commutes one multiply and changes one integer destination register. Manual dataflow review confirms identical operation order/values."
+    },
+    "gfx_gpu_draw_direct_records": {
+      "instruction_count": 35,
+      "differences": [
+        {
+          "index": 0,
+          "old": "fmul.s\tfa4,fa5,fs5",
+          "new": "fmul.s\tfa4,fs5,fa5"
+        },
+        {
+          "index": 9,
+          "old": "fcvt.w.s\ta1,fa5",
+          "new": "fcvt.w.s\ta0,fa5"
+        }
+      ],
+      "assessment": "Exact FP instructions match, except the direct path commutes one multiply and changes one integer destination register. Manual dataflow review confirms identical operation order/values."
+    },
+    "gfx_push_triangle.constprop.0.isra.0": {
+      "instruction_count": 82,
+      "differences": [],
+      "assessment": "Exact FP instructions match, except the direct path commutes one multiply and changes one integer destination register. Manual dataflow review confirms identical operation order/values."
+    }
+  }
+}

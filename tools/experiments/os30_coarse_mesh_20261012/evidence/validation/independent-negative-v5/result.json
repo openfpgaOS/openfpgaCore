@@ -1,0 +1,132 @@
+{
+  "status": "PASS_TWENTYTWO_CORRUPTIONS_REJECTED",
+  "cases": [
+    {
+      "case": "source_vertex_word",
+      "status": "REJECTED",
+      "message": "PSRAM task source differs from immutable CPU bytes"
+    },
+    {
+      "case": "accepted_context_word",
+      "status": "REJECTED",
+      "message": "physical protected context differs from accepted ingress"
+    },
+    {
+      "case": "legacy_granted_ticket",
+      "status": "REJECTED",
+      "message": ""
+    },
+    {
+      "case": "CPU_LOAD_identity",
+      "status": "REJECTED",
+      "message": ""
+    },
+    {
+      "case": "grant_during_open_context",
+      "status": "REJECTED",
+      "message": ""
+    },
+    {
+      "case": "actual_matrix_write_data",
+      "status": "REJECTED",
+      "message": ""
+    },
+    {
+      "case": "snapshot_converted_halfword",
+      "status": "REJECTED",
+      "message": "('physical store differs from pre-edge source', 3, 501052)"
+    },
+    {
+      "case": "raw_read_after_detachment",
+      "status": "REJECTED",
+      "message": ""
+    },
+    {
+      "case": "lease_before_snapshot",
+      "status": "REJECTED",
+      "message": ""
+    },
+    {
+      "case": "survivor_index_storage",
+      "status": "REJECTED",
+      "message": "('physical store differs from pre-edge source', 3, 500223)"
+    },
+    {
+      "case": "actual_post_edge_snapshot_store",
+      "status": "REJECTED",
+      "message": "('physical store differs from pre-edge source', 3, 501052)"
+    },
+    {
+      "case": "physical_group_descriptor",
+      "status": "REJECTED",
+      "message": ""
+    },
+    {
+      "case": "accepted_group_descriptor_pair",
+      "status": "REJECTED",
+      "message": ""
+    },
+    {
+      "case": "physical_protected_context",
+      "status": "REJECTED",
+      "message": "physical protected context differs from accepted ingress"
+    },
+    {
+      "case": "restored_group_context",
+      "status": "REJECTED",
+      "message": ""
+    },
+    {
+      "case": "internal_member_identity",
+      "status": "REJECTED",
+      "message": ""
+    },
+    {
+      "case": "child_DL_continuation",
+      "status": "REJECTED",
+      "message": ""
+    },
+    {
+      "case": "parent_DL_target",
+      "status": "REJECTED",
+      "message": ""
+    },
+    {
+      "case": "return_instruction_PC",
+      "status": "REJECTED",
+      "message": ""
+    },
+    {
+      "case": "return_resume_PC",
+      "status": "REJECTED",
+      "message": ""
+    },
+    {
+      "case": "vertex_actual_continuation",
+      "status": "REJECTED",
+      "message": ""
+    },
+    {
+      "case": "vertex_app_cached_continuation",
+      "status": "REJECTED",
+      "message": "App proof context differs from actual caller"
+    }
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/independent_lifetime_v4.py": "816afb6ecfe524b5c8fe85efe9cafa91520f8cf39ac8e4b938076e0553ce838b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/independent_group_v3.py": "12cb5075ebac3d9de17daa83b00ffbc4ba8d5b10171f6390e4304498a321e13d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/independent_dl_v1.py": "2f4ca9b6d6fbbd808b3c0841334cbffe2e029bd12d91c06d49162faf332648c1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/f28-dl-binding-v1.json": "e9732e24cecfab1b3f69a8c9fddb30908736c97d25fd01fbb507cc4697aae8aa",
+    "docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v4/check-independent-v4.json": "bed350ef8e75046d76c32fc36c3776e52084a294c1e17c81ef2cc003a14ac7a7",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v4/build.json": "74a9169ff96ef8f1265a41f835a9aed18e5ffcf17e5f4b61f1284e577feb1a0d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v4/run/job-sources.tsv": "402ce8191faa095ae9eb9b239f565600f8651e7ca97e0d2fb5e9c320cfe2c070",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v4/run/async-events.tsv": "5c293a0c341bf51c02b6163bed8728344c2e7e5019b315b226a73d62ba6689a7",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v4/run/vtx-calls.tsv": "a63f3dbef8890eb47b5aee24ce6a23e265f5c1a7ce4cd0af06b4391b75c9e39c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v4/run/snapshot-stores.tsv": "21c1fd10f985fc9ff374b73e131a495f1162b669abca9cae72dd9e5a59ef12cb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v4/run/group-descriptors.tsv": "7099b4973e06ef52fc5a88e4a6f14be79e64ea99c38958f2301d6a4ec4d3e527",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v4/run/context-stores.tsv": "6e2ac27c39d40deeb6a6f13455c3122e0de612989d0f85cec881c4b40332dc10",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v4/run/dl-events.tsv": "2b831fc7f79d4782ed7e96f2423aea3a1ad6b5b428eafd9d0c829a649a9d11dc"
+  },
+  "script_sha256": "08385b9fe4e9f7326223df833c4633a2732fd0dccf17c137b625be1d0c93dad2",
+  "measured_inputs_unchanged": true
+}

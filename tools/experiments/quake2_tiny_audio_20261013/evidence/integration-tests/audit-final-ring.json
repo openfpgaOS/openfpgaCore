@@ -1,0 +1,108 @@
+{
+  "passed": true,
+  "correctness_issues": [],
+  "portable_proof": {
+    "path": "portable-proof-final-ring/receipt.json",
+    "sha256": "49f28894256902f655b03c972b3f95c8e069f34a47ffebfea6584f9ac3fb6e17"
+  },
+  "selected_source_pins": {
+    "src/fpga/common/os30/axi_periph_slave.v": "2ad87cc989af89b56492fa898d3f51dea55029fe6b8947c7e385e0859a100444",
+    "src/fpga/common/os30/audio_mixer.v": "c6d2517af662f356b44617230c27aa880c449928282e738c374a2db86663f73a",
+    "src/fpga/common/os30/audio_sample_cache.v": "ac018efd17a7e1012d1456f12375575a4c4f57784ab6a03c2132bb00795c111d",
+    "src/fpga/common/sync_fifo.v": "66545eaee0463d5e25e862cb5fbccb357b2d34948f93a9f8a706c04c536aa28c",
+    "src/fpga/targets/pocket/snac_shifter.v": "4a3953a9729af3c001101e85d67cdd73e4334bc76ef0ad984c55b8c66f42eebf",
+    "src/fpga/targets/pocket/apf/common.v": "26aa1637c4eaaef2fb6acaa38475826fdf9420c86d06a262eaa104422a32c4a8",
+    "src/fpga/targets/pocket/os30/core_top.v": "bc1846e6f148496d5fb41c329fc4c34fe3fd312c65b9316f36ac5a36336a60e5",
+    "src/fpga/targets/pocket/ap_core.qsf": "351431b8158de34a5a18361c8ae8a9d5d94a81b714c3853dfa3d315a47c1f1d1"
+  },
+  "source_audit": {
+    "app_snd_of": {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/app-candidate/src/quake2/openfpga/snd_of.c",
+      "sha256": "4f52e1d5f94a451dd3d05935e3c89978d30d5ec83dda0c54c34196fda321f34c"
+    },
+    "kernel_mixer": {
+      "path": "/home/alberto/Repos/openfpgaCore/src/firmware/os/hal/mixer.c",
+      "sha256": "58c611587d3f2148b3aa022634a446e9670c028076d4e52964e9fa8d85b01543"
+    },
+    "kernel_audio": {
+      "path": "/home/alberto/Repos/openfpgaCore/src/firmware/os/targets/pocket/audio.c",
+      "sha256": "c90392cc5ce0d1264acb87bf36a106dd4e65ec1d7b757bdbf85d314f8c410382"
+    },
+    "kernel_regs": {
+      "path": "/home/alberto/Repos/openfpgaCore/src/firmware/os/hal/regs.h",
+      "sha256": "8e1ca096c12b6005efa574a23a0378597536047c867ac683b5a17f261a88ecfc"
+    },
+    "kernel_hal": {
+      "path": "/home/alberto/Repos/openfpgaCore/src/firmware/os/hal/hal.c",
+      "sha256": "85d412121004542d66a51c5802f9d830aacf7a8e18c96e9c7c02414a6c8f7d0b"
+    },
+    "sdk_audio": {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/app-candidate/src/sdk/include/of_audio.h",
+      "sha256": "70f537f0f89738bf30afb21880957eea89f9782933beaef66fda544a84b7141c"
+    }
+  },
+  "lifecycle": {
+    "initialization_clears_cache_before_app_opt_in": true,
+    "stream_open_or_write_rewrites_global_ctrl": false,
+    "shutdown_clears_opt_in": true,
+    "other_clients_default_uncached": true
+  },
+  "owned_fixture_inventory": {
+    "run_portable.py": "7e88abc0da60243ac740dd33882b2a069a47f88813c68bd8ed1e0f8d64d683f1",
+    "README.txt": "967067b5aee1d7469acce87a72821944e447b22cbbef3964fcd668e732ccf94d",
+    "periph/sources/altsyncram_stub.v": "3ac5420a4ae4fc0e10bdbb73d02c3ef523eb4159c8c9bd4d1002970bfc332db2",
+    "periph/sources/axi_periph_slave.v": "2ad87cc989af89b56492fa898d3f51dea55029fe6b8947c7e385e0859a100444",
+    "periph/sources/common.v": "26aa1637c4eaaef2fb6acaa38475826fdf9420c86d06a262eaa104422a32c4a8",
+    "periph/sources/snac_shifter.v": "4a3953a9729af3c001101e85d67cdd73e4334bc76ef0ad984c55b8c66f42eebf",
+    "periph/sources/sync_fifo.v": "66545eaee0463d5e25e862cb5fbccb357b2d34948f93a9f8a706c04c536aa28c",
+    "periph/sources/tb_axi_periph.v": "5fca328a5232008dc720b3fdd9ff99ad6a31c75cc2296bce734cdac6d266e9f0",
+    "periph/sources/tb_axi_periph_main.cpp": "01f3305f825349a3b7d6ed20f392bf1388b3a019de96950d941b97b2214bf55b",
+    "mixer-cache-harness/run.py": "cc99a553e895ec99724863377d52adfc835ddf34d0cd88a76e5ac1e6cbc5c0e5",
+    "mixer-cache-harness/tb_audio_mixer.v": "7a971901192e49fb8d7333baec8c9a12858fb1b75974b6a6cb9925cf8338e865",
+    "mixer-cache-harness/tb_audio_mixer_main.cpp": "cf85a5d754545d214ec2fd2d4f252c8508668b69951ce5923cdba21e51118391",
+    "mixer-cache-harness/independent_reference.hpp": "1f2f4a466d0ec898b40c55232ee965eb4b69ff09e3ec9897d82146288e8a61df",
+    "mixer-cache-harness/sources/audio_sample_cache.v": "ac018efd17a7e1012d1456f12375575a4c4f57784ab6a03c2132bb00795c111d",
+    "mixer-cache-harness/sources/mister_audio_output.v": "d6788091160dae0689f9e7f649df7f90db5b4530d8111c8a3276dacadf6d378d",
+    "mixer-cache-harness/sources/sync_fifo.v": "66545eaee0463d5e25e862cb5fbccb357b2d34948f93a9f8a706c04c536aa28c"
+  },
+  "scope_notes": [
+    "The portable proof uses the real selected OS30 peripheral, mixer and cache, with fixture RAM/AXI/FIFO models.",
+    "Actual core_top wiring is audited and pinned; the entire Pocket top-level is not simulated by this fixture.",
+    "Initial full generic peripheral run failures were unrelated excluded Analogizer/SNAC functionality.",
+    "Initial rearm address-bound failure was corrected to observe logical requests; physical cacheline fills intentionally prefetch32 bytes.",
+    "No physical timing or board-audio claim.",
+    "Fresh compile/rerun against exact sweep-final-ring-audio frozen source. All five PCM/state/capacity/MMIO result files byte-identical to prior combined reuse+readaddr proof. Final worker changes have separate paired-worker/GPU gates."
+  ],
+  "candidate_source_directory": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/sweep-final-ring-audio/frozen",
+  "previous_proof": {
+    "audit_sha256": "2c884b1fdbf99edf14a03be0ef92aa6ad43dff9472c2a83cb2846429586c75d5",
+    "receipt_sha256": "edadee2e488b064f9a8f2d8997adbec02a7c938a86186b9bd9269515e3fade33"
+  },
+  "exact_vs_previous": {
+    "periph/audio-result-0.log": {
+      "identical": true,
+      "sha256": "4ad19f7f05a2a3e6f52368929dcf584acd5fdf681759232298195eaf40a8f10b"
+    },
+    "periph/audio-result-1.log": {
+      "identical": true,
+      "sha256": "4ad19f7f05a2a3e6f52368929dcf584acd5fdf681759232298195eaf40a8f10b"
+    },
+    "mixer-cache/inherited.log": {
+      "identical": true,
+      "sha256": "01700e17d098195ff7be0ad4f39d236007886cc0164e4ff64925b3a191948f8f"
+    },
+    "mixer-cache/reference.log": {
+      "identical": true,
+      "sha256": "40ac42b89f712cd739ff4407d379be5b5197fc279a69106b3c94eba55d560a03"
+    },
+    "mixer-cache/capacity.csv": {
+      "identical": true,
+      "sha256": "17283e8b69510162c246b31c2501de61cc8c1051f74f8dcda23f5e0f78c6cbbd"
+    }
+  },
+  "lifecycle_audit_reused_after_pins_rechecked": true,
+  "frozen_source_manifest_sha256": "3996ae6170fdb0cb9f3ba47c6d136639a2462a0114868935a03ee68607fd7af5",
+  "source_identity_additions": {
+    "src/fpga/common/gpu_geometry_worker.v": "e0f4ffbd20f2a20ab416543a0e9d830d7ec6b4d8d55df094479428b67f933fbb"
+  }
+}

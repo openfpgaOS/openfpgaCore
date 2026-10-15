@@ -1,0 +1,17 @@
+{
+  "offline_tests_passed": 31,
+  "real_prepare_verified": true,
+  "quartus_launched_by_prepare": false,
+  "cpu_scope": "Optional exact PHYSICAL_SYNTHESIS_COMBO_LOGIC ON -to ic|cpu|cpu with ordinary quoting/whitespace; presence,target,effectivevalue,completehistory frozen andcheckedonresume.",
+  "protected": "All other instance assignments, CPU source, clocks/PLLs/SDCs, pins/device, retiming, register duplication remain protected. No sweep started.",
+  "files": {
+    "sweep-tooling/sweep.py": "39dac3dda28769a0f3b69bd1775df3bd5ba0c77cfeb5700789fe9b4a56937852",
+    "sweep-tooling/results.py": "192828cad6b134c0f6cacfd484611e1ec9db5ab27cf379974bd737296d4f110b",
+    "sweep-tooling/report_sweep_timing.tcl": "2c66004df7b54c2e62a0c47ae976cf7c61da684ec034a169cb077ca00cdca34e",
+    "sweep-tooling/test_sweep.py": "1970bccc7acc1993d15af2340e135dbc912f927e653f7ce3980f1a4c69a74d19",
+    "sweep-tooling/README.txt": "54eb15c4464d029b4d9768e5342a65e411283624dea43ff16e4b9a96c3eadf7e",
+    "area-optimization/cpu-scope-policy-tests.log": "9bd2676a338261a64fb7c6dbb2c0f30f00394486b0dd9b6cb14cd3e315491b76",
+    "area-optimization/cpu-scope-policy-prepare-validation/manifest.json": "d7c80e3a2635f8ed9579bdfd633cec54b38e568cecfea6061e005d797a4a8301",
+    "area-optimization/ddio-policy-final-receipt.json": "b3f64baee6f60313794f437ebbe50d529a5fe5d8cb287e15722af1145b2b16c6"
+  }
+}

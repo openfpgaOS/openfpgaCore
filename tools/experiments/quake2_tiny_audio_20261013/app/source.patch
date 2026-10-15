@@ -1,0 +1,46 @@
+--- a/src/quake2/openfpga/snd_of.c
++++ b/src/quake2/openfpga/snd_of.c
+@@ -57,6 +57,16 @@
+ static int beginofs;
+ static int snd_raw_rate;
+ static qboolean snd_inited;
++static qboolean snd_sample_cache;
++
++/* Optional hardware sample cache. SFX PCM is written once by SDL_LoadSound
++ * and remains immutable while playing; streaming voice31 always bypasses
++ * this cache. Older cores return zero from the reserved capability word.
++ * Ordinary mixer clients retain uncached behavior unless they opt in. */
++#define OF_SND_CACHE_CAPS (*(volatile uint32_t *)(uintptr_t)0x48000834u)
++#define OF_SND_MIX_CTRL   (*(volatile uint32_t *)(uintptr_t)0x48000820u)
++#define OF_SND_CACHE_MAGIC 0x53434631u /* SCF1 */
++#define OF_SND_CACHE_ENABLE 2u
+ 
+ /*
+  * ---------------------------------------------------------------
+@@ -756,6 +766,14 @@
+ 
+ 	of_audio_init();
+ 	of_mixer_init(OF_MIXER_MAX_VOICES, OF_MIXER_OUTPUT_RATE);
++	snd_sample_cache = false;
++	if (caps && (caps->hw_features & OF_HW_MIXER_HW) &&
++		OF_SND_CACHE_CAPS == OF_SND_CACHE_MAGIC)
++	{
++		OF_SND_MIX_CTRL = OF_SND_MIX_CTRL | OF_SND_CACHE_ENABLE;
++		snd_sample_cache = true;
++		Com_Printf("Hardware SFX sample cache enabled.\n");
++	}
+ 
+ 	for (i = 0; i < MAX_CHANNELS; i++)
+ 	{
+@@ -795,6 +813,11 @@
+ {
+ 	SDL_ClearBuffer();
+ 	of_mixer_stop_all();
++	if (snd_sample_cache)
++	{
++		OF_SND_MIX_CTRL = OF_SND_MIX_CTRL & ~OF_SND_CACHE_ENABLE;
++		snd_sample_cache = false;
++	}
+ 	snd_inited = false;
+ 	Com_Printf("openfpgaOS hardware mixer sound backend shut down.\n");
+ }

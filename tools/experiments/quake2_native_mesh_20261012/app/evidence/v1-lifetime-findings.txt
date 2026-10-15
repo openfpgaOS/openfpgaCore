@@ -1,0 +1,1 @@
+V1 preserved for measured CPU/RTL evidence. Independent review found that a same-generation skin-size change reallocates native assets and repeats load waits; map registration did not reclaim native fast-memory copies. V2 addresses these lifecycle issues. V1 is not a deployment candidate.

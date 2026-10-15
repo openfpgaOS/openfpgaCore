@@ -1,0 +1,32 @@
+{
+  "offline_tests_passed": 28,
+  "real_prepare_verified": true,
+  "quartus_launched_by_prepare": false,
+  "allowed_global_choices": {
+    "OPTIMIZATION_TECHNIQUE": [
+      "AREA",
+      "SPEED",
+      "BALANCED"
+    ],
+    "PHYSICAL_SYNTHESIS_COMBO_LOGIC": [
+      "ON",
+      "OFF"
+    ],
+    "PHYSICAL_SYNTHESIS_EFFORT": [
+      "NORMAL",
+      "FAST",
+      "EXTRA"
+    ]
+  },
+  "protected": "Allinstanceassignments,CPUsource,clocks/PLLs/SDCs,pins/device,retiming,registerduplication remainprotected. No sweep started.",
+  "files": {
+    "sweep-tooling/sweep.py": "d77463b8a05ab5ce92ebee8fd528b650c9c16f648d58e184fc28f9c9099d21b1",
+    "sweep-tooling/results.py": "192828cad6b134c0f6cacfd484611e1ec9db5ab27cf379974bd737296d4f110b",
+    "sweep-tooling/report_sweep_timing.tcl": "2c66004df7b54c2e62a0c47ae976cf7c61da684ec034a169cb077ca00cdca34e",
+    "sweep-tooling/test_sweep.py": "aea45505400322c4f38101243fcba1eff5dff97944258d3e2f9df3ab18447f66",
+    "sweep-tooling/README.txt": "4a9973c9e6440f5f1c4497866df87ddef532a92363980317ef6588cf126bdbbd",
+    "area-optimization/physical-policy-tests.log": "c28d64130b39af6d162a41ed6c494d68d4014bacbeacfb45311de4359550f6d7",
+    "area-optimization/physical-policy-prepare-validation/manifest.json": "fecda1e9aed29b02584408b988a988f0689da25dc7df16a32523d53f8c8db17e",
+    "area-optimization/ddio-policy-final-receipt.json": "b3f64baee6f60313794f437ebbe50d529a5fe5d8cb287e15722af1145b2b16c6"
+  }
+}

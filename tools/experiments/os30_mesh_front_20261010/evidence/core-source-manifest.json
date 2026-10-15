@@ -1,0 +1,154 @@
+{
+  "status": "PASS_FINAL_COMPONENT_SOURCE_BINDING_NO_FULLFRAME_OR_FIT_CLAIM",
+  "owned_files": [
+    {
+      "path": "REPORT.txt",
+      "sha256": "dcbf7bc85d95936e2d80dca666f6f4e51292750f1906db67e4a3bf05d9d26a6d"
+    },
+    {
+      "path": "architecture-v1.json",
+      "sha256": "e2e5a02b5b113a06b01c9472236d407f8aa62e0aee88854379fa01b23ee71ec4"
+    },
+    {
+      "path": "architecture-v2.json",
+      "sha256": "cbbdc2d376d92e1821fd8654620c505476c41c2daf89eca824f4c0023c001d54"
+    },
+    {
+      "path": "bind_source.py",
+      "sha256": "ad2fda2ea7199252898d027017c7ae905575e9f5f6361fc074c3886d4e210ec4"
+    },
+    {
+      "path": "rtl/geometry_mesh_raw_frontend.v",
+      "sha256": "61854f2d9949339c9b4c123d1b174da3828601cbf1edcbc0c410fbf854fac764"
+    },
+    {
+      "path": "rtl/geometry_mesh_stream.v",
+      "sha256": "3305e56087a718d675c0141f8c723ab61e7ad3df81d246ec5db6913ab8ef17c3"
+    },
+    {
+      "path": "rtl/geometry_mesh_task_ctrl.v",
+      "sha256": "b2efc5506e55bec2bc3fd2c99532e33b88f6e1270cc55ffc3d28370d21da980d"
+    },
+    {
+      "path": "rtl/geometry_mesh_task_engine.v",
+      "sha256": "89ffb46cdcc2366fefc9b4334d5f0d3f1a66667f072078c69281226f8f4f81e5"
+    },
+    {
+      "path": "scene-outcomes-v1.json",
+      "sha256": "687ebd8382252fbcc68c43f7cf06ebf0a29efb2e52039279b25139a1060227de"
+    },
+    {
+      "path": "sources.json",
+      "sha256": "4516cc26137c669ed01d436f3afc59821d3fe651ee1c92044ce2c8b177243283"
+    },
+    {
+      "path": "task-outcomes-v1.json",
+      "sha256": "26f5c73f822739df8fb6cb6a541ecc9909b57b04d6ce4d67901338f8470c969b"
+    },
+    {
+      "path": "tests/analyze_scene.py",
+      "sha256": "3daf220423ca3af49a7eee0431ddd73eff947c7c133b50538c467bff8d9d6fc1"
+    },
+    {
+      "path": "tests/geometry_mesh_chain.v",
+      "sha256": "d5b5b6097143bcd0910c77825562e06c18b3f65bdcba76fee2b1bdc1274d32f8"
+    },
+    {
+      "path": "tests/run_chain.py",
+      "sha256": "385c89bed17e8e3082372211d5acfb85e225b76a047fa8a7532fcc92b36dcabe"
+    },
+    {
+      "path": "tests/run_controller.py",
+      "sha256": "c0b9ae731378ea378fa231f806b0fc43f51267142ed7564baf7e31c742e5f327"
+    },
+    {
+      "path": "tests/run_engine.py",
+      "sha256": "4b28551e5064c5fe8f0df5698359862a71dccb75162b2e5a35e412e2837c4bfc"
+    },
+    {
+      "path": "tests/run_scene_chain.py",
+      "sha256": "32290433604aff7c92d5be2a6277d63d6efde6d8828cb17e04016d89e48fbd66"
+    },
+    {
+      "path": "tests/run_scene_cull_oracle.py",
+      "sha256": "30ddf8f2bb81d07c5d560d634541125587a484de67e5fe5eade56c83e348a501"
+    },
+    {
+      "path": "tests/run_scene_stream.py",
+      "sha256": "2d5f9cdc4e2466346506690808ebccbef5150e27b812a2fb6eef06b5e8221adc"
+    },
+    {
+      "path": "tests/run_stream_control.py",
+      "sha256": "9cbfda5e7e7fe384eb30e4c040436199f85bf4765e79dc7b7a2545718610c962"
+    },
+    {
+      "path": "tests/task_outcomes.py",
+      "sha256": "268c9d27416b9de0681e5f435a95834f29731a6b39019bd24f537733964d5e9f"
+    },
+    {
+      "path": "tests/test_chain.cpp",
+      "sha256": "4bce3ea275d5bfd5377d208949d5e2aadac759f39e6785956adf360c79692808"
+    },
+    {
+      "path": "tests/test_controller.cpp",
+      "sha256": "b564184deac54829da8bc43892f695babf3e3cf12ff37ef84f1d85630ee533c4"
+    },
+    {
+      "path": "tests/test_engine.cpp",
+      "sha256": "7c7123375ecb3f66a8a5435e1451556d9307568fd9e4bcbd82797aa4aa99a3cb"
+    },
+    {
+      "path": "tests/test_scene_chain.cpp",
+      "sha256": "1844255138d6c3c6a07b7fe560a6e426ba2a2e046e0a1bd5f1c0138217b76d91"
+    },
+    {
+      "path": "tests/test_scene_stream.cpp",
+      "sha256": "dc0d60077553acb965cb78e4eeb35f3dc091c095bc5e117c7e2d6adcf1a3d458"
+    },
+    {
+      "path": "tests/test_stream_control.cpp",
+      "sha256": "c4841821323d0a5d9f0bd0bb05b6a1af5a6bae29e587caf29bf59986c741155f"
+    }
+  ],
+  "final_receipts": [
+    {
+      "path": "tests/engine-v4/manifest.json",
+      "sha256": "d16dd0a269fb7f52020981f10e717d814cbb071423bf99884a69fadbb2c2b995"
+    },
+    {
+      "path": "tests/controller-v3/manifest.json",
+      "sha256": "a708d6b386316d2ae6952732bb7a9e25ff708b5277d5ea1136660485829d643d"
+    },
+    {
+      "path": "tests/chain-v1/manifest.json",
+      "sha256": "94ce9356d2ae33e6333c005d8682d3720f13896747c9a9d239266c4921c85028"
+    },
+    {
+      "path": "tests/scene-cull-oracle-v1/manifest.json",
+      "sha256": "b40fcea95b94252aa0187ba8ded612a31933969e67a094fe249d066ffb3311f0"
+    },
+    {
+      "path": "tests/scene-chain-v1/manifest.json",
+      "sha256": "d582790692c975938d523b1d1bb607e08532972a5088be46c834b3e36d120031"
+    },
+    {
+      "path": "tests/scene-stream-v2/manifest.json",
+      "sha256": "6cd54b0bef07f7af91bb557840a947fd3f99cc2cae1200153a044a2b9d18a8c1"
+    },
+    {
+      "path": "tests/stream-control-v3/manifest.json",
+      "sha256": "a3f3e19b2fdfecf6d2d0f3ef75bb43180091b5710177f8689f95e0d9f9b25224"
+    }
+  ],
+  "external_packet_sources": [
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/geometry_mesh_packet.v",
+      "sha256": "7514026cf2b23e8f219aa193e24c922bacac05e04079bd6f3edd772cbb97e493"
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/geometry_mesh_command_fetch.v",
+      "sha256": "a740d2c2d961bcbe3421e7de594ca842b3c3caf2a38dff7de89ff067c9b93cf8"
+    }
+  ],
+  "packaging": "Source and synthetic tests are portable. Captured game source bytes/contexts and actual CPU model oracle remain externally bound evidence; do not embed ROM/assets in a source-only package."
+}

@@ -1,0 +1,164 @@
+[
+  {
+    "passed": true,
+    "workload": "main",
+    "baseline": "baseline-cpu",
+    "candidate": "alias-v2-cpu",
+    "baseline_elf_sha256": "a19b94e0a3abce9eac98775f1f59f19fa1e4be77c3580c808823cf5f8654412d",
+    "candidate_elf_sha256": "bcb3e95bb8745811375628188c5b66aa5aa1122b99a78dce0a3c2f9cc23e87d9",
+    "baseline_cycles_per_frame": 5812523.232352941,
+    "candidate_cycles_per_frame": 5831407.738235294,
+    "change_percent": 0.3248934262703784,
+    "all_commands_order_and_frame_assignments_including_tail_exact": true,
+    "complete_RGB565_all_frames_exact": true,
+    "sound_service_counts_exact": true,
+    "compared_frame_fields": [
+      "frame",
+      "host_framecount",
+      "buffer",
+      "gpu_cmd_words",
+      "gpu_pixels",
+      "hash_cmd",
+      "hash_px",
+      "hash_z",
+      "hash_pal",
+      "mem_hazards",
+      "gpu_barriers",
+      "gpu_wait_px"
+    ],
+    "frame_mismatch_count": 0,
+    "first_frame_mismatches": [],
+    "largest_function_deltas": [
+      {
+        "function": "ofgl_emit_ctri",
+        "baseline": 853695.7794117647,
+        "candidate": 724896.9205882353,
+        "delta": -128798.85882352944
+      },
+      {
+        "function": "_gpu_stream_reserve_words",
+        "baseline": 0,
+        "candidate": 72577.39411764705,
+        "delta": 72577.39411764705
+      },
+      {
+        "function": "ofq2_tri_batch_refill",
+        "baseline": 0,
+        "candidate": 70555.1205882353,
+        "delta": 70555.1205882353
+      },
+      {
+        "function": "R_ApplyGLBuffer",
+        "baseline": 297392.8382352941,
+        "candidate": 291444.1705882353,
+        "delta": -5948.6676470587845
+      },
+      {
+        "function": "ofgl_project_cvert",
+        "baseline": 338059.5088235294,
+        "candidate": 343660.42647058825,
+        "delta": 5600.917647058843
+      },
+      {
+        "function": "ofgl_fetch_attrs",
+        "baseline": 161467.76764705882,
+        "candidate": 165979.5205882353,
+        "delta": 4511.75294117647
+      },
+      {
+        "function": "ofgl_cached_tri",
+        "baseline": 473183.72352941177,
+        "candidate": 477637.5764705882,
+        "delta": 4453.852941176447
+      },
+      {
+        "function": "OFGL_DrawWorldPolys",
+        "baseline": 349586.8294117647,
+        "candidate": 353248.83235294116,
+        "delta": 3662.00294117647
+      },
+      {
+        "function": "R_DrawAliasModel",
+        "baseline": 323140.45588235295,
+        "candidate": 319779.50294117647,
+        "delta": -3360.9529411764815
+      },
+      {
+        "function": "ofgl_begin3d",
+        "baseline": 30447.144117647058,
+        "candidate": 27789.961764705884,
+        "delta": -2657.182352941174
+      },
+      {
+        "function": "CL_AddEntities",
+        "baseline": 169949.81470588237,
+        "candidate": 167405.19411764707,
+        "delta": -2544.620588235295
+      },
+      {
+        "function": "R_LightPoint",
+        "baseline": 4171.879411764706,
+        "candidate": 5910.914705882353,
+        "delta": 1739.035294117647
+      },
+      {
+        "function": "ofgl_alias_cvert",
+        "baseline": 362671.67647058825,
+        "candidate": 361162.6941176471,
+        "delta": -1508.9823529411806
+      },
+      {
+        "function": "CL_Frame",
+        "baseline": 33665.65294117647,
+        "candidate": 34831.05294117647,
+        "delta": 1165.4000000000015
+      },
+      {
+        "function": "__adddf3",
+        "baseline": 53082.964705882354,
+        "candidate": 51971.888235294115,
+        "delta": -1111.0764705882393
+      },
+      {
+        "function": "R_RenderLightmappedPoly",
+        "baseline": 35531.08529411765,
+        "candidate": 36575.43235294118,
+        "delta": 1044.3470588235286
+      },
+      {
+        "function": "ofgl_box_bounds",
+        "baseline": 87380.78529411765,
+        "candidate": 88329.7911764706,
+        "delta": 949.0058823529398
+      },
+      {
+        "function": "ofgl_setup_tri_state",
+        "baseline": 156982.2294117647,
+        "candidate": 156053.59705882354,
+        "delta": -928.6323529411748
+      },
+      {
+        "function": "ofgl_blit_rect",
+        "baseline": 115155.94117647059,
+        "candidate": 114453.2205882353,
+        "delta": -702.7205882352864
+      },
+      {
+        "function": "R_RecursiveWorldNode",
+        "baseline": 183340.9911764706,
+        "candidate": 184024.3205882353,
+        "delta": 683.3294117647165
+      }
+    ],
+    "limits": [
+      "Scalar OS25-derived CPU/cache estimates with OS30 cache sizes; not Vexii measurements or Pocket FPS.",
+      "Fixed guest clock is 5000000 + ceil(flips*1000000/30), independent of instruction counts.",
+      "GPU functional model records 3D commands but does not rasterize them; full RGB565 capture covers CPU framebuffer output.",
+      "Physical GPU/audio/CPU/scanout contention and kernel timing are not modeled; sound services use functional stubs.",
+      "Main/sound use timedemo; live uses fixedtime33334 and +forward from demo1 spawn, not prolonged combat.",
+      "Texture uploads are instantaneous; identical commands and framebuffer bytes do not alone prove texture-memory equality.",
+      "Startup is excluded from CPU metrics; exact output checks include startup and trailing command records.",
+      "GPU-on and GPU-off commands differ; run completion and CPU framebuffer equality are not a geometry correctness gate. Separate RTL output validation is required."
+    ]
+  }
+]

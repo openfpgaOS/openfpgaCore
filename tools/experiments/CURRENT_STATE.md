@@ -1,3 +1,22 @@
+# Current release selection — 2026-10-14
+
+The retained Quake2 OS30 release is the full-ISA, I64/D64, full-audio
+`f3685d90...` source and seed-16 `7c7021e6...` image, paired with app
+`10581bdb...`. The complete qualified bundle is archived in
+[`release/os30-quake2`](../../release/os30-quake2/README.txt).
+The I32 trial was rolled back after a reported hardware performance regression.
+SM64 keeps its separate `b1083c26...` image; the Quake2-specific image is not
+an SM64 replacement. No os20/os25 promotion is implied.
+
+See [the current experiment index](RELEASE_EXPERIMENTS_20261014.txt) for all
+18 newly reviewed experiment folders, rejected/superseded candidates and
+local evidence retention. Existing dated reports remain unchanged.
+
+The following 2026-10-08 snapshot is retained for historical provenance;
+its Quake2 app/core selection is superseded by the current selection above.
+
+---
+
 # Selected core and game performance work
 
 This index records the selected state as of 2026-10-08. The dated directories

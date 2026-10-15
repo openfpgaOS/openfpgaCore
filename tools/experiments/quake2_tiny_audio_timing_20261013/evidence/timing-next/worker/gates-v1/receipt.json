@@ -1,0 +1,45 @@
+{
+  "passed": true,
+  "worker_sha256": "f535bc90a271228196358413120cdc4badda2094d2ffe8e8d4d95e78fd2aa7fa",
+  "reference_sha256": "c427042984b29753347e5e41d39cee5cbf2851c2cd1030331d5e4893f9cf6dc2",
+  "runner_sha256": "0da4dde8ed6e7a9e8ba165c625aab70afd78825d3fb966beda3b3d8631f91cc9",
+  "fixtures": {
+    "arithmetic.cpp": "706e6dea3e4fb90af0c4b132ed5fccc68375e05e1fee9ebdc80ffc6e76b37107",
+    "geometry_worker.cpp": "bcfa7d6991bb5063b1e5b2f05e01f96cee1842a172aa04b2b5e50d538b7bee7f",
+    "geometry_worker_tb.v": "693a2783f4299d9c9833c7313ef9678b9b43161a464b5477460f9912bb43a703"
+  },
+  "scope": "Actual source-extracted arithmetic compared with parent and independent integer model, then direct e0f4 parent/candidate paired workers. No Quartus/device I/O.",
+  "configurations": {
+    "native1-particles1": {
+      "passed": true,
+      "cycles": 10722773,
+      "result": "PASS particles640 mixed jobs, 520456 exact output words, six malformed contexts, RNE/bbox/alpha/cull and preserved native context (5401144 cycles)\nPASS particle invalid record8/overflow1: no indexed triangle or hang\nPASS particle reset18 at divide/emit/alpha/basis/space/triangle; stale context rejects; fresh rebind recovers\nPASS descriptor width: rejected108 high/alignment bits, immediate valid recovery, accepted10 count/address/end boundaries (859703 cycles)\nPASS malformed19, reset12 (request-held/before-data/mid/last; soft/ring/media), postreset reuse\nPASS: 1920 mixed vertex batches, 7680 winding tests, 199032 exact output words, wrap/backpressure/enable/reset (3958603 cycles)\nNative jobs120, meshlets240, burst reads25902, returnedbeats207216, beatswhilepaused23117\nPASS signed near-plane boundaries: 11 planes, 641 explicit legacy vertices, 134346 cycles\nPASS cycle lockstep 10722773 cycles, busy-publication 121421; divides raw=20574 clip=872 native=10897 particle=21526\n",
+      "result_sha256": "b30bfa97587d9142f38409115bf4d3b578db5ad161ebb99ce93351d689cd8d99"
+    },
+    "native1-particles0": {
+      "passed": true,
+      "cycles": 5064373,
+      "result": "PASS descriptor width: rejected108 high/alignment bits, immediate valid recovery, accepted10 count/address/end boundaries (814225 cycles)\nPASS malformed19, reset12 (request-held/before-data/mid/last; soft/ring/media), postreset reuse\nPASS: 1920 mixed vertex batches, 7680 winding tests, 202484 exact output words, wrap/backpressure/enable/reset (4033870 cycles)\nNative jobs120, meshlets240, burst reads19283, returnedbeats154264, beatswhilepaused17389\nPASS signed near-plane boundaries: 11 planes, 641 explicit legacy vertices, 122832 cycles\nPASS cycle lockstep 5064373 cycles, busy-publication 75978; divides raw=20674 clip=872 native=8071 particle=0\n",
+      "result_sha256": "7c610fcffc13239abc7bfffe177a5c573e7a62e3bbf9b4041a7480694f5812bd"
+    },
+    "native0-particles1": {
+      "passed": true,
+      "cycles": 8188415,
+      "result": "PASS particles640 mixed jobs, 490418 exact output words, six malformed contexts, RNE/bbox/alpha/cull and preserved native context (4746698 cycles)\nPASS particle invalid record8/overflow1: no indexed triangle or hang\nPASS particle reset18 at divide/emit/alpha/basis/space/triangle; stale context rejects; fresh rebind recovers\nPASS: 1920 mixed vertex batches, 7680 winding tests, 162828 exact output words, wrap/backpressure/enable/reset (3071991 cycles)\nPASS signed near-plane boundaries: 11 planes, 641 explicit legacy vertices, 89109 cycles\nPASS cycle lockstep 8188415 cycles, busy-publication 103477; divides raw=20533 clip=872 native=0 particle=21366\n",
+      "result_sha256": "f2fcdd450d8a3a9566d58b7b25207a97474800dfe7092fcc9bdf7b9f8a93bee9"
+    },
+    "native0-particles0": {
+      "passed": true,
+      "cycles": 3188181,
+      "result": "PASS: 1920 mixed vertex batches, 7680 winding tests, 163988 exact output words, wrap/backpressure/enable/reset (3099045 cycles)\nPASS signed near-plane boundaries: 11 planes, 641 explicit legacy vertices, 88837 cycles\nPASS cycle lockstep 3188181 cycles, busy-publication 60835; divides raw=20701 clip=872 native=0 particle=0\n",
+      "result_sha256": "5e5ec9855f8c92b5d4bc432fac4de16e5691a0f22eaaa2671008833e074ab321"
+    }
+  },
+  "arithmetic": {
+    "passed": true,
+    "result": "PASS 5146368 screen vectors and 4003616 cull vectors; exact old/new/model\n",
+    "result_sha256": "bc70622a217ca57f527835f45c1d70640dffdeeaadf987a6b56b1df8d63cac05",
+    "wrapper_sha256": "dd24601a581d2e32d0ae9199b78c23dcdcf29ace9ea4f0ae31ca042eb0b83608"
+  },
+  "total_lockstep_cycles": 27163742
+}

@@ -1,0 +1,35 @@
+{
+  "status": "PASS_FOUR_CORRUPTIONS_REJECTED",
+  "cases": [
+    {
+      "case": "source_vertex_word",
+      "status": "REJECTED",
+      "message": "PSRAM task source differs from immutable CPU bytes"
+    },
+    {
+      "case": "accepted_context_word",
+      "status": "REJECTED",
+      "message": "accepted context words differ from ordered ingress"
+    },
+    {
+      "case": "legacy_granted_ticket",
+      "status": "REJECTED",
+      "message": ""
+    },
+    {
+      "case": "CPU_LOAD_identity",
+      "status": "REJECTED",
+      "message": "original LOAD call identity/order changed"
+    }
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/async_lifetime_v1.py": "939c12f3c128e305936091f01d7bb3d1c3623797256cca5eeb6b7a894ac61ba3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/candidate-v2-witness/check-independent-v1.json": "7c6a3fa5a1ea7f96e4cd35f9f35122d636e9764c9a0d319c342e7599599810b6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/candidate-v2-witness/build.json": "65f0260f4dda1d00e2d84259c29323ccc2aa16ab4dab0285b5168f2e2d8d81b6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/candidate-v2-witness/run/job-sources.tsv": "44cdf94a0adeefd420cfa537ba83751d1bd277fde204510b2867c6ea21f385ff",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/candidate-v2-witness/run/async-events.tsv": "4e32e83ad4aa415453cd3026ddbd9ee92e2d4d122cef7c72dcc516e24ca87c87",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/validation/candidate-v2-witness/run/vtx-calls.tsv": "2e6152f7a2aef703e50dedf03893d1af21ae186fe56e959aae17231043872da1"
+  },
+  "script_sha256": "b7da51099663f00bd4f5559cb38aafddebdfa3099e3761c56d38cfe617fa94a3",
+  "measured_inputs_unchanged": true
+}

@@ -1,0 +1,30 @@
+{
+  "status": "PASS_SOURCE_REVIEW_PENDING_FULL_NATIVE",
+  "elf_sha256": "5c7acaac7ee5093a652b507c18d71a314742403c0c5e1c460d0dbd6c6b3f1576",
+  "bindings": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app/evidence/app-build-v1/build-result.json": "1c47cd50ab62744bb28749ed666dffd8884eee211d7f6de7c0b6bc562ebe5e2f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app/evidence/source-pool-tests-v1/result.json": "eb55c178785b8a8232d045e61f5f9eacdd2b932fdd12ef7d28164b5e8c819145",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "e82540a75716eadf21ec995e5b142ca706d0e7d18895ff83d4a829a942cb92c9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app/src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "ba534a150368260eb6cfa17e4c8fefea550e1e343f962fbc5fc8d82cb830c3ae",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app/src/sm64/sm64/src/pc/gfx/gfx_gpu.h": "0a59b53654ac32742e7d61b7d81cbe03626d28a441c906c307d33e951862bdf0"
+  },
+  "reviewed": [
+    "Immutable ELF topology cache bounded by 32 own dest0 vertices, 64 original TRI commands and 64 total triangles; live mutable material remains current until preflight/classification/validation complete.",
+    "Terminal polling accepts hardware preflight OR fallback. Successful raw LOAD on geometric fallback is retained lazily for canonical CPU handling; raw failure falls back to CPU transform.",
+    "A fully culled accepted task does not prepare material. Live tasks use existing material preparation and explicit material eligibility/LOD/alpha rejection before hardware validation.",
+    "Packet numeric validation must complete before the exact serial/context marker is emitted. Marker forces publication, preserving progress of next ownership wait.",
+    "Canonical fallback and surviving old slots are materialized before raw storage reuse; actual wrapper blocks new aliases while validation/output owns its port and drains accepted aliases first.",
+    "Every mesh marker invalidates software VC residency, so later legacy draws reload their required slots in stream order.",
+    "Vertex and command source offsets share generation ownership. Arena recycle drains mesh owner, clears both descriptor caches, and command allocation that recycles after vertex lookup retries BOTH offsets.",
+    "Only frozen same-ELF capability-off baseline against candidate can establish frame-time change; no charged-work subtraction is accepted."
+  ],
+  "fixed_during_review": [
+    "Accepted-only status bit1 was insufficient to end geometric fallback polling; final app polls bit1 or bit2.",
+    "GPU payload-underflow and soft-reset output-pointer rules must use separate STREAMED_COMMANDS so new bridge remains ordinary opcode semantics. Root fixed this before native-v2."
+  ],
+  "limits": [
+    "Read-only source review; actual native frame correctness and performance still required.",
+    "Source-pool host tests stub owner drain; actual wrapper lifecycle tests supply complementary RTL ownership coverage.",
+    "No area/clock-fit or Pocket hardware claim."
+  ]
+}

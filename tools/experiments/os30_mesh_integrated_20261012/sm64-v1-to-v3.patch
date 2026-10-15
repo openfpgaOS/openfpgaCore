@@ -1,0 +1,83 @@
+--- a/src/sm64/pocket/perf_pocket.c
++++ b/src/sm64/pocket/perf_pocket.c
+@@ -381,7 +381,7 @@
+ #if SM64_PERF_DETAILS
+     print_text(12,210,"PERF P3 VERT");
+ #else
+-    print_text(12,210,"PERF F16 MESH1");
++    print_text(12,210,"PERF F18 MESH3");
+ #endif
+     if(!s->valid) {
+         print_text(12,178,"WAIT 5 SECONDS IN LEVEL");
+--- a/src/sm64/sm64/src/pc/gfx/gfx_gpu.c
++++ b/src/sm64/sm64/src/pc/gfx/gfx_gpu.c
+@@ -308,14 +308,14 @@
+ #ifndef OF_PC
+ #define BRAM_GEO_REGS ((volatile uint32_t *)0x4b000000u)
+ #endif
+-/* MTF1 same-ELF fixture probe and bounded diagnostic counters. */
++/* MTF2 same-ELF fixture probe and bounded diagnostic counters. */
+ unsigned sm64_mesh_front_capability;
+ uint32_t gfx_mesh_stats[16];
+ int gfx_gpu_mesh_supported(void) {
+ #ifndef OF_PC
+     if(!g_clip_load||!g_truecolor)return 0;
+     if(!sm64_mesh_front_capability) {
+-        sm64_mesh_front_capability=BRAM_GEO_REGS[0x20]==0x4d544631u?1u:2u;
++        sm64_mesh_front_capability=BRAM_GEO_REGS[0x20]==0x4d544632u?1u:2u;
+         if(sm64_mesh_front_capability==2u)++gfx_mesh_stats[15];
+     }
+     return sm64_mesh_front_capability==1u;
+@@ -326,6 +326,11 @@
+ void gfx_gpu_mesh_wait_source(void) {
+ #ifndef OF_PC
+     if(sm64_mesh_front_capability!=1u)return;
++    /* A validated owner can be waiting for packet credit held by older staged
++     * markers. Publish once before waiting; after copy starts, its complete
++     * reservation makes progress independent of GPU consumption. */
++    const uint32_t status=BRAM_GEO_REGS[0x21];
++    if((status&0xa1u)==0x21u)of_gpu_kick_now();
+     while(BRAM_GEO_REGS[0x21]&1u)++gfx_mesh_stats[13];
+ #endif
+ }
+@@ -2083,9 +2088,9 @@
+     *packet++=(uint32_t)context->u_offset;
+     *packet++=(uint32_t)context->v_offset;
+     _gpu_ring_commit(5);g_vc_words+=5;
+-    /* The next raw LOAD can wait on this ownership. Its marker must be
+-     * published even when the ordinary staging threshold is not reached. */
+-    of_gpu_kick_now();
++    /* Keep small mesh packets in the normal command batch. Source ownership
++     * waits publish older staged markers if packet credit blocks progress. */
++    of_gpu_kick();
+ #else
+     (void)serial;(void)context;
+ #endif
+--- a/src/sm64/sm64/src/pc/gfx/gfx_pc.c
++++ b/src/sm64/sm64/src/pc/gfx/gfx_pc.c
+@@ -1108,7 +1108,7 @@
+ #define LOAD_ALIAS_REGS ((struct LoadAliasRegisters *)0x4b000000u)
+ #define LOAD_ALIAS_ID 0x4c4f4405u
+ #define LOAD_ALIAS_VIEW ((const uint32_t *)0x13f80000u)
+-/* MTF1 topology is compiled only for immutable ELF display-list bytes. The
++/* MTF2 topology is compiled only for immutable ELF display-list bytes. The
+  * cached end pointer replaces steady per-triangle CPU decoding; physical DMA
+  * offsets are separately rebound to the retained source-pool generation. */
+ struct MeshTask {
+@@ -3313,9 +3313,15 @@
+     if(!(checked&MESH_OWNER)||!(checked&MESH_VALIDATED)||(checked&(MESH_PACKET_ERROR|MESH_PROTOCOL_ERROR))) {
+         ++gfx_mesh_stats[11];gfx_mesh_discard();return fallback;
+     }
++    /* MTF2 copies into its private packet FIFO independently of the marker.
++     * ARM may release raw ownership before the marker reaches the GPU. Keep
++     * the serial and uniforms locally; do not reread owner after this point. */
++    const uint32_t packet_serial=mesh_serial;
++    MESH_REGS[0x26]=16;
++    __asm__ volatile("fence rw,rw" ::: "memory");
+     gfx_vc_texture_state(comb,textured,bias?0.5f:0.0f);
+     if(buf_vbo_len)gfx_flush();
+-    gfx_gpu_mesh_packet(mesh_serial,alpha,&context);
++    gfx_gpu_mesh_packet(packet_serial,alpha,&context);
+     ++gfx_mesh_stats[7];gfx_mesh_stats[8]+=live;
+     vc_slot_stale=0xffffffffu;
+ #ifdef TARGET_POCKET

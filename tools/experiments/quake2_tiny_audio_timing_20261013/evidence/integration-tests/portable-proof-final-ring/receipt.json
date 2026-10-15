@@ -1,0 +1,52 @@
+{
+  "passed": true,
+  "source_pins": {
+    "src/fpga/common/os30/axi_periph_slave.v": "2ad87cc989af89b56492fa898d3f51dea55029fe6b8947c7e385e0859a100444",
+    "src/fpga/common/os30/audio_mixer.v": "c6d2517af662f356b44617230c27aa880c449928282e738c374a2db86663f73a",
+    "src/fpga/common/os30/audio_sample_cache.v": "ac018efd17a7e1012d1456f12375575a4c4f57784ab6a03c2132bb00795c111d",
+    "src/fpga/common/sync_fifo.v": "66545eaee0463d5e25e862cb5fbccb357b2d34948f93a9f8a706c04c536aa28c",
+    "src/fpga/targets/pocket/snac_shifter.v": "4a3953a9729af3c001101e85d67cdd73e4334bc76ef0ad984c55b8c66f42eebf",
+    "src/fpga/targets/pocket/apf/common.v": "26aa1637c4eaaef2fb6acaa38475826fdf9420c86d06a262eaa104422a32c4a8",
+    "src/fpga/targets/pocket/os30/core_top.v": "bc1846e6f148496d5fb41c329fc4c34fe3fd312c65b9316f36ac5a36336a60e5",
+    "src/fpga/targets/pocket/ap_core.qsf": "351431b8158de34a5a18361c8ae8a9d5d94a81b714c3853dfa3d315a47c1f1d1"
+  },
+  "mmio": [
+    {
+      "cache_present": 0,
+      "passed": 39,
+      "failed": 0,
+      "log_sha256": "4ad19f7f05a2a3e6f52368929dcf584acd5fdf681759232298195eaf40a8f10b"
+    },
+    {
+      "cache_present": 1,
+      "passed": 39,
+      "failed": 0,
+      "log_sha256": "4ad19f7f05a2a3e6f52368929dcf584acd5fdf681759232298195eaf40a8f10b"
+    }
+  ],
+  "mixer_cache": {
+    "passed": true,
+    "mixer_sha256": "c6d2517af662f356b44617230c27aa880c449928282e738c374a2db86663f73a",
+    "reference": {
+      "samples": "18432",
+      "scenarios": "96",
+      "errors": "0",
+      "saturation_samples": "169",
+      "stream_holds": "12808",
+      "hash": "46e30baca498b56b",
+      "processing_cycles": "19618042"
+    },
+    "inherited_results": "=== Results: 177 passed, 0 failed ===",
+    "limits": [
+      "Dynamic component tests, not a formal proof.",
+      "SDRAM response latency/AR/R stalls are synthetic, not the shared physical arbiter.",
+      "FIFO sink uses existing synchronous48 kHz model; Pocket CDC and physical audio pins require separate checks.",
+      "No physical fitter, timing result or game FPS claim."
+    ]
+  },
+  "limits": [
+    "Synthetic responder; real shared-arbiter performance has separate receipts.",
+    "The rearm address bound is asserted on upstream mixer requests; physical cache fills cover32-byte lines.",
+    "Physical FPGA timing, Pocket audio CDC and device playback require separate qualification."
+  ]
+}

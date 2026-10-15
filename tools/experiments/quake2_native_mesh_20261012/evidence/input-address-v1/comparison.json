@@ -1,0 +1,13 @@
+{
+  "baseline_sha256": "829827085023e6bf62832595e8f75ee57558d232e478640a6e65b4c728abdca5",
+  "candidate_sha256": "27fdcfc565b3232186bc5febfb84cd084aca054bdc8d4429e0d125d656b0f19b",
+  "identical_result_bytes": {
+    "native": true,
+    "legacy-disabled": true
+  },
+  "exhaustive_pointer_pairs": 67121152,
+  "exhaustive_lookahead_pairs": 8320,
+  "physical_timing_measured": false,
+  "prepared_core_unchanged": true,
+  "proof": "With A-bit pointers, U=(W-R) mod2^A and C=2^Q-1. F=(C-U) mod2^(A+1) is zero iff U=C (0<=U,C<2^A), iff R=(W-C) mod2^A. No occupancy assumption. Addr=(R+take) mod2^A equals take?((R+1)mod2^A):R."
+}

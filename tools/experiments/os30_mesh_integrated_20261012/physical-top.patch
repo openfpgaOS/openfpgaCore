@@ -1,0 +1,42 @@
+--- a/src/fpga/targets/pocket/os30/core_top.v
++++ b/src/fpga/targets/pocket/os30/core_top.v
+@@ -2849,7 +2849,23 @@
+     wire geometry_cpu_sdram_wlast;
+     wire geometry_cpu_sdram_bvalid;
+     wire [1:0] geometry_cpu_sdram_bresp;
++`ifdef INCLUDE_GPU_MESH_FRONT
++wire mesh_marker_valid,mesh_marker_ready,mesh_marker_error;
++wire [31:0] mesh_marker_serial,mesh_marker_flags,mesh_marker_uofs,mesh_marker_vofs;
++wire mesh_word_valid,mesh_word_ready,mesh_packet_done,mesh_packet_error;
++wire [31:0] mesh_word_data;
++wire mesh_consumer_reset,mesh_bridge_fault;
++`endif
+     geometry_load_alias geometry_load (
++`ifdef INCLUDE_GPU_MESH_FRONT
++ .mesh_marker_valid(mesh_marker_valid),.mesh_marker_serial(mesh_marker_serial),
++ .mesh_marker_flags(mesh_marker_flags),.mesh_marker_uofs(mesh_marker_uofs),
++ .mesh_marker_vofs(mesh_marker_vofs),.mesh_marker_ready(mesh_marker_ready),
++ .mesh_marker_error(mesh_marker_error),.mesh_word_valid(mesh_word_valid),
++ .mesh_word_data(mesh_word_data),.mesh_word_ready(mesh_word_ready),
++ .mesh_packet_done(mesh_packet_done),.mesh_packet_error(mesh_packet_error),
++ .mesh_consumer_reset(mesh_consumer_reset),.mesh_bridge_fault(mesh_bridge_fault),
++`endif
+         .clk(clk_cpu),.reset(geometry_reset),
+         .reg_wr(geometry_reg_wr),.reg_addr(geometry_reg_addr),
+         .reg_wdata(geometry_reg_wdata),.reg_wstrb(geometry_reg_wstrb),.reg_rdata(geometry_reg_rdata),
+@@ -4044,6 +4060,15 @@
+     // the internal write combiner in front of it only costs time and RAM.
+     .GPU_WRITE_COMBINE(`ifdef INCLUDE_GPU_RENDER_CACHE 0 `else 1 `endif)
+ ) gpu (
++`ifdef INCLUDE_GPU_MESH_FRONT
++ .mesh_marker_valid(mesh_marker_valid),.mesh_marker_serial(mesh_marker_serial),
++ .mesh_marker_flags(mesh_marker_flags),.mesh_marker_uofs(mesh_marker_uofs),
++ .mesh_marker_vofs(mesh_marker_vofs),.mesh_marker_ready(mesh_marker_ready),
++ .mesh_marker_error(mesh_marker_error),.mesh_word_valid(mesh_word_valid),
++ .mesh_word_data(mesh_word_data),.mesh_word_ready(mesh_word_ready),
++ .mesh_packet_done(mesh_packet_done),.mesh_packet_error(mesh_packet_error),
++ .mesh_consumer_reset(mesh_consumer_reset),.mesh_bridge_fault(mesh_bridge_fault),
++`endif
+     .clk(clk_cpu),
+     .reset_n(reset_n_cpu_media),
+     .gpu_enable(1'b1),

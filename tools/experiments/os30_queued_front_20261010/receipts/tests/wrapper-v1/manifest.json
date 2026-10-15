@@ -1,0 +1,57 @@
+{
+  "status": "PASS_ACTUAL_QGF_WRAPPER_ARBITRATION_AND_RESET",
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/run_wrapper.py": "7355c5eac313ccdafaf304e7613ba2c3f88a0f6d81dd41749fde3f7d68bf28f7",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/raw_transaction_stub_body.vh": "a7d9fe5fa9de2b1ee608200d1c2a6f8729f81ebd756ff2d49a7a2359dd5893fb",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/test_queue_wrapper.cpp": "90f75cc2a8f983c0ae92ecdf958f14ce7451b9c9b562c48895839fb4bd05e872",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/model/frozen/src/fpga/common/geometry_raw_load.v": "a49563b15545d9d89e0b33d09428897baa0256af6d8e582dfdd51755ad0da860",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/model/frozen/src/fpga/common/phase10_load_alias.v": "424c41d245bac415e4f453ab4dd6b650a73cee57ee392239f89cf7b8bcc49646",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/model/frozen/src/fpga/common/geometry_import_view.v": "937f80db1ec005f22d91b7df384ebd5258c97d494e9009cbc13ae1ac53eaa128",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/model/frozen/src/fpga/common/GeometryFmaProbe.v": "348d11609de14326dc9408c11e39a385a85a4e0678eaaf5d69f39d6cfba38088"
+  },
+  "commands": [
+    {
+      "argv": [
+        "verilator",
+        "--cc",
+        "--exe",
+        "--build",
+        "-j",
+        "2",
+        "-Wno-fatal",
+        "-DINCLUDE_GPU_BRAM_IMPORT",
+        "-DINCLUDE_GPU_QUEUED_FRONT",
+        "--top-module",
+        "geometry_load_alias",
+        "--Mdir",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/wrapper-v1/obj",
+        "-CFLAGS",
+        "-std=c++17 -O1 -fsanitize=address,undefined -fno-omit-frame-pointer",
+        "-LDFLAGS",
+        "-fsanitize=address,undefined",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/model/frozen/src/fpga/common/phase10_load_alias.v",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/model/frozen/src/fpga/common/geometry_import_view.v",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/model/frozen/src/fpga/common/GeometryFmaProbe.v",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/wrapper-v1/geometry_raw_load_stub.v",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/test_queue_wrapper.cpp"
+      ],
+      "returncode": 0,
+      "log_sha256": "9abadd630c380eb33adff7cdd80811eb4dd78740f0fcf2e3f780af402a4eb26c"
+    },
+    {
+      "argv": [
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/tests/wrapper-v1/obj/Vgeometry_load_alias"
+      ],
+      "returncode": 0,
+      "log_sha256": "5799700d5e381b6a9bb2ab77664ebc653e9597181efa228aa6a274d59c9c6e71"
+    }
+  ],
+  "result": {
+    "pass": true,
+    "checks": 415,
+    "cycles": 1090,
+    "scope": "Actual QGF phase10, BIM2 and shared FMA; transaction producer uses one actual FMA operation"
+  },
+  "test_producer_sha256": "0f86b222d347df69486b7ed126f31db083e77f3d3bb21168f98876a9d42a0720",
+  "executable_sha256": "123a0e1a8c04f7b27c18c9411f0022928243e0a16148e964c94adc345d385432"
+}

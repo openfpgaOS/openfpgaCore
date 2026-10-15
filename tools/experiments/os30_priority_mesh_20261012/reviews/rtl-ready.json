@@ -1,0 +1,107 @@
+{
+  "status": "FOCUSED_RTL_PASS_READY_FOR_NATIVE_AB",
+  "ABI": "AJ02 unchanged",
+  "source_baseline": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/native-v1/frozen",
+  "changed_rtl": [
+    {
+      "path": "src/fpga/common/geometry_async_mesh.v",
+      "before_sha256": "09131cd1181097a3c94d871dbdb793a24bfb6af8b7e85798dd241f4d1d902eda",
+      "sha256": "a0dfbfb6b047c1be06dc2bff10df9071ecbebe73cbf355579cff3256098cf123"
+    },
+    {
+      "path": "src/fpga/common/geometry_mesh_packet.v",
+      "before_sha256": "493c6618a9e7962de6e171d3730e85df0725edae20658fb457b86522a8b2d4b8",
+      "sha256": "59781cee057d8fbeaec43f96ed9eb4cca8b44484be8dd125f0466a1080b694fc"
+    },
+    {
+      "path": "src/fpga/common/geometry_mesh_stream.v",
+      "before_sha256": "0a5841c2e389b7f1e7358c803cd282fce51e611ccb386f0301f440b6ab484c95",
+      "sha256": "18947ec0aed3901031e03b536815cc6f6165617e7f52a036377e8ddbfa8fa7b7"
+    },
+    {
+      "path": "src/fpga/common/geometry_mesh_task_ctrl.v",
+      "before_sha256": "899e04b44048bc94d6fe70c259c6fc144e826260fc1ecff032ba8bb890251496",
+      "sha256": "49a70c3174f91d698916dd6eca0e826f00e91a6f641cfc015ed30c0848740133"
+    },
+    {
+      "path": "src/fpga/common/geometry_mesh_task_engine.v",
+      "before_sha256": "488101ebc88805495970d738cc12523dff29f784dc747e67c9d24e6a9c1823c4",
+      "sha256": "26a0022220c1eba04b1df5b778e081a48895dfd370a8a39b61d36a043de39eef"
+    }
+  ],
+  "test_receipts": [
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-core-v2/tests/wrapper-v3/manifest.json",
+      "sha256": "b548609fc4a44b79304e7b82854940a80a9c57045ad966351c5f1e3289a9fca8",
+      "result": {
+        "status": "PASS",
+        "cases": 77,
+        "checks": 16810,
+        "cycles": 81622,
+        "AXI_bursts": 650
+      }
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-core-v2/tests/combined-v1/manifest.json",
+      "sha256": "c6e22aded24dab8e8276337b7bcede52aaef1ae4fc90ed78d178af2005018aa4",
+      "result": {
+        "status": "PASS",
+        "cases": 8,
+        "checks": 54919,
+        "cycles": 29958,
+        "AXI_bursts": 14,
+        "ingress_full_cycles": 1734,
+        "output_full_cycles": 4582
+      }
+    }
+  ],
+  "data_layout": {
+    "memory": "mesh.engine.ctrl.survivors[0:511], sixteen bits per entry",
+    "indices": "entries0..63, low15bits of each",
+    "vertices": "entry64+plane*32+slot",
+    "planes": [
+      "X low16",
+      "X high16",
+      "Y low16",
+      "Y high16",
+      "W low16",
+      "W high16",
+      "U low16",
+      "U high16",
+      "V low16",
+      "V high16",
+      "RGB565",
+      "depth low16",
+      "depth high16"
+    ],
+    "maximum_used_entries": 480,
+    "M10K_source_estimate": 1,
+    "extra_M10K_vs_v1": 0
+  },
+  "ownership": [
+    "Current async raw engine retains every vertex/list/context through complete geometric and numeric validation. Validation writes all converted fields into the existing survivor M10K.",
+    "Fresh packet_validated && validation_started && packet_snapshot_valid is required to detach the current raw owner; retained prior snapshot_valid alone is insufficient.",
+    "After detachment the packet reads only frozen store fields. Priority legacy lease may overwrite shared matrix/scalars/raw outputs and execute LOAD while old packet stalls/drains.",
+    "No next async CONTEXT or JOB is accepted until ordered old output is fully stored and the legacy lease is released.",
+    "completed_serial advances only at the last old packet word accepted into output FIFO, zero-task completion, or completed CPU repair END. It never advances merely at raw detachment.",
+    "Old packet completion does not clear a newer legacy LOAD active/pending/completed/success/view state.",
+    "GPU consumer reset discards old snapshot/output, resets packet epoch, cancels or drains async raw work, and preserves granted legacy lease/raw alias or active legacy DMA."
+  ],
+  "observability": [
+    "output_pending",
+    "snapshot_detached",
+    "output_serial",
+    "mesh.packet_snapshot_valid",
+    "mesh.packet_raw_read_active",
+    "mesh.packet_store_we",
+    "mesh.packet_store_addr",
+    "mesh.packet_store_wdata",
+    "mesh.packet_store_rdata",
+    "mesh.engine.ctrl.survivors"
+  ],
+  "limits": [
+    "No physical fit or timing claim. One M10K inference is a source-level estimate.",
+    "Complete-frame native correctness and performance remain pending.",
+    "A full output FIFO can still block later async jobs. This change releases only raw/FMA ownership to priority legacy work."
+  ]
+}

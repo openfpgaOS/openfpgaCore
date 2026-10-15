@@ -1,0 +1,2 @@
+PASS disabled particles: context/records/alpha pass through as unknown commands
+PASS: 1920 mixed vertex batches, 7680 winding tests, 159960 exact output words, wrap/backpressure/enable/reset (3017813 cycles)

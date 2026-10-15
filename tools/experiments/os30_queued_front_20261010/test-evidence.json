@@ -1,0 +1,105 @@
+{
+  "scope": "Native simulation and source tests; final physical/deployment status is recorded in results.json.",
+  "tests": {
+    "tests/metadata-v1/manifest.json": {
+      "status": "PASS_ACTUAL_QGF_LOAD_ADMISSION_METADATA",
+      "scope": "Actual raw LOAD SCAN/metadata with test-only synchronous transform output RAM and external DMA completion",
+      "result": {
+        "pass": true,
+        "batches": 292,
+        "checks": 102701,
+        "triangle_admissions_checked": 2104210,
+        "accepted": 37164,
+        "conservative_hash_collisions": 1026,
+        "cycles": 43978
+      },
+      "sha256": "b757d83a57fb13544d56806ea6f3d03cf9365b8320a98c466181289eb4c0447b"
+    },
+    "tests/wrapper-v1/manifest.json": {
+      "status": "PASS_ACTUAL_QGF_WRAPPER_ARBITRATION_AND_RESET",
+      "scope": null,
+      "result": {
+        "pass": true,
+        "checks": 415,
+        "cycles": 1090,
+        "scope": "Actual QGF phase10, BIM2 and shared FMA; transaction producer uses one actual FMA operation"
+      },
+      "sha256": "d8e92c65fee6e08680d228a21f7c3761a968b5400defb370721b49050f790489"
+    },
+    "tests/worker-v4/manifest.json": {
+      "status": "PASS_ACTUAL_QGF_WORKER_ARITHMETIC_ORDER_REPAIR_AND_PRESSURE",
+      "scope": "Actual queued worker, snapshot copier/read ownership, current CPU cull oracle, conversion, command FIFO; shared-FMA grant modeled separately from already-tested actual wrapper arbiter.",
+      "result": {
+        "pass": true,
+        "checks": 80768,
+        "cycles": 135462,
+        "current_cpu_vectors": 140,
+        "exact_FP_stage_checks": 150,
+        "natural_arithmetic_repairs": 5,
+        "total_repairs": 7
+      },
+      "sha256": "bd7b9b8919db56eee85514a5bfdcdb3602104796ed7b1904995b534c38c59ec3"
+    },
+    "tests/repair-cpu-v1/manifest.json": {
+      "status": "PASS_ACTUAL_CPU_QGF_REPAIR_AND_FCSR",
+      "scope": "Actual frozen CPU executes extracted app repair arithmetic/comparison/FCSR-restore block. MMIO operand acquisition/ACK tested separately in worker harness.",
+      "result": {
+        "pass": true,
+        "vectors": 2405,
+        "status": 1611516670,
+        "cycles": 912699,
+        "last_pc": 272630238,
+        "mcause": 0,
+        "mepc": 0,
+        "mtval": 0
+      },
+      "sha256": "c7ec8ef7ef55a5555468d330be850d2078cf3b2fc6a65861e58c105b3c010ccf"
+    },
+    "tests/admission-v1/manifest.json": {
+      "status": "PASS_ACTUAL_QGF_ADMISSION_C_LOOP",
+      "scope": "Actual C metadata/atomic TRI2 collection loop; display-list decoder is a test stub. Hardware metadata separately tested on real LOAD SCAN.",
+      "result": {
+        "pass": true,
+        "streams": 20003,
+        "checks": 60009
+      },
+      "sha256": "383cd77d66dc5092ac4abfb975bbc26e155dc26c527a97f99e5d97aaebe2e7c2"
+    },
+    "tests/lazy-v1/report.json": {
+      "status": "PASS_ACTUAL_LAZY_C_FUNCTIONS",
+      "scope": null,
+      "result": {
+        "pass": true,
+        "loads": 8000,
+        "checks": 322014,
+        "explicit_consumes": 4968,
+        "materialized_slots": 52519,
+        "copy_calls": 5023
+      },
+      "sha256": "adecf2dd62891b30e1537f157649da343b5726e24873ab63403c41f6690a6d77"
+    },
+    "tests/worker-large-v1/manifest.json": {
+      "status": "PASS_ACTUAL_QGF_LARGE_FIFO_ARITHMETIC_ORDER_REPAIR_AND_PRESSURE",
+      "scope": "Actual queued worker, snapshot copier/read ownership, current CPU cull oracle, conversion, command FIFO; shared-FMA grant modeled separately from already-tested actual wrapper arbiter.",
+      "result": {
+        "pass": true,
+        "checks": 84608,
+        "cycles": 140838,
+        "current_cpu_vectors": 140,
+        "exact_FP_stage_checks": 150,
+        "natural_arithmetic_repairs": 5,
+        "total_repairs": 7
+      },
+      "sha256": "2d16d636901f854c114b05b344f0487aec5bdb6c41b03cf7eaa5ae84ba66c968"
+    },
+    "review/app-v2-liveness.json": {
+      "status": "PASS_FROZEN_APP_V2_POLLING_LIVENESS_REVIEW",
+      "scope": [
+        "This is a static liveness review, not a performance or sustained-hardware claim.",
+        "No repeated arithmetic/lazy tests needed because their actual function bodies and backend/SDK remain identical; final same-ELF replay remains required."
+      ],
+      "result": null,
+      "sha256": "e292565f4ec0973588f8dd8a380fd8de01d79c0f77f20703943b284d03b08488"
+    }
+  }
+}

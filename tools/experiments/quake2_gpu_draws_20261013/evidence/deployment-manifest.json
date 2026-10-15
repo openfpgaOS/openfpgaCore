@@ -1,0 +1,96 @@
+{
+  "app_source_manifest_sha256": "c6d1d1b2c0a9e77b172cf1a0b4c41a6c259da86ff004b15d9c91cf239f5276eb",
+  "audio_disabled_on_experimental_core": true,
+  "compatibility": {
+    "Assets/quake2/common/os.bin": "054abd4b3d2c57d55b4ecec23f2fcaa3703206db3df14ebe7793c22941d34ef7",
+    "Cores/thinkelastic.quake2/loader.bin": "fc1f8d37eb0fb322006b4428f0b59d2801c9b74978bd3f24103f5f9bbfca3c99"
+  },
+  "configured_clock_MHz": 100,
+  "core_source_manifest_sha256": "bf4855ce20e202897fad48417981d0b316665fc9e583deb6aec9a300d46a6d1b",
+  "date": "2026-10-13",
+  "deployed": false,
+  "files": {
+    "core.json": {
+      "bytes": 775,
+      "sha256": "d780a23ad7138584f2eaeca67c072537f8b1df0a9cbf61ee169b5514e9a63af8"
+    },
+    "os30.rbf_r": {
+      "bytes": 2171892,
+      "sha256": "a45744ecf2181ccce580eaf0f1afc45e18b94075c7cf62f3b19281209d8d7a7e"
+    },
+    "quake2-gpuprofile.elf": {
+      "bytes": 1774424,
+      "sha256": "75db4eca10e3b7412771e977620770d0450047b283e9be68e33c64cbc512b0c7"
+    },
+    "quake2.elf": {
+      "bytes": 1793172,
+      "sha256": "46d2206d655e663aab7c15b56ff0c88b7a1c547bb6b3516e921780d795c9b753"
+    }
+  },
+  "installer_sha256": "1313665b6de91fa316fa3c64c00d33036469314f15e64d326f6187d9f83e33e2",
+  "physical_FPS_improvement_established": false,
+  "physical_Pocket_tested": false,
+  "physical_receipt_sha256": "25f869becf4b58497eb524a456fd573abdf22c5e12a40ab19bbe8ac12ed8c0c9",
+  "resolution": "320x240 RGB565",
+  "selection": {
+    "appearance": {
+      "bit_exact": false,
+      "decision": "Accept localized fixed-point particle sampling changes for the experimental build.",
+      "depth_memory_exact": true,
+      "max_changed_pixels": 252,
+      "max_depth_test_input_relative_error": 6.4661559813999346e-06,
+      "max_projected_xy_error_pixels": 0.0625,
+      "maximum_changed_percent": 0.328125
+    },
+    "appearance_review_decision": "Accept localized fixed-point particle sampling changes for the experimental build.",
+    "bitstream_sha256": "a45744ecf2181ccce580eaf0f1afc45e18b94075c7cf62f3b19281209d8d7a7e",
+    "configured_clock_MHz": 100,
+    "deployed": false,
+    "evidence_scope": "Complete app/core sources and selected evidence summaries, logs and pins; full raw capture archives are not included.",
+    "legacy_pixel_exact": false,
+    "minimum_nonsetup_slack_ns": {
+      "hold": 0.043,
+      "pulse_width": 0.5,
+      "recovery": 4.01,
+      "removal": 0.274
+    },
+    "modeled_busy_aggregate_gain_percent": 22.892865962760702,
+    "modeled_sample_gain_range_percent": [
+      4.415446879813234,
+      34.73831929777062
+    ],
+    "normal_elf_sha256": "46d2206d655e663aab7c15b56ff0c88b7a1c547bb6b3516e921780d795c9b753",
+    "physical_FPS_improvement_established": false,
+    "physical_Pocket_tested": false,
+    "profile_elf_sha256": "75db4eca10e3b7412771e977620770d0450047b283e9be68e33c64cbc512b0c7",
+    "resources": {
+      "ALMs": {
+        "available": 18480,
+        "used": 17948
+      },
+      "DSPs": {
+        "available": 66,
+        "used": 32
+      },
+      "LABs": {
+        "available": 1848,
+        "used": 1847
+      },
+      "M10Ks": {
+        "available": 308,
+        "used": 296
+      }
+    },
+    "restricted_slow_Fmax_MHz": {
+      "slow_0": 90.13,
+      "slow_85": 90.74
+    },
+    "scope": "Quake2 only; 320x240 RGB565; native particle projection; no additive color combiner; silent audio.",
+    "status": "READY_FOR_DEVICE_TRIAL",
+    "timing_qualified": false,
+    "worst_setup_ns": -1.095
+  },
+  "status": "READY_FOR_DEVICE_TRIAL",
+  "timing_qualified": false,
+  "validation_receipt_sha256": "7fd33920700e21d2e7c81ce47905bf1adfc8290a57814ada6ae2c8243309d6b6"
+}

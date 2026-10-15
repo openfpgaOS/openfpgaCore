@@ -1,0 +1,49 @@
+{
+  "source_fingerprint": "f63613efe348448c45af303972d6804a41d15724ac3a716f17eff4b40e6eb2d3",
+  "worker_sha256": "e0f4ffbd20f2a20ab416543a0e9d830d7ec6b4d8d55df094479428b67f933fbb",
+  "qsf_sha256": "351431b8158de34a5a18361c8ae8a9d5d94a81b714c3853dfa3d315a47c1f1d1",
+  "source_pins_unchanged_after_readonly_sta": true,
+  "source_file_count": 128,
+  "qualification_receipt_sha256": "b3c42e76a0d26c13a443cef11e9f92e7a3d2ea2e37902d73ce30426389553dd9",
+  "focus_recipe_sha256": "c8be19b2025ff5d2d45d13157fcf7c6f2ee5448229f0cea04bc04c848eeb6199",
+  "focus_reports": {
+    "slow_0_inputptr_to_ring.rpt": {
+      "sha256": "838fd2abae08417b478498b09ef918e38b590271e1143aef7bc20f4cb84f379c",
+      "from": "core_top:ic|gpu_core:gpu|gpu_geometry_worker:g_geometry_worker.worker|input_rdptr[1]",
+      "to": "core_top:ic|gpu_core:gpu|altsyncram:ring_bram_rtl_0|altsyncram_mcn1:auto_generated|ram_block1a13~portb_address_reg3",
+      "slack_ns": -0.282,
+      "data_delay_ns": 10.008
+    },
+    "slow_0_writeptr_to_ring.rpt": {
+      "sha256": "8833f4f4bc085feeb5e8a409072b354efa5c4a24581aeae574bc59c506f47c9c",
+      "from": "core_top:ic|gpu_core:gpu|gpu_geometry_worker:g_geometry_worker.worker|write_ptr[0]~DUPLICATE",
+      "to": "core_top:ic|gpu_core:gpu|altsyncram:ring_bram_rtl_0|altsyncram_mcn1:auto_generated|ram_block1a13~portb_address_reg3",
+      "slack_ns": -1.188,
+      "data_delay_ns": 10.924
+    },
+    "slow_85_inputptr_to_ring.rpt": {
+      "sha256": "3d938a4bf02f4e7831e005cfaa1959ea8a1ff0e83f74b265a2cca0c5c73af08e",
+      "from": "core_top:ic|gpu_core:gpu|gpu_geometry_worker:g_geometry_worker.worker|input_rdptr[1]",
+      "to": "core_top:ic|gpu_core:gpu|altsyncram:ring_bram_rtl_0|altsyncram_mcn1:auto_generated|ram_block1a13~portb_address_reg3",
+      "slack_ns": -0.451,
+      "data_delay_ns": 10.11
+    },
+    "slow_85_writeptr_to_ring.rpt": {
+      "sha256": "c4fa29b7aeccbbcff30ff5851b7e7ce151d51f9f3286fea126ea067872e3d96d",
+      "from": "core_top:ic|gpu_core:gpu|gpu_geometry_worker:g_geometry_worker.worker|write_ptr[0]~DUPLICATE",
+      "to": "core_top:ic|gpu_core:gpu|altsyncram:ring_bram_rtl_0|altsyncram_mcn1:auto_generated|ram_block1a13~portb_address_reg3",
+      "slack_ns": -1.287,
+      "data_delay_ns": 10.957
+    }
+  },
+  "conclusion": [
+    "The write-pointer-to-ring control path now has used_words arithmetic followed by LUT predicates and the input_addr output mux. The second free_words subtraction and late conditional-increment carry chain are absent from the focused path.",
+    "Worst write-pointer-to-ring slack improved from -1.942 to -1.188 ns at slow0, and -1.697 to -1.287 ns at slow85.",
+    "Overall seed2 remains below90 MHz: worst slow0 worker DSP product\u2192TRI_HEADER; slow85 state.HEADER\u2192native_ys capture enable. The source is frozen for the seed sweep; no new RTL change is requested."
+  ],
+  "quartus_jobs_launched": {
+    "type": "one read-only timing-netlist query of completed qualification database",
+    "elapsed_seconds": 5,
+    "synthesis_or_fit": false
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "tb_audio_mixer.v": {
+    "original": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/tests/tb_audio_mixer.v",
+    "sha256": "398588bde179251248c0e56a26d69e459849f3dfe09e912f91317b0e3dbbf59e"
+  },
+  "tb_audio_mixer_main.cpp": {
+    "original": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/tests/tb_audio_mixer_main.cpp",
+    "sha256": "cf85a5d754545d214ec2fd2d4f252c8508668b69951ce5923cdba21e51118391"
+  },
+  "independent_reference.hpp": {
+    "original": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/tests/independent_reference.hpp",
+    "sha256": "1f2f4a466d0ec898b40c55232ee965eb4b69ff09e3ec9897d82146288e8a61df"
+  },
+  "sync_fifo.v": {
+    "original": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/tests/sources/sync_fifo.v",
+    "sha256": "66545eaee0463d5e25e862cb5fbccb357b2d34948f93a9f8a706c04c536aa28c"
+  },
+  "mister_audio_output.v": {
+    "original": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/tests/sources/mister_audio_output.v",
+    "sha256": "d6788091160dae0689f9e7f649df7f90db5b4530d8111c8a3276dacadf6d378d"
+  },
+  "audio_mixer.v": {
+    "original": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/component-synth/compact-v4-reuse-readaddr/audio_mixer.v",
+    "sha256": "c6d2517af662f356b44617230c27aa880c449928282e738c374a2db86663f73a"
+  }
+}

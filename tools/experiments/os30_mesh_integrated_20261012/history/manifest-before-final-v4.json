@@ -1,0 +1,761 @@
+{
+  "status": "UNQUALIFIED_SOURCE_REVIEW_NOT_DEPLOYED",
+  "performance_status": "PENDING_FINAL_REPORT_NO_SPEEDUP_CLAIM",
+  "native_revision": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7",
+  "app_revision": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3",
+  "native_baseline": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2",
+  "physical_baseline": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1",
+  "patches": {
+    "native-v7.patch": {
+      "base": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2",
+      "files": {
+        "frozen/docs/measurements/os30-dual-20261004/validation/baseline128/tb_irq.v": {
+          "before_sha256": "427694f419d5585b93b01791579512c6cf301a4a07f0ad25db8bf78c67a48d52",
+          "after_sha256": "c47e825b0edecebfa5d694dc3a30b44ac1e32021a465044a11795abfaed4258c",
+          "postimage_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/docs/measurements/os30-dual-20261004/validation/baseline128/tb_irq.v"
+        },
+        "frozen/src/fpga/common/geometry_float_cull_mem.v": {
+          "before_sha256": null,
+          "after_sha256": "53163df4519861d2ffa3d115b45656a90f03e6ef869a02188d1344710931f2ac",
+          "postimage_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_float_cull_mem.v"
+        },
+        "frozen/src/fpga/common/geometry_import_convert.v": {
+          "before_sha256": null,
+          "after_sha256": "3beac876e469ec45ff3d3e81c9645671dcb92737d1f84dd188ca454fbbcf7526",
+          "postimage_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_import_convert.v"
+        },
+        "frozen/src/fpga/common/geometry_mesh_command_fetch.v": {
+          "before_sha256": null,
+          "after_sha256": "a740d2c2d961bcbe3421e7de594ca842b3c3caf2a38dff7de89ff067c9b93cf8",
+          "postimage_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_command_fetch.v"
+        },
+        "frozen/src/fpga/common/geometry_mesh_packet.v": {
+          "before_sha256": null,
+          "after_sha256": "493c6618a9e7962de6e171d3730e85df0725edae20658fb457b86522a8b2d4b8",
+          "postimage_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_packet.v"
+        },
+        "frozen/src/fpga/common/geometry_mesh_queue.v": {
+          "before_sha256": null,
+          "after_sha256": "a3ac412006c503332f4a6d8895155d869f367bb39924e8a6a4c4245d1ff230e4",
+          "postimage_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_queue.v"
+        },
+        "frozen/src/fpga/common/geometry_mesh_raw_frontend.v": {
+          "before_sha256": null,
+          "after_sha256": "61854f2d9949339c9b4c123d1b174da3828601cbf1edcbc0c410fbf854fac764",
+          "postimage_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_raw_frontend.v"
+        },
+        "frozen/src/fpga/common/geometry_mesh_stream.v": {
+          "before_sha256": null,
+          "after_sha256": "c437aa11c859757493764e6c243da4cb1238c585a8c65ff7330a8f4017aedc28",
+          "postimage_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_stream.v"
+        },
+        "frozen/src/fpga/common/geometry_mesh_task_ctrl.v": {
+          "before_sha256": null,
+          "after_sha256": "899e04b44048bc94d6fe70c259c6fc144e826260fc1ecff032ba8bb890251496",
+          "postimage_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_task_ctrl.v"
+        },
+        "frozen/src/fpga/common/geometry_mesh_task_engine.v": {
+          "before_sha256": null,
+          "after_sha256": "7a7a4d0d5d376d81412437f7dd9a9b2d66bdc90db7d06d456680920af1e29f7f",
+          "postimage_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_task_engine.v"
+        },
+        "frozen/src/fpga/common/gpu_core.v": {
+          "before_sha256": "bb1143c3d6a42f6d209a59d220b373ce8ef6ef1d69dce7f10f400c30cf7810ee",
+          "after_sha256": "f5483ea84933b3f02b953c147ec16e6ba0622cd76886dd3072e8f13f8f49e5ff",
+          "postimage_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/gpu_core.v"
+        },
+        "frozen/src/fpga/common/gpu_mesh_bridge.v": {
+          "before_sha256": null,
+          "after_sha256": "8c02f8dacee2e4ff57d568bc9b968bb8b4109aa622739e3bf33804d39dc9cad9",
+          "postimage_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/gpu_mesh_bridge.v"
+        },
+        "frozen/src/fpga/common/phase10_load_alias.v": {
+          "before_sha256": "298dc6470719159e9b85aa90a6879ea41d78b32fae2fdb7dea580cd4980cec6a",
+          "after_sha256": "322bea9ab96131f84d13edf6448f490e7190519b38a2dfa1ba027fa31fae116d",
+          "postimage_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/phase10_load_alias.v"
+        }
+      }
+    },
+    "physical-top.patch": {
+      "base": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/frozen",
+      "files": {
+        "src/fpga/targets/pocket/os30/core_top.v": {
+          "before_sha256": "25d5b5966aea68cafce7db5a716cc5640190b8db928785304b1078905db40802",
+          "after_sha256": "c0ea8f4515b0ccf958359cde1ac16f3df67cb54ff1cc8a627b46fb52cb357805",
+          "postimage_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/physical-top/core_top.v"
+        }
+      }
+    },
+    "sm64-integration.patch": {
+      "base": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64-v2",
+      "files": {
+        "src/sm64/pocket/perf_pocket.c": {
+          "before_sha256": "2a01671e3d170882e7ae41f62f80d3d54e7b87c30907a3cf1b52706147f84520",
+          "after_sha256": "903abc613eb371923c281ad09155625b4805e2f4fb0c0f7efdd84b8941c0f3e1",
+          "postimage_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/src/sm64/pocket/perf_pocket.c"
+        },
+        "src/sm64/sm64/src/pc/gfx/gfx_gpu.c": {
+          "before_sha256": "c8daac5bb1442fcb93310d2e7a01f307b9b1ac612d717ef253e412024174cf05",
+          "after_sha256": "36ff1e0e20da4c6eab7112e67fa4bf565aae69c9f41f41d1b5dfc8d3910c3b83",
+          "postimage_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/src/sm64/sm64/src/pc/gfx/gfx_gpu.c"
+        },
+        "src/sm64/sm64/src/pc/gfx/gfx_gpu.h": {
+          "before_sha256": "5b0452081737fd970e66232ebabc2de29e16a7ecf95e7a6c035bc4a792d258c7",
+          "after_sha256": "0a59b53654ac32742e7d61b7d81cbe03626d28a441c906c307d33e951862bdf0",
+          "postimage_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/src/sm64/sm64/src/pc/gfx/gfx_gpu.h"
+        },
+        "src/sm64/sm64/src/pc/gfx/gfx_pc.c": {
+          "before_sha256": "49a72cfd370563bb3c283a72d35a4d32007905565778259d8cad060e87fbd503",
+          "after_sha256": "8dc5cfe5726622feaf6b1f0d9a31b58d8ba7ff085f0c067022163adffae54e00",
+          "postimage_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/src/sm64/sm64/src/pc/gfx/gfx_pc.c"
+        }
+      }
+    },
+    "sm64-v1-to-v3.patch": {
+      "base": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app",
+      "files": {
+        "src/sm64/pocket/perf_pocket.c": {
+          "before_sha256": "77f109fa4c7cde181243c9dd2605c72f4f1989ea820d93d79e895bbeb551f6b0",
+          "after_sha256": "903abc613eb371923c281ad09155625b4805e2f4fb0c0f7efdd84b8941c0f3e1",
+          "postimage_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/src/sm64/pocket/perf_pocket.c"
+        },
+        "src/sm64/sm64/src/pc/gfx/gfx_gpu.c": {
+          "before_sha256": "ba534a150368260eb6cfa17e4c8fefea550e1e343f962fbc5fc8d82cb830c3ae",
+          "after_sha256": "36ff1e0e20da4c6eab7112e67fa4bf565aae69c9f41f41d1b5dfc8d3910c3b83",
+          "postimage_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/src/sm64/sm64/src/pc/gfx/gfx_gpu.c"
+        },
+        "src/sm64/sm64/src/pc/gfx/gfx_pc.c": {
+          "before_sha256": "e82540a75716eadf21ec995e5b142ca706d0e7d18895ff83d4a829a942cb92c9",
+          "after_sha256": "8dc5cfe5726622feaf6b1f0d9a31b58d8ba7ff085f0c067022163adffae54e00",
+          "postimage_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/src/sm64/sm64/src/pc/gfx/gfx_pc.c"
+        }
+      }
+    },
+    "sm64-v2-to-v3.patch": {
+      "base": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v2",
+      "files": {
+        "src/sm64/pocket/perf_pocket.c": {
+          "before_sha256": "d7c8973159680b7ac808658cbe766300ee0d7aa855487cd2eeda6ce0cc7f5049",
+          "after_sha256": "903abc613eb371923c281ad09155625b4805e2f4fb0c0f7efdd84b8941c0f3e1",
+          "postimage_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/src/sm64/pocket/perf_pocket.c"
+        },
+        "src/sm64/sm64/src/pc/gfx/gfx_gpu.c": {
+          "before_sha256": "39a5c23f0bb77d537d8b2f6b76be82351fdcc1b77fedef3b44639e36e59c434e",
+          "after_sha256": "36ff1e0e20da4c6eab7112e67fa4bf565aae69c9f41f41d1b5dfc8d3910c3b83",
+          "postimage_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/src/sm64/sm64/src/pc/gfx/gfx_gpu.c"
+        }
+      }
+    },
+    "additions/app-v4/sm64-v3-to-v4.patch": {
+      "base": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3",
+      "files": {
+        "src/sm64/pocket/perf_pocket.c": {
+          "before_sha256": "903abc613eb371923c281ad09155625b4805e2f4fb0c0f7efdd84b8941c0f3e1",
+          "after_sha256": "908c61b1c845e17d8e100228c11cc3198c920d781404c801b504684201046504",
+          "postimage_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/src/sm64/pocket/perf_pocket.c"
+        },
+        "src/sm64/sm64/src/pc/gfx/gfx_gpu.c": {
+          "before_sha256": "36ff1e0e20da4c6eab7112e67fa4bf565aae69c9f41f41d1b5dfc8d3910c3b83",
+          "after_sha256": "5944f0d2b983418eddc1711a1b39ae6be6ebc0ea4cfcc4c954402d23d805492d",
+          "postimage_source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/src/sm64/sm64/src/pc/gfx/gfx_gpu.c"
+        }
+      }
+    }
+  },
+  "copied_inputs": {
+    "rtl/geometry_float_cull_mem.v": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_float_cull_mem.v",
+      "sha256": "53163df4519861d2ffa3d115b45656a90f03e6ef869a02188d1344710931f2ac"
+    },
+    "rtl/geometry_import_convert.v": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_import_convert.v",
+      "sha256": "3beac876e469ec45ff3d3e81c9645671dcb92737d1f84dd188ca454fbbcf7526"
+    },
+    "rtl/geometry_mesh_command_fetch.v": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_command_fetch.v",
+      "sha256": "a740d2c2d961bcbe3421e7de594ca842b3c3caf2a38dff7de89ff067c9b93cf8"
+    },
+    "rtl/geometry_mesh_packet.v": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_packet.v",
+      "sha256": "493c6618a9e7962de6e171d3730e85df0725edae20658fb457b86522a8b2d4b8"
+    },
+    "rtl/geometry_mesh_queue.v": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_queue.v",
+      "sha256": "a3ac412006c503332f4a6d8895155d869f367bb39924e8a6a4c4245d1ff230e4"
+    },
+    "rtl/geometry_mesh_raw_frontend.v": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_raw_frontend.v",
+      "sha256": "61854f2d9949339c9b4c123d1b174da3828601cbf1edcbc0c410fbf854fac764"
+    },
+    "rtl/geometry_mesh_stream.v": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_stream.v",
+      "sha256": "c437aa11c859757493764e6c243da4cb1238c585a8c65ff7330a8f4017aedc28"
+    },
+    "rtl/geometry_mesh_task_ctrl.v": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_task_ctrl.v",
+      "sha256": "899e04b44048bc94d6fe70c259c6fc144e826260fc1ecff032ba8bb890251496"
+    },
+    "rtl/geometry_mesh_task_engine.v": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_task_engine.v",
+      "sha256": "7a7a4d0d5d376d81412437f7dd9a9b2d66bdc90db7d06d456680920af1e29f7f"
+    },
+    "rtl/gpu_core.v": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/gpu_core.v",
+      "sha256": "f5483ea84933b3f02b953c147ec16e6ba0622cd76886dd3072e8f13f8f49e5ff"
+    },
+    "rtl/gpu_mesh_bridge.v": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/gpu_mesh_bridge.v",
+      "sha256": "8c02f8dacee2e4ff57d568bc9b968bb8b4109aa622739e3bf33804d39dc9cad9"
+    },
+    "rtl/phase10_load_alias.v": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/phase10_load_alias.v",
+      "sha256": "322bea9ab96131f84d13edf6448f490e7190519b38a2dfa1ba027fa31fae116d"
+    },
+    "abi.json": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/abi-v2.json",
+      "sha256": "76ae0f8bb5b14d9b7f0ccfd8bdae8c759cf556a8e0cd35e3b184f2bd7d27363e"
+    },
+    "recipes/build_native.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/build_native.py",
+      "sha256": "d95ffb169e4e716d1ca76519da00eb49c262b83ab97443d74356876f4232cefe"
+    },
+    "recipes/build_pocket.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/build_pocket.py",
+      "sha256": "12007eb3e43bc743d566bae519504a9be8db1f3235227e14369a08d364abc395"
+    },
+    "receipts/native-v7/prepared.json": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/prepared.json",
+      "sha256": "4212a8790cd00675b2b71fe0ae3452b6ecfc37e6123ee22bd09517098841fe7d"
+    },
+    "receipts/native-v7/build.json": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/build.json",
+      "sha256": "dc287dc954580fdad0c815d8c3e179796fc4187475311185470451d09cadd44a"
+    },
+    "recipes/new-sources.json": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/new-sources.json",
+      "sha256": "757ec314b01cd093e41c00fd0adc1068ea65cf7929218b00c4cca678e9fe8854"
+    },
+    "reviews/rtl-build-notes-v7.json": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/rtl-build-notes-v7.json",
+      "sha256": "82c2c8819dd3d8f9239aae7ed0998ffbae2ca54a067e5182701174b64b2e8098"
+    },
+    "recipes/tests/run_wrapper.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/tests/pre-large-v8-sources/run_wrapper.py",
+      "sha256": "270e235ec837895a1b360270a755bdc1dc2c48cf856933b1c1bec66b47148c4f"
+    },
+    "tests/test_wrapper.cpp": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/tests/pre-large-v8-sources/test_wrapper.cpp",
+      "sha256": "12900848a42369701b7ae837877b408763ece5820cfc820f5a6e111b38a0ca81"
+    },
+    "recipes/tests/run_scene_split.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/tests/run_scene_split.py",
+      "sha256": "b753db7f4809811fa60abc0babfa3c9ed8e42770d1cf6d5d14152f349085b4dc"
+    },
+    "tests/test_scene_split.cpp": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/tests/test_scene_split.cpp",
+      "sha256": "ef78be624ef30ee5db0828f96de7f02aa896640f99150e6221ff47667c695153"
+    },
+    "receipts/tests/wrapper-v7b.json": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/tests/wrapper-v7b/manifest.json",
+      "sha256": "87bdace13014562bcd93cacf464cd44f0fc6225f41b671d51d36314cf3627b1c"
+    },
+    "receipts/tests/scene-split-v7.json": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/tests/scene-split-v7/manifest.json",
+      "sha256": "427903111ccaf5470d1e5344da3026b11bb8689aab57866ec484c7e23cf45918"
+    },
+    "recipes/tests/run_queue.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/queue-test-v3/run.py",
+      "sha256": "5647d367bcb6b14a0ef32797d11127b86bbb9292125385eb940398084409c144"
+    },
+    "tests/test_queue.cpp": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/queue-test-v3/test.cpp",
+      "sha256": "397c0e04d55f4674e3b697ec37b4ba5d36a5f0ab845151954a94791f6beec541"
+    },
+    "receipts/tests/queue-v3.json": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/queue-test-v3/manifest.json",
+      "sha256": "e9adca9c1bf31e335a95c69a410408bae480efd2798ebd144eb2540da6be4f61"
+    },
+    "recipes/prepare_fixture.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/prepare_fixture.py",
+      "sha256": "58457e17e59805315b903b1a9f1ef0340cf19addb1f7c123859a659e7cf1ba8f"
+    },
+    "recipes/replay.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/replay.py",
+      "sha256": "dc1d26a5c3ce2a01da7821acdb8279ccd0e2b327df0813ae77157c26e34f02cf"
+    },
+    "recipes/check_replays_v2.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/check_replays_v2.py",
+      "sha256": "272d35b1412a299845d1d43e6f79c3009cde14f356f8c23c226c901865ca6177"
+    },
+    "recipes/mesh3_hooks_v3.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/mesh3_hooks_v3.py",
+      "sha256": "dde158381e731a4a9696b93fb527c87b0ce437b47cfc319d183f80af3d2d1ab8"
+    },
+    "recipes/mesh3_lifetime_appv3.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/mesh3_lifetime_appv3.py",
+      "sha256": "ee24533f66d93ead71bdbef2054b41f2cb9d217b62581a70451d47bf0f07575b"
+    },
+    "reviews/appv3-publication-review.json": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/appv3-publication-review.json",
+      "sha256": "30b57f820232fb7c29dea957a01265617e2fb740eeb24affac4af3fb358a41c7"
+    },
+    "reviews/app-source-review-v1.json": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/app-source-review-v1.json",
+      "sha256": "991fbf154433c0f8c2bd3286867d256a61e4fd8e851fe13d6f86b6326cce4c85"
+    },
+    "reviews/packet-domain-proof-v1.json": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/packet-domain-proof-v1.json",
+      "sha256": "5d547974ae7a37ff673b3d9c96d4a356b54e3fe732470291da3d63161325513d"
+    },
+    "reviews/alm-audit-v7.json": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/analysis/alm-audit-v7.json",
+      "sha256": "36fdaf418916ce6a868628ba489f3a9222f297b556420be569b418ceebce5a05"
+    },
+    "reviews/qualified-firmware-ring-consumers.json": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/analysis/qualified-firmware-ring-consumers.json",
+      "sha256": "7a58cd20eb39400191f6b18eeec24699bf96255367f41001fc1a15c654d63e90"
+    },
+    "reviews/physical-v5-source-review.json": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/analysis/physical-v5-source-review.json",
+      "sha256": "e4acf55728f1f627c56912c702886c060ea531aa3a5c325a9df19b503f0d91bd"
+    },
+    "recipes/app-build-v3/build_app.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/evidence/app-build-v3/build_app.py",
+      "sha256": "e2d3b759af7dfdc7762abd68edf6bb0feeb27f41807c64e12b225dc43fd69ca7"
+    },
+    "receipts/app-build-v3.json": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/evidence/app-build-v3/build-result.json",
+      "sha256": "0573249b3104faea60b31aed99ce9e4ed1cf4cb6f934626ebff9c8eda1f4f772"
+    },
+    "recipes/tests/test_wait.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/evidence/batching-liveness-v1/test_wait.py",
+      "sha256": "f9b80899caafb66382b15780be31b59a86a6d82deed5c20ddcc8800e838a239d"
+    },
+    "tests/actual_wait_test.c": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/evidence/batching-liveness-v1/actual_wait_test.c",
+      "sha256": "f48014b492aad1e9b63a7fe81713ecd2897ef30c840ebc57d093bed6a9117678"
+    },
+    "receipts/tests/app-batching.json": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/evidence/batching-liveness-v1/result.json",
+      "sha256": "227e2570157d12c920e8b872f4b56514b6567f5e957d864b5681a59752f0131e"
+    },
+    "reviews/blocking-paths.json": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/evidence/batching-liveness-v1/blocking-paths.json",
+      "sha256": "13c841dd665c75094a94bcb0e24719aa8a60a65d7b794da355155c6d41faa2d5"
+    },
+    "additions/app-v4/build_app.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/evidence/app-build-v4/build_app.py",
+      "sha256": "466eef221dc50240bca802dc330b442b4c6981bf65426f71e9608d0d8d68fc2a"
+    },
+    "additions/app-v4/build-result.json": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/evidence/app-build-v4/build-result.json",
+      "sha256": "e824fc71374638930c9b128ebdfeb084e1a25c65af0db001da04853970fcf63d"
+    },
+    "additions/app-v4/test_feed.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/evidence/adaptive-feed-v1/test_feed.py",
+      "sha256": "6755708f584848f7e4549bdd957267b247daf6aa25218a7e6e1f4b50898f1685"
+    },
+    "additions/app-v4/actual_feed_test.c": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/evidence/adaptive-feed-v1/actual_feed_test.c",
+      "sha256": "fced40751818036a3902eba8e079d0f7054dd455d63657285e0c03d27cdbd17a"
+    },
+    "additions/app-v4/test-result.json": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/evidence/adaptive-feed-v1/result.json",
+      "sha256": "824ed53498bd441dfcacc39bffd1871155ed03898a259aafdfea63a73b592d6a"
+    },
+    "additions/app-v4/independent-review.json": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/appv4-adaptive-review.json",
+      "sha256": "25cfa14414f6d453e1b260f854eea88a5e9d703bd0c8d0ad12b32fa723be108b"
+    },
+    "additions/app-v4/mesh3_lifetime_appv4.py": {
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/mesh3_lifetime_appv4.py",
+      "sha256": "0f1c3ad91fb036bad30d68f1bced0ab0453afd941d1d9369f55ef0f85391a03f"
+    }
+  },
+  "external_evidence_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/docs/measurements/os30-dual-20261004/validation/baseline128/tb_irq.v": "c47e825b0edecebfa5d694dc3a30b44ac1e32021a465044a11795abfaed4258c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_float_cull_mem.v": "53163df4519861d2ffa3d115b45656a90f03e6ef869a02188d1344710931f2ac",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_import_convert.v": "3beac876e469ec45ff3d3e81c9645671dcb92737d1f84dd188ca454fbbcf7526",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_command_fetch.v": "a740d2c2d961bcbe3421e7de594ca842b3c3caf2a38dff7de89ff067c9b93cf8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_packet.v": "493c6618a9e7962de6e171d3730e85df0725edae20658fb457b86522a8b2d4b8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_queue.v": "a3ac412006c503332f4a6d8895155d869f367bb39924e8a6a4c4245d1ff230e4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_raw_frontend.v": "61854f2d9949339c9b4c123d1b174da3828601cbf1edcbc0c410fbf854fac764",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_stream.v": "c437aa11c859757493764e6c243da4cb1238c585a8c65ff7330a8f4017aedc28",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_task_ctrl.v": "899e04b44048bc94d6fe70c259c6fc144e826260fc1ecff032ba8bb890251496",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_task_engine.v": "7a7a4d0d5d376d81412437f7dd9a9b2d66bdc90db7d06d456680920af1e29f7f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/gpu_core.v": "f5483ea84933b3f02b953c147ec16e6ba0622cd76886dd3072e8f13f8f49e5ff",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/gpu_mesh_bridge.v": "8c02f8dacee2e4ff57d568bc9b968bb8b4109aa622739e3bf33804d39dc9cad9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/phase10_load_alias.v": "322bea9ab96131f84d13edf6448f490e7190519b38a2dfa1ba027fa31fae116d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/physical-top/core_top.v": "c0ea8f4515b0ccf958359cde1ac16f3df67cb54ff1cc8a627b46fb52cb357805",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/src/sm64/pocket/perf_pocket.c": "903abc613eb371923c281ad09155625b4805e2f4fb0c0f7efdd84b8941c0f3e1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "36ff1e0e20da4c6eab7112e67fa4bf565aae69c9f41f41d1b5dfc8d3910c3b83",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/src/sm64/sm64/src/pc/gfx/gfx_gpu.h": "0a59b53654ac32742e7d61b7d81cbe03626d28a441c906c307d33e951862bdf0",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "8dc5cfe5726622feaf6b1f0d9a31b58d8ba7ff085f0c067022163adffae54e00",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64-v2/src/sdk/include/of_gpu.h": "7e4b105e444b7307b36010da87749eff445650b6983283eeab9223e6af3dc01d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/src/sdk/include/of_gpu.h": "7e4b105e444b7307b36010da87749eff445650b6983283eeab9223e6af3dc01d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64-v2/src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "c8daac5bb1442fcb93310d2e7a01f307b9b1ac612d717ef253e412024174cf05",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64-v2/src/sm64/sm64/src/pc/gfx/gfx_gpu.h": "5b0452081737fd970e66232ebabc2de29e16a7ecf95e7a6c035bc4a792d258c7",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64-v2/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "49a72cfd370563bb3c283a72d35a4d32007905565778259d8cad060e87fbd503",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/queued-front-v1/work/sm64-v2/src/sm64/pocket/perf_pocket.c": "2a01671e3d170882e7ae41f62f80d3d54e7b87c30907a3cf1b52706147f84520",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/src/sm64/pocket/perf_pocket.c": "908c61b1c845e17d8e100228c11cc3198c920d781404c801b504684201046504",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "5944f0d2b983418eddc1711a1b39ae6be6ebc0ea4cfcc4c954402d23d805492d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/src/sdk/include/of_gpu.h": "7e4b105e444b7307b36010da87749eff445650b6983283eeab9223e6af3dc01d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/src/sm64/sm64/src/pc/gfx/gfx_gpu.h": "0a59b53654ac32742e7d61b7d81cbe03626d28a441c906c307d33e951862bdf0",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "8dc5cfe5726622feaf6b1f0d9a31b58d8ba7ff085f0c067022163adffae54e00",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/src/sm64/Makefile": "a6c56594688f3be6308d066ae6904e80be52e37336314ba96ca64eb4351b1460",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/src/sdk/sdk.mk": "4a9f7779f4cef8c3798e45c1c108d8c6c2b8246fba8d1aa846a89022b0396bd9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/src/sdk/app-sdram-staging.ld": "8b490f5d6095d18b94b5e2db98f95b52ed135f162f696e0f6100695447019888",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/tools/sdk-container.sh": "a66b9b91844460dcb62764d06233185c075f6cdd80d9d716c06ac230f8dd11a0",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/.obj/sm64-mesh-integrated-v4-perfdiag/app.elf": "883e2b4cfcd105bddc032d89c4379cd72702621cd1923cacbd0b6596ad02ce9e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/cached-cpu-v1/native-sdram-v2/prepared.json": "9dc6be7d6567ccbd7ea78c56123e37f33d19d575fd94169fc32f67a93ff28ec6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/inputs.json": "a1d09c8d78e887fe61900b632a389c82d3b79c6e861ef1d0f8d024b029311226",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/work/core/docs/measurements/psram32-build-upload-reset-placeeffort-v1/timing-qualification.json": "137f97f30f6810187ec93b48a116c2ea202bb2e8c32bd6a43f354f07d64f02dd",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app/evidence/app-build-v1/build-result.json": "1c47cd50ab62744bb28749ed666dffd8884eee211d7f6de7c0b6bc562ebe5e2f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v2/evidence/app-build-v2/build-result.json": "86d70bc71fda1830a876afb878bc67895f2afa8059a91e02ac7a61ad57940b33",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/evidence/app-build-v3/build-result.json": "0573249b3104faea60b31aed99ce9e4ed1cf4cb6f934626ebff9c8eda1f4f772",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/frozen/src/fpga/common/geometry_mesh_task_ctrl.v": "899e04b44048bc94d6fe70c259c6fc144e826260fc1ecff032ba8bb890251496",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/frozen/src/fpga/common/geometry_mesh_raw_frontend.v": "61854f2d9949339c9b4c123d1b174da3828601cbf1edcbc0c410fbf854fac764",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/frozen/src/fpga/common/geometry_mesh_task_engine.v": "7a7a4d0d5d376d81412437f7dd9a9b2d66bdc90db7d06d456680920af1e29f7f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/frozen/src/fpga/common/geometry_float_cull_mem.v": "53163df4519861d2ffa3d115b45656a90f03e6ef869a02188d1344710931f2ac",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/frozen/src/fpga/common/geometry_raw_load.v": "ade3041bfd27ab6200c5d6356775adac778a34eb0d81c1f253ff83367627c144",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/frozen/src/fpga/common/geometry_transform_light.v": "6987e27771c84173b31eb53e9f3bce4e7337437414548ef089f3adfe430c810f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/frozen/src/fpga/common/GeometryFmaProbe.v": "348d11609de14326dc9408c11e39a385a85a4e0678eaaf5d69f39d6cfba38088",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/frozen/src/fpga/common/phase10_raw_vtx_dma.v": "ce51296a880ef212cacffbe4bb4c1728fc1bc9976d3504dd91883882d4316f81",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/frozen/src/fpga/common/geometry_float_batch_recip.v": "c3cc22d4aa4559d0cfe087c6556361eec22e363fbff79072bb65a1028c3dfd9b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/frozen/src/fpga/common/phase10_float_recip2.v": "d68bc3fcdcb750f88cebf9aa8ed890a499d12210cbd50fe9d3a049c168bea5cc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/frozen/src/fpga/common/geometry_color_rtz.v": "27025e32c4c8f42168db8e49149d9ee7cd2255d606ddb7ed0f5c932bedd1a335",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/frozen/src/fpga/common/geometry_mesh_stream.v": "c437aa11c859757493764e6c243da4cb1238c585a8c65ff7330a8f4017aedc28",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/frozen/src/fpga/common/geometry_mesh_packet.v": "493c6618a9e7962de6e171d3730e85df0725edae20658fb457b86522a8b2d4b8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/frozen/src/fpga/common/geometry_mesh_command_fetch.v": "a740d2c2d961bcbe3421e7de594ca842b3c3caf2a38dff7de89ff067c9b93cf8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/frozen/src/fpga/common/geometry_import_convert.v": "3beac876e469ec45ff3d3e81c9645671dcb92737d1f84dd188ca454fbbcf7526",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/tests/pre-large-v8-sources/test_wrapper.cpp": "12900848a42369701b7ae837877b408763ece5820cfc820f5a6e111b38a0ca81",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/tests/pre-large-v8-sources/run_wrapper.py": "270e235ec837895a1b360270a755bdc1dc2c48cf856933b1c1bec66b47148c4f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/tests/test_scene_split.cpp": "ef78be624ef30ee5db0828f96de7f02aa896640f99150e6221ff47667c695153",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/tests/run_scene_split.py": "b753db7f4809811fa60abc0babfa3c9ed8e42770d1cf6d5d14152f349085b4dc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/native-vectors-v3/vectors.json": "cb1bb8ee2bd4474a4da37a69baf8ce947abd7f52903388e7d73a4e4b4491681b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/native-vectors-v3/manifest.json": "934b27dd8a16c0e0ebaac3989f347576a8e85e6ee2deaaefbac555ba6a400cc0",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/scene-cull-oracle-v1/inputs.json": "e84a58d7a9e80b4133b809f0a0e9daa236026875b17fa007fd228f629dc9f285",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/scene-cull-oracle-v1/outputs.bin": "082db91cc1412fef6c013c7b567bee752f23ebe48ff3e4ed8b25d8e3e955ce9f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/scene-cull-oracle-v1/manifest.json": "b40fcea95b94252aa0187ba8ded612a31933969e67a094fe249d066ffb3311f0",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/queue-test-v3/run.py": "5647d367bcb6b14a0ef32797d11127b86bbb9292125385eb940398084409c144",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/queue-test-v3/test.cpp": "397c0e04d55f4674e3b697ec37b4ba5d36a5f0ab845151954a94791f6beec541",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/queue-test-v3/geometry_mesh_queue.v": "a3ac412006c503332f4a6d8895155d869f367bb39924e8a6a4c4245d1ff230e4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/evidence/batching-liveness-v1/test_wait.py": "f9b80899caafb66382b15780be31b59a86a6d82deed5c20ddcc8800e838a239d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/evidence/batching-liveness-v1/actual_wait_test.c": "f48014b492aad1e9b63a7fe81713ecd2897ef30c840ebc57d093bed6a9117678",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/evidence/adaptive-feed-v1/test_feed.py": "6755708f584848f7e4549bdd957267b247daf6aa25218a7e6e1f4b50898f1685",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/evidence/adaptive-feed-v1/actual_feed_test.c": "fced40751818036a3902eba8e079d0f7054dd455d63657285e0c03d27cdbd17a"
+  },
+  "receipt_input_relocations": [
+    {
+      "receipt": "receipts/tests/wrapper-v7b.json",
+      "historical_path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/frozen/src/fpga/common/phase10_load_alias.v",
+      "sha256": "322bea9ab96131f84d13edf6448f490e7190519b38a2dfa1ba027fa31fae116d",
+      "immutable_replacement": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/phase10_load_alias.v",
+      "reason": "Historical mutable staging path advanced; identical tested bytes retained in frozen/archive copy."
+    },
+    {
+      "receipt": "receipts/tests/wrapper-v7b.json",
+      "historical_path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/frozen/src/fpga/common/geometry_mesh_queue.v",
+      "sha256": "a3ac412006c503332f4a6d8895155d869f367bb39924e8a6a4c4245d1ff230e4",
+      "immutable_replacement": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_queue.v",
+      "reason": "Historical mutable staging path advanced; identical tested bytes retained in frozen/archive copy."
+    },
+    {
+      "receipt": "receipts/tests/wrapper-v7b.json",
+      "historical_path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/tests/test_wrapper.cpp",
+      "sha256": "12900848a42369701b7ae837877b408763ece5820cfc820f5a6e111b38a0ca81",
+      "immutable_replacement": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/tests/pre-large-v8-sources/test_wrapper.cpp",
+      "reason": "Historical mutable staging path advanced; identical tested bytes retained in frozen/archive copy."
+    },
+    {
+      "receipt": "receipts/tests/wrapper-v7b.json",
+      "historical_path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/tests/run_wrapper.py",
+      "sha256": "270e235ec837895a1b360270a755bdc1dc2c48cf856933b1c1bec66b47148c4f",
+      "immutable_replacement": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/tests/pre-large-v8-sources/run_wrapper.py",
+      "reason": "Historical mutable staging path advanced; identical tested bytes retained in frozen/archive copy."
+    },
+    {
+      "receipt": "receipts/tests/scene-split-v7.json",
+      "historical_path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/frozen/src/fpga/common/geometry_mesh_queue.v",
+      "sha256": "a3ac412006c503332f4a6d8895155d869f367bb39924e8a6a4c4245d1ff230e4",
+      "immutable_replacement": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_queue.v",
+      "reason": "Historical mutable staging path advanced; identical tested bytes retained in frozen/archive copy."
+    },
+    {
+      "receipt": "receipts/tests/queue-v3.json",
+      "historical_path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-core/frozen/src/fpga/common/geometry_mesh_queue.v",
+      "sha256": "a3ac412006c503332f4a6d8895155d869f367bb39924e8a6a4c4245d1ff230e4",
+      "immutable_replacement": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_queue.v",
+      "reason": "Historical mutable staging path advanced; identical tested bytes retained in frozen/archive copy."
+    }
+  ],
+  "app_additions": [
+    {
+      "name": "F19 MESH4 adaptive feed",
+      "path": "additions/app-v4",
+      "source": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4",
+      "elf_sha256": "883e2b4cfcd105bddc032d89c4379cd72702621cd1923cacbd0b6596ad02ce9e",
+      "exact_base": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3",
+      "native_revision_unchanged": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7",
+      "status": "BUILT_FOCUSED_TESTED_FULL_FRAME_RESULT_PENDING",
+      "changes": [
+        "Publish small CPU-ring batches when published occupancy is below128 words",
+        "Keep512-word/sync override and force publication on DMA backend",
+        "V3 ownership-wait helper unchanged",
+        "F19 MESH4 label"
+      ],
+      "not_deployed": true
+    }
+  ],
+  "native_source_sha256": {
+    "frozen/docs/measurements/os30-dual-20261004/validation/baseline128/io_sdram_pocket_test.v": "aca83f0e76138b77b0ab5255d7411507abad5d2ede120f3aadb438ce794f0765",
+    "frozen/docs/measurements/os30-dual-20261004/validation/baseline128/main.cpp": "af38a2d0bdd85ca4da2365c99b2f7682bd9b76b7048e0abd69b47d280563c25b",
+    "frozen/docs/measurements/os30-dual-20261004/validation/baseline128/tb_irq.v": "c47e825b0edecebfa5d694dc3a30b44ac1e32021a465044a11795abfaed4258c",
+    "frozen/src/fpga/common/GeometryFmaProbe.v": "348d11609de14326dc9408c11e39a385a85a4e0678eaaf5d69f39d6cfba38088",
+    "frozen/src/fpga/common/audio_mixer.v": "f9cbfe37da81ae6d5564df076e75c6d28f46feabb992bb695392d06aa55e0ba4",
+    "frozen/src/fpga/common/axi_periph_slave.v": "713d55b83637b81b07a36c52ba86232fa609076e3c990d56dc77811a0df82aa4",
+    "frozen/src/fpga/common/axi_register_slice.v": "e9a408b3d558e099f42d669ea4c052350d4cc5dc0099046cb2c8b2bab67f2666",
+    "frozen/src/fpga/common/axi_sdram_arbiter.v": "9d1bfed762e317ad937f67c34219ca3ac44fa5e8781c989e7a92aceefad1d706",
+    "frozen/src/fpga/common/axi_sdram_clock_bridge.v": "09a7418a0a04c40b5afa2ee96acdeec323a097bc74ac83f17a9ecb2b0299e9f6",
+    "frozen/src/fpga/common/axi_sdram_slave.v": "8a0e120d569812f176f83908bb18d9cf1459403999faf7be0d2853c591cfaa4e",
+    "frozen/src/fpga/common/cpu_system.v": "15046c22d85be4476d75b13194d8fdf6f087ea0f89d31a1bab91378e8e39db84",
+    "frozen/src/fpga/common/cpu_target_port.v": "92017b80d7414766b12b9b09994a785998a803b55d82a14f2e9a1aacd048bc78",
+    "frozen/src/fpga/common/cpu_target_port_per.v": "119c0f1f6baa76448e483a6f7782ae19119478bca91bebbc2e9206922ec3339d",
+    "frozen/src/fpga/common/geometry_color_rtz.v": "27025e32c4c8f42168db8e49149d9ee7cd2255d606ddb7ed0f5c932bedd1a335",
+    "frozen/src/fpga/common/geometry_float_batch_recip.v": "c3cc22d4aa4559d0cfe087c6556361eec22e363fbff79072bb65a1028c3dfd9b",
+    "frozen/src/fpga/common/geometry_float_cull_mem.v": "53163df4519861d2ffa3d115b45656a90f03e6ef869a02188d1344710931f2ac",
+    "frozen/src/fpga/common/geometry_import_convert.v": "3beac876e469ec45ff3d3e81c9645671dcb92737d1f84dd188ca454fbbcf7526",
+    "frozen/src/fpga/common/geometry_lighting_batch.v": "1d2c50748b04ab7dec19d8b6127191ff9cbeae486344571dc76663cf8fd00821",
+    "frozen/src/fpga/common/geometry_mesh_command_fetch.v": "a740d2c2d961bcbe3421e7de594ca842b3c3caf2a38dff7de89ff067c9b93cf8",
+    "frozen/src/fpga/common/geometry_mesh_packet.v": "493c6618a9e7962de6e171d3730e85df0725edae20658fb457b86522a8b2d4b8",
+    "frozen/src/fpga/common/geometry_mesh_queue.v": "a3ac412006c503332f4a6d8895155d869f367bb39924e8a6a4c4245d1ff230e4",
+    "frozen/src/fpga/common/geometry_mesh_raw_frontend.v": "61854f2d9949339c9b4c123d1b174da3828601cbf1edcbc0c410fbf854fac764",
+    "frozen/src/fpga/common/geometry_mesh_stream.v": "c437aa11c859757493764e6c243da4cb1238c585a8c65ff7330a8f4017aedc28",
+    "frozen/src/fpga/common/geometry_mesh_task_ctrl.v": "899e04b44048bc94d6fe70c259c6fc144e826260fc1ecff032ba8bb890251496",
+    "frozen/src/fpga/common/geometry_mesh_task_engine.v": "7a7a4d0d5d376d81412437f7dd9a9b2d66bdc90db7d06d456680920af1e29f7f",
+    "frozen/src/fpga/common/geometry_raw_load.v": "ade3041bfd27ab6200c5d6356775adac778a34eb0d81c1f253ff83367627c144",
+    "frozen/src/fpga/common/geometry_transform_light.v": "6987e27771c84173b31eb53e9f3bce4e7337437414548ef089f3adfe430c810f",
+    "frozen/src/fpga/common/gpu_color_depth_cache.sv": "ab1f1aeeb135cd2f80e44adb39616c35f28f1e164ab639b2f5645fbb447000ae",
+    "frozen/src/fpga/common/gpu_core.v": "f5483ea84933b3f02b953c147ec16e6ba0622cd76886dd3072e8f13f8f49e5ff",
+    "frozen/src/fpga/common/gpu_edge_walker.v": "69ef2238babab6716ddc9e7c004943982190d179547895081a9e69a94259e5d3",
+    "frozen/src/fpga/common/gpu_geometry_worker.v": "25ac255b738938d9a0e9d6f3a8f9b3a934ba3337d51eea68a0fb7c73dfef69e0",
+    "frozen/src/fpga/common/gpu_mesh_bridge.v": "8c02f8dacee2e4ff57d568bc9b968bb8b4109aa622739e3bf33804d39dc9cad9",
+    "frozen/src/fpga/common/gpu_tex_cache.v": "c3fdc0adfe5ed583c37bf09ad3dbbbecb1e3c6ae1f5714cab5064eacc328e51c",
+    "frozen/src/fpga/common/phase10_bram_alias.v": "b265bab9aeb93c5ae2444f652579b0fdc13cdab90e06b63d2c3fbcaf49b802d9",
+    "frozen/src/fpga/common/phase10_cram1_read_arbiter.v": "b82f0725555682a14006e90a6a8546d320e822c71f34c25d057942aaf653c303",
+    "frozen/src/fpga/common/phase10_float_recip2.v": "d68bc3fcdcb750f88cebf9aa8ed890a499d12210cbd50fe9d3a049c168bea5cc",
+    "frozen/src/fpga/common/phase10_load_alias.v": "322bea9ab96131f84d13edf6448f490e7190519b38a2dfa1ba027fa31fae116d",
+    "frozen/src/fpga/common/phase10_raw_vtx_dma.v": "ce51296a880ef212cacffbe4bb4c1728fc1bc9976d3504dd91883882d4316f81",
+    "frozen/src/fpga/common/psram32_axi_adapter.sv": "66547c1b68a83d8912b32ef7a88f1b856ad924e0156305c35c21655c7be1cddc",
+    "frozen/src/fpga/common/psram32_controller.sv": "679fc63fbf10b43cf903c4927c82add7ac58e31b7c94dd88d175ead51f1c950b",
+    "frozen/src/fpga/common/skid_buffer.v": "f13c26d8d7cd89cb0259af5b299fbee722cbf2a106f2bee25df9d444dd1e81b8",
+    "frozen/src/fpga/common/sync_fifo.v": "66545eaee0463d5e25e862cb5fbccb357b2d34948f93a9f8a706c04c536aa28c",
+    "frozen/src/fpga/common/video_CRT_scanout_indexed_BRAM.v": "e93c6acc58e3e335fc5c9f3f90e410e168a9b6a7201b97c5edd60363391197cf",
+    "frozen/src/fpga/targets/pocket/._ap_core.qsf": "83256e07819c30785643f4fe3cf90cd145998e36404ea5ff3570ef83bfae1ee1",
+    "frozen/src/fpga/targets/pocket/Makefile": "50997211b1e1913c8c86e7b2e813440b929ea94b345f40ad09e68d0ab120e282",
+    "frozen/src/fpga/targets/pocket/about.txt": "b087b021b912788a4902fa00089f290d486e23d912fbeb0ad8aca219bfb28986",
+    "frozen/src/fpga/targets/pocket/ap_core.qpf": "c81d392b3e32615e566ebcf6c2a43532459605b2dd08419ff512d2b57d7cb9d0",
+    "frozen/src/fpga/targets/pocket/ap_core.qsf": "0baaf374e7a066446ee01a9a5e7d72fc937f44d15893bf4c5056900bc50ecfdb",
+    "frozen/src/fpga/targets/pocket/ap_core_assignment_defaults.qdf": "34eaceabdf642fbd9040b8fc4fc11b1faf032c05081a4c3465acf8ce19abccee",
+    "frozen/src/fpga/targets/pocket/apf/apf.qip": "94af53185dde4d51ef30e75bb1ec8df672126742af36399bd62f4efb3a84b26a",
+    "frozen/src/fpga/targets/pocket/apf/apf_constraints.sdc": "71dca7fe3d90df657dd0f1dfd87c273c78675d4d9ef63d8c5aa666725d308069",
+    "frozen/src/fpga/targets/pocket/apf/apf_top.v": "7bb67bcd94ae4fd5224b8bf37d7110cdf9e2bc7c5c805997bfd7cdc7b506920d",
+    "frozen/src/fpga/targets/pocket/apf/build_id.mif": "00b59c7c91bccef55e9b7ef360bbccd7dc8bdb73338953e722b64a1b4c12a700",
+    "frozen/src/fpga/targets/pocket/apf/build_id_gen.tcl": "6279533fec80081e3c91884e1cc5df853b2a716df0b573636147f3420aace996",
+    "frozen/src/fpga/targets/pocket/apf/common.v": "26aa1637c4eaaef2fb6acaa38475826fdf9420c86d06a262eaa104422a32c4a8",
+    "frozen/src/fpga/targets/pocket/apf/io_bridge_peripheral.v": "8073a9f7d81d8dc00d8fb8bb67a02f55d913f9f2aa79ce947bd69074d9762b98",
+    "frozen/src/fpga/targets/pocket/apf/io_pad_controller.v": "70cda74af63d3baa53f87473e1d9e2d524ea305b299a3f832d6c1292771a305e",
+    "frozen/src/fpga/targets/pocket/apf/mf_datatable.qip": "6702b31dc8f86541e9c3eac266440c27243fc7b56d712d6bbbfe7138601ce887",
+    "frozen/src/fpga/targets/pocket/apf/mf_datatable.v": "ee3ff252ca7c454fa5e3492b719690a5e5a48ad95554fd77cf2882221999eb25",
+    "frozen/src/fpga/targets/pocket/apf/mf_ddio_bidir_12.ppf": "70e683493ee94bfd8ccd350fb2b8717a0116e6e0c30071abff32e148ae7c3b8f",
+    "frozen/src/fpga/targets/pocket/apf/mf_ddio_bidir_12.qip": "0c9880349656415cdb4fc7c2b6f42709fdafcca353577b2c47f11670cac3a248",
+    "frozen/src/fpga/targets/pocket/apf/mf_ddio_bidir_12.v": "46b49eb24886b306b4a637cfa03286ed706ecef789a90ac804fc6e707040a838",
+    "frozen/src/fpga/targets/pocket/audio_output.v": "833ce95e4adce5b647130cffd0de3cbd84b7a9fc6ff05a8668dee584cee8fef9",
+    "frozen/src/fpga/targets/pocket/c5_pin_model_dump.txt": "9f3cfcc3738fb0106996c8858287d31592511bf95f3f7e0eabbdacb79f56b4e8",
+    "frozen/src/fpga/targets/pocket/chip32/Makefile": "49fdf41d4c8e772f7b97a285ef5f472fccc426cd49d7511028ff1456fef0929f",
+    "frozen/src/fpga/targets/pocket/chip32/architectures/chip32.vm.arch": "bdd5f401c44a32edb7259172a8576d2b941192df6436b4f62985377c4ab98f06",
+    "frozen/src/fpga/targets/pocket/chip32/loader.asm": "a85ef65310d818639532aca892361b9c71329613809933f1025bb30f45d98632",
+    "frozen/src/fpga/targets/pocket/chip32/loader.bin": "fc1f8d37eb0fb322006b4428f0b59d2801c9b74978bd3f24103f5f9bbfca3c99",
+    "frozen/src/fpga/targets/pocket/core_bridge_cmd.v": "a4f1f4afa7be9f5695068e19ddfc71b1a5e2daba9bec3be3a8498a24a3035cd0",
+    "frozen/src/fpga/targets/pocket/core_constraints.sdc": "a41b3643ac62e699f3aa05a1a558e66b7f71868d5ccc0bcc8956fe8276290a29",
+    "frozen/src/fpga/targets/pocket/core_top.v": "e5d30a69b72f7e8a9a97ef519f677f28f64f1d18c0bcd7b08be7053b80a7f73b",
+    "frozen/src/fpga/targets/pocket/cram0_cdc.v": "0f8873291b1b0a70af4f0f03585d1db9a3a68a329d7546d00afbf722f105ec61",
+    "frozen/src/fpga/targets/pocket/cram0_controller.v": "5cea541c267053569f2576c6be05beac3c4e8b8c6769995b740aa1934b6313f3",
+    "frozen/src/fpga/targets/pocket/cram1_controller.v": "b494189e1fe1b2eb084ab225246c4efb861f5af9e5023feb759be5c5e44528fc",
+    "frozen/src/fpga/targets/pocket/cram1_phy.sv": "f78292e36aaba83aa3fc96f9b5a057ce615535c0bb3a3a4b3d003bfa76ca9c53",
+    "frozen/src/fpga/targets/pocket/firmware.mif": "e505071d970e68bb7672be27db82ff304e37d9cb3a9d04180c0f9cf61992b031",
+    "frozen/src/fpga/targets/pocket/frac_cen.v": "bb7fa3505a5c1eff03bdd10446a0d79058d333265ce18844d5b5bcde90634abd",
+    "frozen/src/fpga/targets/pocket/gpu_cram1_tex_adapter.v": "5f36cf1ae1e4d7e986a8b9175e83bfd05f1bdd7f3e8a11cca32fb0fd2a8a814f",
+    "frozen/src/fpga/targets/pocket/io_sdram.v": "402fbc16b1b6957001f13b5c0ba957ce4e2253d586ddb3b965464e5c017ac2fc",
+    "frozen/src/fpga/targets/pocket/link_lite.v": "6da77f7ac8b35f2bfb67b96fc1f34fd70d5b8146a1a4ca05178e21cb18b0ef24",
+    "frozen/src/fpga/targets/pocket/megafunctions/mf_pllbase/mf_pllbase_0002.qip": "eb47247cb283d3bd21d865ef0152993978eeaaec4b72c66a39746c0375f25815",
+    "frozen/src/fpga/targets/pocket/megafunctions/mf_pllbase/mf_pllbase_0002.v": "4f57b2b686119dc09a08df1b65d3d992f5778ef63da977e2210d641f54ed3258",
+    "frozen/src/fpga/targets/pocket/megafunctions/mf_pllbase.cmp": "78fe704bf3f8271f9e1197801260881c43ab0141dee22baa536cd3bbbb672295",
+    "frozen/src/fpga/targets/pocket/megafunctions/mf_pllbase.ppf": "115a937de51d4f60d201353151d850f92b0220b5f069dbf6404fa0afb436e368",
+    "frozen/src/fpga/targets/pocket/megafunctions/mf_pllbase.qip": "f9eca468d0303e6b7323d388e8d65719cc7845dc72000b76bf0cb02af6e41bb4",
+    "frozen/src/fpga/targets/pocket/megafunctions/mf_pllbase.v": "d244ed0476d9a5fc494400a858d4a0040d7726ed4ca039d798e1e4ebce281a1d",
+    "frozen/src/fpga/targets/pocket/megafunctions/mf_pllbase.xml": "77011dfe081e6731f8448880aab733b49bfcfc52b830c27cccedb4249eb7b2df",
+    "frozen/src/fpga/targets/pocket/megafunctions/mf_pllram_133.v": "a1937ee962322c05bb212a16d9cd85007f2d1e1841df64e48016bd75307311b3",
+    "frozen/src/fpga/targets/pocket/megafunctions/mf_pllram_166.v": "77cb3c2c1fd520011bb176d95b2e7723a747af9ed94704d2797ba10192aa69e3",
+    "frozen/src/fpga/targets/pocket/megafunctions/mf_pllram_90.v": "e111e749a5e72ea313825d9cade44d5fa7165d08b4da7d53c4079cb2a5adabea",
+    "frozen/src/fpga/targets/pocket/megafunctions/mf_pllram_96.v": "4aa86146891915b29c8d3bb1d5c3929b396c00bb54c5a81a14e074582d7347bb",
+    "frozen/src/fpga/targets/pocket/os30_failing_paths.txt": "01fae758c2efce2bb50287817df0007d144082eb04f6e3a4a4b3f45791461b70",
+    "frozen/src/fpga/targets/pocket/os30_worst30_detail.txt": "7adaa9fde8a2dc6a386171086a186e8754516b9e09c412566830a89096064ddc",
+    "frozen/src/fpga/targets/pocket/sdk-runtime.sh": "e36081545eb71d5fba4666bcaa80fd70eaf88502c98a42ada4128811c9d8a42a",
+    "frozen/src/fpga/targets/pocket/seed_sweep_results.txt": "14667d5e9f62fd9d1a64300336db3640a9ac3e3e586292728f682490757689fa",
+    "frozen/src/fpga/targets/pocket/seeds/os20.seed": "90d7ec0f0acef104d8b6252794295f661a0149634868d02a1ae0c358099638f5",
+    "frozen/src/fpga/targets/pocket/seeds/os20.seed.src": "8211ce0e28fe2a4a563ec5ebed5f2f99b55bf8d939f0afe8c58305d6cde9c5f0",
+    "frozen/src/fpga/targets/pocket/seeds/os25.seed": "5378796307535df3ec8d8b15a2e2dc5641419c3d3060cfe32238c0fa973f7aa3",
+    "frozen/src/fpga/targets/pocket/seeds/os25.seed.src": "781f93450d220d81eda9ce1fa13224e340c8c82c827f90f608a28cf2c7a33892",
+    "frozen/src/fpga/targets/pocket/seeds/os30.seed": "53c234e5e8472b6ac51c1ae1cab3fe06fad053beb8ebfd8977b010655bfdd3c3",
+    "frozen/src/fpga/targets/pocket/seeds/os30.seed.src": "68ba72a874d9d9d12f2c8691c78541ad8b9f4e97174080db17576dc6a3b1b62a",
+    "frozen/src/fpga/targets/pocket/snac_shifter.v": "4a3953a9729af3c001101e85d67cdd73e4334bc76ef0ad984c55b8c66f42eebf",
+    "frozen/src/fpga/targets/pocket/sram_controller.v": "302dff0f86dc5016407ddfa50d3894f0a5cd0377325f04a93097d86c5801b79b",
+    "frozen/src/fpga/targets/pocket/third_party/analogizer/analogizer.qip": "e4de027da1f8690382014234e914a10e6973c74c3fd9273524e601048a4ed7e5",
+    "frozen/src/fpga/targets/pocket/third_party/analogizer/analogizer_psx.sv": "6563d7db73e3e98bd10d2676fe778a3caa3b70294c8994961fb2e72d72eba729",
+    "frozen/src/fpga/targets/pocket/third_party/analogizer/clock_divider_fract.v": "46b9ad71aa3c60796fe5594e98b5b5b346c6db075f0aa634086c0118ada5b8fb",
+    "frozen/src/fpga/targets/pocket/third_party/analogizer/csync.v": "1f4a21fe9632625637fe6709de59b792302c6a7155479d3b9457dc6c11fa7d8d",
+    "frozen/src/fpga/targets/pocket/third_party/analogizer/dualshock_controller.v": "593ee87e7b5e0de1dee8ebf8f19c147697e816e3cb1c2e580483f843b5d27b5b",
+    "frozen/src/fpga/targets/pocket/third_party/analogizer/hq2x.sv": "2146b69cf63c26a4b41407e9ac1b4462db4d7e3ea6d8a99f31ba12712d68f975",
+    "frozen/src/fpga/targets/pocket/third_party/analogizer/openFPGA_Pocket_Analogizer.v": "62d54892fe7f9574b62beda77fa7211212e7045d61b6521061964fa9421d7b3c",
+    "frozen/src/fpga/targets/pocket/third_party/analogizer/rgb2YPbPr.v": "25113aa95cc209181183010199b8732382796d2c7ad55e90401509aad94cca09",
+    "frozen/src/fpga/targets/pocket/third_party/analogizer/scandoubler.v": "c8e79c99e320227def38f46a65db939985a00de511eae602cb44e6295852d05e",
+    "frozen/src/fpga/targets/pocket/third_party/analogizer/scandoubler_2.v": "e10b57d988940b6408c453e9706a229652e5fb79ec53e1e1c3d884c57f434b08",
+    "frozen/src/fpga/targets/pocket/third_party/analogizer/scanlines.v": "a1df24e4f5112754372937a9776e335e6ae14d904b6fe4161d5612b8231d8d46",
+    "frozen/src/fpga/targets/pocket/third_party/analogizer/scanlines_analogizer.v": "417d81989691e0424f35cdbf3267e9dde6aec2374184586ebacda5b21f0ab70c",
+    "frozen/src/fpga/targets/pocket/third_party/analogizer/sync_fix.v": "c86e0ff7b7ecd643cc39d9a71ab2f321b4cd148be5664d743724befdc9836454",
+    "frozen/src/fpga/targets/pocket/third_party/analogizer/vga_out_sw.v": "0eba3403335da3b9a2101a5d5de55416a270960a33dff571092a96116e386fe2",
+    "frozen/src/fpga/targets/pocket/third_party/analogizer/yc_out.sv": "d2d92c25f572f79c85cc4d0ce13315bab7cc76355afd6859ef3648669a62504b",
+    "frozen/src/fpga/targets/pocket/third_party/cram0_phy.sv": "a4c2ee32a9026eaf50ef53bcb0f6a1fb8032af4acd76eda41e2d0351de22ea51",
+    "frozen/src/fpga/targets/pocket/third_party/openrtl_sdram/NOTICE": "f06116f0d4ea431f83394ae1ed8212b2a133cbc95ba291e9edf56f4c4736f760",
+    "frozen/src/fpga/targets/pocket/tools/capture_ocr.sh": "d2f32c9a6cf5acadddc8a3c18bd418110df08cf56f734ecdaf603f606e68c30b",
+    "frozen/src/fpga/targets/pocket/uart_rx.v": "56eafb059b8a2915619fde9b6645ec4d35b3accf279371fc156def42e001ca32",
+    "frozen/src/fpga/targets/pocket/uart_tx.v": "36700e6365accd444838f3db70550b51524898da262c81bbc695a8d78c4009bb",
+    "frozen/src/fpga/targets/pocket/variants/os20.mk": "9e5ff3e2f9ab38c460171e919d993eb7ebc59529e5363526758fd8dcc9130d13",
+    "frozen/src/fpga/targets/pocket/variants/os20.qsf": "5b1813a63b69f2907686b8346b529f73140da4b358df1bb4bce2d5292916bdc0",
+    "frozen/src/fpga/targets/pocket/variants/os20.sdc": "e4f5c0589457385a1cdd5fbba4bc393fbb2addf88fff05773b8655313f3049ce",
+    "frozen/src/fpga/targets/pocket/variants/os25.mk": "e1637e2071aeb7c969d6a4b124e09b50ba94ed0414508d32931e15de01e00538",
+    "frozen/src/fpga/targets/pocket/variants/os30.mk": "b82a9691e05ce578ff5a231663e454a8f35aeffeed738e0872439748994bc008",
+    "frozen/src/fpga/test/Makefile": "3b44582bdc1e407d4009117e84aea35bb0dfe9248c38334717bc365bef05c8f2",
+    "frozen/src/fpga/test/altddio_out_stub.v": "0a564ec8d8a6c427d5d6c5104f34968e0c02629f48eadf546187136a71d0503f",
+    "frozen/src/fpga/test/altera_reconfig_stubs.v": "dc21e759d268b30422b274334628dde9d78f33823b9505b7f3e4f3397d232d4a",
+    "frozen/src/fpga/test/altsyncram_stub.v": "3ac5420a4ae4fc0e10bdbb73d02c3ef523eb4159c8c9bd4d1002970bfc332db2",
+    "frozen/src/fpga/test/bram_model.v": "9019fc5033ee83bbb8934e018bf3f750205f26971c50a87cbae267e8e3492ff7",
+    "frozen/src/fpga/test/cram0_sim_model.v": "f8625cc67e20ffb62430727eeca7f5f56c96969027555b30a4c21912d38f6c82",
+    "frozen/src/fpga/test/cram_chip_model.v": "3c1a6fbce6698b42a78dab23534236c2a14d11a773fdb64a546d2ae68224a813",
+    "frozen/src/fpga/test/dcfifo_stub.v": "e0aaf5aeb419b5d2e24b6ed4dbe2d6af9a1fcf927d2e910f76d2df9642c88a94",
+    "frozen/src/fpga/test/io_sdram_mister_test.v": "77fdfaf09d741889faa990f9ecfac8c6a2847115a9a6791627245ee8a3de55a0",
+    "frozen/src/fpga/test/io_sdram_test.v": "97deebd07420dabaae132b09adcbe9af7e13fd326befbcb82149d782abe25ea0",
+    "frozen/src/fpga/test/lsu_axi_shim.v": "35b92bafd33acc1bc4ce8671cb3fded52fe5f4789fbec6c4a2ebb9cfa0ae41c7",
+    "frozen/src/fpga/test/psram32_pin_model.sv": "be63a7040b1b7f39cb28d829c9f35c2b77a0318b3b8af6a0379d9f77593673c7",
+    "frozen/src/fpga/test/psram_pins.vh": "3b22c6a6cfc248fcb914b72b86b2ca30f96a43a265edc3d1fefa7ab9a5f2d61a",
+    "frozen/src/fpga/test/scandoubler_test.v": "b9a40300a89f112d57732fa9b2a01c2188d45036780be684f91b10930905a458",
+    "frozen/src/fpga/test/sdram_fast_model.v": "1a64b9d106e3e9e0ef387a15c1ca687c46048e6a707bba375e0d9a04fddba4e4",
+    "frozen/src/fpga/test/sdram_model.v": "4fee45121b63b51c63c32dd4eb69c830188d139e15224ed420b95b2fcb97af5a",
+    "frozen/src/fpga/test/sdram_model_full.v": "a777d648d2fe8dd85af047cbc1350c65811b75838af4ffc5e3eaec3e4242302b",
+    "frozen/src/fpga/test/sram_chip_model.v": "664c1abfd8653e7f41d4aec043d8e4963fe16bbaf76be8dabe8096b9835ac341",
+    "frozen/src/fpga/test/tb_analogizer_chain.v": "d99013ae997db822f500e9c2b4288cef90e4299e04913b3021f9fd182138a987",
+    "frozen/src/fpga/test/tb_arbiter.v": "6aa9f5d803e1f672773ea3d48ab20b914642fb3dfe09505549db3541ae9bf615",
+    "frozen/src/fpga/test/tb_audio_mixer.v": "9531bbc99e8397901f24a55af65ab91f227872930d076f3d984e7092b13f4c0b",
+    "frozen/src/fpga/test/tb_audio_pipeline.v": "9a58fdf8361c1c9ea8e90ed3eed7718af97f5b1574893ea4b0cf611393064709",
+    "frozen/src/fpga/test/tb_axi_periph.v": "d481d27c246b3b5c0cafdba62e3c4c1cb97e51d9ccbd589b187dd4199919c9c1",
+    "frozen/src/fpga/test/tb_clk_autotune.v": "ec5cf2be984a4100fbcb37388b9e32686bdf6e875b3e441084ee763e3d7e0d5c",
+    "frozen/src/fpga/test/tb_core_bridge_cmd.v": "f44ae922e1be83000e0bce3d3aa3a70a5a2c904b6961d24539f00707a8bee04e",
+    "frozen/src/fpga/test/tb_cram1_cmap_chain.v": "1e26e84ff1241ea7f5936035a6ae4c3d8c3d2ca1a484a046ac664f4b442c929b",
+    "frozen/src/fpga/test/tb_cram1_tex_chain.v": "eb9ea8c2897961546f9f1d62918857361351eae53811bfeaea55c30157aa282a",
+    "frozen/src/fpga/test/tb_ddr3_fb.v": "25a9f31d4a9a9fda6dccd80b27a97c9868f7bc217bb8993a16b619f73bfe9f5b",
+    "frozen/src/fpga/test/tb_gpu.v": "eb36e3d2ad361c8875c8090dc43052646227124755f6e7b08a083df88ef281a8",
+    "frozen/src/fpga/test/tb_gpu_chain.v": "536c0e3355d8325dd8da167a82ebab3e95278c641d179ce97dfa9fc99726a976",
+    "frozen/src/fpga/test/tb_gpu_cram1.v": "dba7addc0b4b00b32c3d67ac789e740d16460b6d9c5882293aacab3222d4d0f9",
+    "frozen/src/fpga/test/tb_gpu_transluc.v": "19857c24efbf699eb632ddb8f70265329b98e2fa8deaa1773ad9f4999adb1fcd",
+    "frozen/src/fpga/test/tb_gpu_wrpath.v": "d791ddde0165067c5b006c65116b0b2298a742fc90fb5bfcc218934aec88833c",
+    "frozen/src/fpga/test/tb_gpu_wstall.v": "34a8c066054483f27f700fc6f6d3dc01d0e540f9c0ae5cd2930c2ca43e509f3c",
+    "frozen/src/fpga/test/tb_hps_bridge.v": "47a04c64664e9464b791cddfa6eae5d0ef6b36d3379063434d672eb5966de103",
+    "frozen/src/fpga/test/tb_hps_keyboard.v": "2471d102efcae360e26ea2f2cdbb8988533f94e6b7d4bbea416145365d44b47d",
+    "frozen/src/fpga/test/tb_hps_mouse.v": "9e5a17c6d51963e2a0515e3aba1f2196b92be70bd35c320b3faae85591c0d736",
+    "frozen/src/fpga/test/tb_io_bridge.v": "a535f92fccc4691d48e0f9831d1d3399abb0b6ece371378a494ad38518725139",
+    "frozen/src/fpga/test/tb_scanout.v": "3f6edfc6b3472e5030903d1e9fb66e75b97085dff79d74a44b5c0e996605cd4e",
+    "frozen/src/fpga/test/tb_scanout_race.v": "daa98b9a044a5ed3100811ba9459d22fc0ec1c7683b8c46ff48df11682292a88",
+    "frozen/src/fpga/test/tb_sdram.v": "2a3b2b2d397680f1214f0279022569d6f3c864724e5ecace2a4938fc2c1830af",
+    "frozen/src/fpga/test/tb_sdram_cont.v": "4ab1d72cbb7de699f82f248a3da9bd1f6a5f562850f289b4c610b032d77830ab",
+    "frozen/src/fpga/test/tb_sdram_lock90.v": "a9023268fcee67898676775e72d27e695cfca860f96e62326024f66578bd6ef8",
+    "frozen/src/fpga/test/tb_sdram_rdscan.v": "14f76cd2e6f0402dc483e0b45ab79f416f136af7046cd9ebc63acd2bd0b25d61",
+    "frozen/src/fpga/test/tb_sdram_stress.v": "ee029ff1b9e4c4152a8e929a0a094752e8fb773addea320cc445911d97cee022",
+    "frozen/src/fpga/test/tb_settle_probe.v": "c3320239186011ba0517ea78ee3c35283e0314976f6d71f0ba91e1104c487985",
+    "frozen/src/fpga/test/tb_sram.v": "3aa9b44341047b895ee0ec1a4dc6315f802095c65b761fce55af432e77b8a264",
+    "frozen/src/fpga/test/tb_system.v": "3589bc808ecaace5648b2a703ba17321aa04340fb64f0fa66a74f437425b6609",
+    "frozen/src/fpga/test/tb_system_sdram.v": "48df1133a902eaf665f2b2f9c3bac92710c5047c8aa996c2dc625cd5c187c884",
+    "frozen/src/fpga/vendor/vexriscv/VexiiRiscv/VexiiRiscv_os30.v": "6f50382aa82e6684551756e6c2473492d0bd915a0c94b2aeae9ac4a47e62dec4",
+    "frozen/tools/report_core_timing.tcl": "80a456b4aaa9fe62e050339d9ce0c4ec405e025a4617cd3b2687c2b7ee1ae8e2"
+  },
+  "excluded_inventory": [
+    "manifest.json",
+    "verification.json",
+    "verification-v4.json"
+  ],
+  "files": {
+    "README.txt": "70059d403962067677f9a977464f3826dbc604e9091c1c7a92a252115d902372",
+    "abi.json": "76ae0f8bb5b14d9b7f0ccfd8bdae8c759cf556a8e0cd35e3b184f2bd7d27363e",
+    "additions/app-v4/README.txt": "a0480b8c518e9e813b33b8f3c5bed61466a519859e7796a0ccdd9872304d291d",
+    "additions/app-v4/actual_feed_test.c": "fced40751818036a3902eba8e079d0f7054dd455d63657285e0c03d27cdbd17a",
+    "additions/app-v4/build-result.json": "e824fc71374638930c9b128ebdfeb084e1a25c65af0db001da04853970fcf63d",
+    "additions/app-v4/build_app.py": "466eef221dc50240bca802dc330b442b4c6981bf65426f71e9608d0d8d68fc2a",
+    "additions/app-v4/independent-review.json": "25cfa14414f6d453e1b260f854eea88a5e9d703bd0c8d0ad12b32fa723be108b",
+    "additions/app-v4/mesh3_lifetime_appv4.py": "0f1c3ad91fb036bad30d68f1bced0ab0453afd941d1d9369f55ef0f85391a03f",
+    "additions/app-v4/sm64-v3-to-v4.patch": "3412ce16a266b2ccfe8c51e30ea580f23afbd541bdcbaa0c70cc0cf6481898f2",
+    "additions/app-v4/test-result.json": "824ed53498bd441dfcacc39bffd1871155ed03898a259aafdfea63a73b592d6a",
+    "additions/app-v4/test_feed.py": "6755708f584848f7e4549bdd957267b247daf6aa25218a7e6e1f4b50898f1685",
+    "native-v7.patch": "84b919a94fb7ccc78c447069797f886bd8d2738f187f11975dfd6efe4b3394cf",
+    "package.py": "700304c3e182517f60596be86885cbcad1f514360bc7aced08e4a6e90230ed4f",
+    "physical-top.patch": "8b9cc60d06a295f1ccaf1bb4dfebaeb1cae2601040584e0c664bb13bf6b35be2",
+    "receipts/app-build-v3.json": "0573249b3104faea60b31aed99ce9e4ed1cf4cb6f934626ebff9c8eda1f4f772",
+    "receipts/native-v7/build.json": "dc287dc954580fdad0c815d8c3e179796fc4187475311185470451d09cadd44a",
+    "receipts/native-v7/prepared.json": "4212a8790cd00675b2b71fe0ae3452b6ecfc37e6123ee22bd09517098841fe7d",
+    "receipts/tests/app-batching.json": "227e2570157d12c920e8b872f4b56514b6567f5e957d864b5681a59752f0131e",
+    "receipts/tests/queue-v3.json": "e9adca9c1bf31e335a95c69a410408bae480efd2798ebd144eb2540da6be4f61",
+    "receipts/tests/scene-split-v7.json": "427903111ccaf5470d1e5344da3026b11bb8689aab57866ec484c7e23cf45918",
+    "receipts/tests/wrapper-v7b.json": "87bdace13014562bcd93cacf464cd44f0fc6225f41b671d51d36314cf3627b1c",
+    "recipes/app-build-v3/build_app.py": "e2d3b759af7dfdc7762abd68edf6bb0feeb27f41807c64e12b225dc43fd69ca7",
+    "recipes/build_native.py": "d95ffb169e4e716d1ca76519da00eb49c262b83ab97443d74356876f4232cefe",
+    "recipes/build_pocket.py": "12007eb3e43bc743d566bae519504a9be8db1f3235227e14369a08d364abc395",
+    "recipes/check_replays_v2.py": "272d35b1412a299845d1d43e6f79c3009cde14f356f8c23c226c901865ca6177",
+    "recipes/mesh3_hooks_v3.py": "dde158381e731a4a9696b93fb527c87b0ce437b47cfc319d183f80af3d2d1ab8",
+    "recipes/mesh3_lifetime_appv3.py": "ee24533f66d93ead71bdbef2054b41f2cb9d217b62581a70451d47bf0f07575b",
+    "recipes/new-sources.json": "757ec314b01cd093e41c00fd0adc1068ea65cf7929218b00c4cca678e9fe8854",
+    "recipes/prepare_fixture.py": "58457e17e59805315b903b1a9f1ef0340cf19addb1f7c123859a659e7cf1ba8f",
+    "recipes/replay.py": "dc1d26a5c3ce2a01da7821acdb8279ccd0e2b327df0813ae77157c26e34f02cf",
+    "recipes/tests/run_queue.py": "5647d367bcb6b14a0ef32797d11127b86bbb9292125385eb940398084409c144",
+    "recipes/tests/run_scene_split.py": "b753db7f4809811fa60abc0babfa3c9ed8e42770d1cf6d5d14152f349085b4dc",
+    "recipes/tests/run_wrapper.py": "270e235ec837895a1b360270a755bdc1dc2c48cf856933b1c1bec66b47148c4f",
+    "recipes/tests/test_wait.py": "f9b80899caafb66382b15780be31b59a86a6d82deed5c20ddcc8800e838a239d",
+    "reviews/alm-audit-v7.json": "36fdaf418916ce6a868628ba489f3a9222f297b556420be569b418ceebce5a05",
+    "reviews/app-source-review-v1.json": "991fbf154433c0f8c2bd3286867d256a61e4fd8e851fe13d6f86b6326cce4c85",
+    "reviews/appv3-publication-review.json": "30b57f820232fb7c29dea957a01265617e2fb740eeb24affac4af3fb358a41c7",
+    "reviews/blocking-paths.json": "13c841dd665c75094a94bcb0e24719aa8a60a65d7b794da355155c6d41faa2d5",
+    "reviews/packet-domain-proof-v1.json": "5d547974ae7a37ff673b3d9c96d4a356b54e3fe732470291da3d63161325513d",
+    "reviews/physical-v5-source-review.json": "e4acf55728f1f627c56912c702886c060ea531aa3a5c325a9df19b503f0d91bd",
+    "reviews/qualified-firmware-ring-consumers.json": "7a58cd20eb39400191f6b18eeec24699bf96255367f41001fc1a15c654d63e90",
+    "reviews/rtl-build-notes-v7.json": "82c2c8819dd3d8f9239aae7ed0998ffbae2ca54a067e5182701174b64b2e8098",
+    "rtl/geometry_float_cull_mem.v": "53163df4519861d2ffa3d115b45656a90f03e6ef869a02188d1344710931f2ac",
+    "rtl/geometry_import_convert.v": "3beac876e469ec45ff3d3e81c9645671dcb92737d1f84dd188ca454fbbcf7526",
+    "rtl/geometry_mesh_command_fetch.v": "a740d2c2d961bcbe3421e7de594ca842b3c3caf2a38dff7de89ff067c9b93cf8",
+    "rtl/geometry_mesh_packet.v": "493c6618a9e7962de6e171d3730e85df0725edae20658fb457b86522a8b2d4b8",
+    "rtl/geometry_mesh_queue.v": "a3ac412006c503332f4a6d8895155d869f367bb39924e8a6a4c4245d1ff230e4",
+    "rtl/geometry_mesh_raw_frontend.v": "61854f2d9949339c9b4c123d1b174da3828601cbf1edcbc0c410fbf854fac764",
+    "rtl/geometry_mesh_stream.v": "c437aa11c859757493764e6c243da4cb1238c585a8c65ff7330a8f4017aedc28",
+    "rtl/geometry_mesh_task_ctrl.v": "899e04b44048bc94d6fe70c259c6fc144e826260fc1ecff032ba8bb890251496",
+    "rtl/geometry_mesh_task_engine.v": "7a7a4d0d5d376d81412437f7dd9a9b2d66bdc90db7d06d456680920af1e29f7f",
+    "rtl/gpu_core.v": "f5483ea84933b3f02b953c147ec16e6ba0622cd76886dd3072e8f13f8f49e5ff",
+    "rtl/gpu_mesh_bridge.v": "8c02f8dacee2e4ff57d568bc9b968bb8b4109aa622739e3bf33804d39dc9cad9",
+    "rtl/phase10_load_alias.v": "322bea9ab96131f84d13edf6448f490e7190519b38a2dfa1ba027fa31fae116d",
+    "run_tests.py": "6e3ae95ddc011765602e2f5d5cf8661b0bd995111e2fd912cdc6e8fb9c77e3f1",
+    "sm64-integration.patch": "b2eeb48df654d58b4d5dfb6f7de694ea48345a59bb1e3870dd3336cff395e4ff",
+    "sm64-v1-to-v3.patch": "ac238e5bdf252646a282d2deff1317716be10edbc338f4e36b0721b558889b0c",
+    "sm64-v2-to-v3.patch": "165b7df10bc27de91c5b2ecf8fb76b3eefa8afbc4f7ef7dffdd48be5cacdf0f8",
+    "tests/actual_wait_test.c": "f48014b492aad1e9b63a7fe81713ecd2897ef30c840ebc57d093bed6a9117678",
+    "tests/test_queue.cpp": "397c0e04d55f4674e3b697ec37b4ba5d36a5f0ab845151954a94791f6beec541",
+    "tests/test_scene_split.cpp": "ef78be624ef30ee5db0828f96de7f02aa896640f99150e6221ff47667c695153",
+    "tests/test_wrapper.cpp": "12900848a42369701b7ae837877b408763ece5820cfc820f5a6e111b38a0ca81",
+    "verify.py": "d180026a39fdb4885422f757471f5d2d2017df6456cadef2255f9db286e2b812"
+  }
+}

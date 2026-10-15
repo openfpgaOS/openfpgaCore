@@ -1,0 +1,183 @@
+{
+  "status": "PASS",
+  "selected_source": "full-strobe/axi_sdram_arbiter.v",
+  "selected_sha256": "5e9e06dca5ccf978a89f0aaacba05aa295ed7706636d8abed85ef2601ee037f1",
+  "resources": {
+    "before": {
+      "ALMs": 798,
+      "registers": 236,
+      "block_memory_bits": 512
+    },
+    "norw": {
+      "ALMs": 798,
+      "registers": 236,
+      "block_memory_bits": 512
+    },
+    "mlab": {
+      "ALMs": 772,
+      "registers": 162,
+      "block_memory_bits": 0
+    },
+    "full-strobe": {
+      "ALMs": 672,
+      "registers": 114,
+      "block_memory_bits": 0
+    }
+  },
+  "tests": {
+    "status": "PASS",
+    "runs": [
+      {
+        "delay": 0,
+        "seed": 1,
+        "command": [
+          "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-extra/gpu-metadata/miter_wq16_delay0/Vtb_arbiter",
+          "+verilator+rand+reset+2",
+          "+verilator+seed+1"
+        ],
+        "status": "PASS",
+        "log_sha256": "be8a16fd62d12837a9e31f6e58d8ab7c7d3c6e706bca4d04a28a6fbe1add40a9"
+      },
+      {
+        "delay": 0,
+        "seed": 2,
+        "command": [
+          "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-extra/gpu-metadata/miter_wq16_delay0/Vtb_arbiter",
+          "+verilator+rand+reset+2",
+          "+verilator+seed+2"
+        ],
+        "status": "PASS",
+        "log_sha256": "be8a16fd62d12837a9e31f6e58d8ab7c7d3c6e706bca4d04a28a6fbe1add40a9"
+      },
+      {
+        "delay": 0,
+        "seed": 1977,
+        "command": [
+          "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-extra/gpu-metadata/miter_wq16_delay0/Vtb_arbiter",
+          "+verilator+rand+reset+2",
+          "+verilator+seed+1977"
+        ],
+        "status": "PASS",
+        "log_sha256": "be8a16fd62d12837a9e31f6e58d8ab7c7d3c6e706bca4d04a28a6fbe1add40a9"
+      },
+      {
+        "delay": 0,
+        "seed": 2494483,
+        "command": [
+          "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-extra/gpu-metadata/miter_wq16_delay0/Vtb_arbiter",
+          "+verilator+rand+reset+2",
+          "+verilator+seed+2494483"
+        ],
+        "status": "PASS",
+        "log_sha256": "be8a16fd62d12837a9e31f6e58d8ab7c7d3c6e706bca4d04a28a6fbe1add40a9"
+      },
+      {
+        "delay": 31,
+        "seed": 1,
+        "command": [
+          "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-extra/gpu-metadata/miter_wq16_delay31/Vtb_arbiter",
+          "+verilator+rand+reset+2",
+          "+verilator+seed+1"
+        ],
+        "status": "PASS",
+        "log_sha256": "0447c75f98ed17601a1ac20e5834597ffbbcda5bb2343591006f4e41526f8d6d"
+      },
+      {
+        "delay": 31,
+        "seed": 2,
+        "command": [
+          "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-extra/gpu-metadata/miter_wq16_delay31/Vtb_arbiter",
+          "+verilator+rand+reset+2",
+          "+verilator+seed+2"
+        ],
+        "status": "PASS",
+        "log_sha256": "0447c75f98ed17601a1ac20e5834597ffbbcda5bb2343591006f4e41526f8d6d"
+      },
+      {
+        "delay": 31,
+        "seed": 1977,
+        "command": [
+          "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-extra/gpu-metadata/miter_wq16_delay31/Vtb_arbiter",
+          "+verilator+rand+reset+2",
+          "+verilator+seed+1977"
+        ],
+        "status": "PASS",
+        "log_sha256": "0447c75f98ed17601a1ac20e5834597ffbbcda5bb2343591006f4e41526f8d6d"
+      },
+      {
+        "delay": 31,
+        "seed": 2494483,
+        "command": [
+          "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-tiny-audio-20261013/area-extra/gpu-metadata/miter_wq16_delay31/Vtb_arbiter",
+          "+verilator+rand+reset+2",
+          "+verilator+seed+2494483"
+        ],
+        "status": "PASS",
+        "log_sha256": "0447c75f98ed17601a1ac20e5834597ffbbcda5bb2343591006f4e41526f8d6d"
+      }
+    ],
+    "ordered_words_per_run": 9000,
+    "bursts_per_run": 2000,
+    "cycle_exact_valid_outputs": true,
+    "same_address_reads_poisoned": true
+  },
+  "source_and_evidence_sha256": {
+    "PROOF.txt": "b93a3cba512472523766c2c4edbe5630efb255706aac9b85c373a915d575993d",
+    "prepare.py": "c70aea4d0a2bd14fe6e6e8fa163d36f48b2f902eb59edeb3bd78ac5cd68f889b",
+    "prepare_miter.py": "81013499331aa7f84a759eac86de24032548fc6bff548786831468ce347a2b36",
+    "run_tests.py": "4fb38332b67631857b9f758d3c2649c18791a2fde35b07b97320ab76e280473b",
+    "source-pins.json": "7414a362734352b0422e99c36139ec83a0aaabc441387c41b0e2c68af9d0bfa7",
+    "test-results.json": "8b962cc59ef5a63c19a29c12e3b18cae852108ef576b894f764491760fc1ec87",
+    "before/axi_sdram_arbiter.v": "bf3342a40edac6d77758bcaa15e2603fe72458cdfa84a7645fa3f27c69ac2c95",
+    "before/map_source.v": "877145bc0e8a37f6ddc12a843c5064e991e8e93e9c9599a2b683a79d7ab6be9b",
+    "before/queue.qsf": "65409d7153f5bccd0baad9b043fa4d7d8d159686656ad170756270c6e14e730a",
+    "before/queue.qpf": "ba1043412984ba75948f10c4662ec5a816c5a911d210f1a2d9c0b5d99c8fde82",
+    "before/queue.sdc": "011e666e45d6419ce0327deeba816c7d35efc91cb5125537c04d3fec48d9f78a",
+    "before/map.log": "4e73bd6b9d430aa97c0544082afaa6c44c8dec7f7ec46509905d236c229df644",
+    "before/output_files/queue.map.rpt": "8b0d30cc72d894cfc6badf32ea266ecfa98b72d0a039b6a9bd5cec6a9e1c7d66",
+    "before/output_files/queue.map.summary": "0f11fd168568723432fb5466f7f8dc312725aeeaa1b65031cdab965529ea0c13",
+    "norw/axi_sdram_arbiter.v": "6774cc2727f1dbc8b1bf9cb5de7b5d8ea43dcd43732fa32a220c772431c6d8ce",
+    "norw/map_source.v": "0648aa7d442dc2e8f013dad236979e431968e953ffa6a66efa1cf919a173e133",
+    "norw/queue.qsf": "65409d7153f5bccd0baad9b043fa4d7d8d159686656ad170756270c6e14e730a",
+    "norw/queue.qpf": "35c812770cbb52508b7a21c005333c7d2143eef82f05cfbb8fbab9a4d66596f5",
+    "norw/queue.sdc": "011e666e45d6419ce0327deeba816c7d35efc91cb5125537c04d3fec48d9f78a",
+    "norw/map.log": "4ace37c58fe166abb44b0386d99ba00cd3a7d9aa65b9ceb59cae825bc29c1876",
+    "norw/output_files/queue.map.rpt": "370ea76711808cd7b49be7f8792906de806a6210632862eb0f13168bba09abf5",
+    "norw/output_files/queue.map.summary": "2f16695d6f20e7e876c28888487620542f18e668ecca4706a0f534b1702723db",
+    "mlab/axi_sdram_arbiter.v": "b72746c8f4df7b0290a460ef16887da89664459b1ca90776a3ee8b25609b6ba2",
+    "mlab/map_source.v": "0d8c28dc395e8cb308ff2e7e46efdf80ba3c124f14e8df64b88ab5b84c998f11",
+    "mlab/queue.qsf": "65409d7153f5bccd0baad9b043fa4d7d8d159686656ad170756270c6e14e730a",
+    "mlab/queue.qpf": "9bc6fb1c72fddca1cd8ce678247311bcf42f0163573ee475e93c0e1088ec1cb8",
+    "mlab/queue.sdc": "011e666e45d6419ce0327deeba816c7d35efc91cb5125537c04d3fec48d9f78a",
+    "mlab/map.log": "1e08c614652762110633209a1b56a2d417d1db265bf9aa5a05ee196a171ac2ba",
+    "mlab/output_files/queue.map.rpt": "bd2b61425a988a57f7e91779499465bb60c95ba6662b42c456ed691502693422",
+    "mlab/output_files/queue.map.summary": "beadf4687a6d0adb13cb8230ca64b0d3142842cbb29503e2d918c78d473b9713",
+    "full-strobe/axi_sdram_arbiter.v": "5e9e06dca5ccf978a89f0aaacba05aa295ed7706636d8abed85ef2601ee037f1",
+    "full-strobe/map_source.v": "14feb428b4909b819133b14c905d04f0e317864644bb30685822b61a4ceedf60",
+    "full-strobe/queue.qsf": "65409d7153f5bccd0baad9b043fa4d7d8d159686656ad170756270c6e14e730a",
+    "full-strobe/queue.qpf": "9bc6fb1c72fddca1cd8ce678247311bcf42f0163573ee475e93c0e1088ec1cb8",
+    "full-strobe/queue.sdc": "011e666e45d6419ce0327deeba816c7d35efc91cb5125537c04d3fec48d9f78a",
+    "full-strobe/map.log": "0016f22239fb6952a556d3749d955fdf06cafd39e544491d71b96ec7334b5a65",
+    "full-strobe/output_files/queue.map.rpt": "46fd19d089c92e21100eb86a705509f00ce88558d71901181c4e0f656b52a71b",
+    "full-strobe/output_files/queue.map.summary": "499da626036ed1a096387f7442bbbc359fa578ab91cefca68991ce49d2231cd0",
+    "tests/miter.v": "919dd1fd951eea71e00edfb92a0d2e2b33dd146e2a46fb1085cfd17115b3c8fc",
+    "tests/before.v": "a807831650ceaec124c7f0a3b566e7e659f31dddad5ed4f36896f71bfcbf1ffa",
+    "tests/after_poisoned.v": "123bb221561857918c98c037dda5f96c11d6002e92ea8826fb74cdf6c4f4b077",
+    "tests/tb_arbiter_main.cpp": "fdbfbbb2c307f35a237d8fe701cb8e58d40a5460074a79ebd02ff0a5998e6c77",
+    "tests/liveness_watchdog.h": "35bd255daeafdaf5a29b24a120496ffaf25763abfe6abcd60698ae2cf6d0ce31",
+    "tests/tb_arbiter.v": "13c5fd0434603e576a038b8d16d3d1f22e3798b68a4a1509c2f714cadf60fe37",
+    "tests/source-pins.json": "cd4678e7aafe2799540eea01151a978ec2b64af8cbe95e5f6fd07b8c2125b845",
+    "miter_wq16_delay0-seed1.log": "be8a16fd62d12837a9e31f6e58d8ab7c7d3c6e706bca4d04a28a6fbe1add40a9",
+    "miter_wq16_delay0-seed2.log": "be8a16fd62d12837a9e31f6e58d8ab7c7d3c6e706bca4d04a28a6fbe1add40a9",
+    "miter_wq16_delay0-seed1977.log": "be8a16fd62d12837a9e31f6e58d8ab7c7d3c6e706bca4d04a28a6fbe1add40a9",
+    "miter_wq16_delay0-seed2494483.log": "be8a16fd62d12837a9e31f6e58d8ab7c7d3c6e706bca4d04a28a6fbe1add40a9",
+    "miter_wq16_delay31-seed1.log": "0447c75f98ed17601a1ac20e5834597ffbbcda5bb2343591006f4e41526f8d6d",
+    "miter_wq16_delay31-seed2.log": "0447c75f98ed17601a1ac20e5834597ffbbcda5bb2343591006f4e41526f8d6d",
+    "miter_wq16_delay31-seed1977.log": "0447c75f98ed17601a1ac20e5834597ffbbcda5bb2343591006f4e41526f8d6d",
+    "miter_wq16_delay31-seed2494483.log": "0447c75f98ed17601a1ac20e5834597ffbbcda5bb2343591006f4e41526f8d6d"
+  },
+  "not_yet_qualified": [
+    "whole-design fit and timing",
+    "real GPU/SDRAM integration of this metadata variant"
+  ]
+}

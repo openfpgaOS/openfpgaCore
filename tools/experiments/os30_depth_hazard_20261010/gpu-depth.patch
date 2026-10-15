@@ -1,0 +1,123 @@
+--- a/src/fpga/common/gpu_core.v
++++ b/src/fpga/common/gpu_core.v
+@@ -5160,6 +5160,75 @@
+                        && (fb_acc_addr[GPU_ADDR_W-1:2] != p3_fb_addr[GPU_ADDR_W-1:2]);
+ wire fb_write_buffer_stall = p3_needs_fb_flush && !fb_write_can_issue;
+ wire [GPU_ADDR_W-1:0] p3_fb_word_addr_w = p3_fb_addr & {{(GPU_ADDR_W-2){1'b1}}, 2'b00};
++
++// Cache-specific depth-only selective wait. The upstream render cache owns
++// an accepted AW through its final W/data commit, and accepts AR only in IDLE
++// with no AW presented. Therefore popped FIFO writes are already ordered
++// ahead of reads by that cache; its own posted-writeback scoreboard protects
++// fills that could otherwise pass dirty SDRAM writes. Only not-yet-popped
++// FIFO entries need a GPU scoreboard. Do not use this with an uncached port.
++`ifdef INCLUDE_GPU_DEPTH_SELECTIVE_WAIT
++`ifdef INCLUDE_GPU_RENDER_CACHE
++`define GPU_DEPTH_SELECTIVE_ACTIVE
++`endif
++`endif
++`ifdef GPU_DEPTH_SELECTIVE_ACTIVE
++// DEPTH_HAZARD_QUEUE_BEGIN: source-bound focused tests extract this block.
++localparam DH_TAG_W = 6;
++function [DH_TAG_W-1:0] depth_hazard_tag(input [GPU_ADDR_W-1:0] a);
++    integer k;
++    begin
++        depth_hazard_tag = {DH_TAG_W{1'b0}};
++        for (k = 6; k < GPU_ADDR_W; k = k + 1)
++            depth_hazard_tag[(k-6) % DH_TAG_W] =
++                depth_hazard_tag[(k-6) % DH_TAG_W] ^ a[k];
++    end
++endfunction
++reg [DH_TAG_W-1:0] depth_read_tag;
++reg [DH_TAG_W-1:0] depth_q_tag [0:FBWQ_DEPTH-1];
++reg [FBWQ_DEPTH-1:0] depth_q_valid;
++reg depth_pending_valid;
++reg [3:0] depth_pending_index;
++reg [DH_TAG_W-1:0] depth_pending_tag;
++wire depth_q_push = fbwq_swap_now || fbwq_stage_drain_now;
++// The pending tag avoids extending the late enqueue/swap decision through
++// an array write enable. It is included in every read hazard decision.
++always @(posedge clk) begin
++    if (!reset_n || soft_reset) begin
++        depth_q_valid <= {FBWQ_DEPTH{1'b0}};
++        depth_pending_valid <= 1'b0;
++    end else begin
++        depth_pending_valid <= depth_q_push;
++        depth_pending_index <= fbwq_wr_ptr;
++        depth_pending_tag <= fbwq_swap_now
++                           ? depth_hazard_tag(fbwq_req_addr)
++                           : depth_hazard_tag(fbwq_stage_addr);
++        if (depth_pending_valid) begin
++            depth_q_valid[depth_pending_index] <= 1'b1;
++            depth_q_tag[depth_pending_index] <= depth_pending_tag;
++        end
++        // Clear wins if a just-committed pending entry is popped this edge.
++        if (fbwq_pop_now) depth_q_valid[fbwq_rd_ptr] <= 1'b0;
++    end
++end
++reg depth_queue_conflict;
++integer depth_q_i;
++always @* begin
++    depth_queue_conflict = depth_pending_valid && (depth_pending_tag == depth_read_tag);
++    for (depth_q_i = 0; depth_q_i < FBWQ_DEPTH; depth_q_i = depth_q_i + 1)
++        if (depth_q_valid[depth_q_i] && depth_q_tag[depth_q_i] == depth_read_tag)
++            depth_queue_conflict = 1'b1;
++end
++// Keep local holding registers conservative; every write kind (color,
++// depth, clear, partial mask) is tagged identically. A 64-byte tag covers
++// any supported aligned depth-window burst (up to sixteen words). XOR
++// collisions only add waits; an equal address can never miss a conflict.
++wire depth_read_safe = !z_flush_valid && !z_src_pending_valid && !wc_busy
++                       && !fbwq_req_valid && !fbwq_stage_valid && !depth_queue_conflict;
++// DEPTH_HAZARD_QUEUE_END
++`else
++wire depth_read_safe = fb_read_barrier_clear;
++`endif
+ 
+ // Barrier for the z / blend-dst window fills.  The arbiter lets GPU reads
+ // overtake posted GPU writes, so the default waits for every write to drain.
+@@ -6542,6 +6611,9 @@
+         p3_valid <= 0; p3_color <= 0; p3_flags <= 0;
+         p3_fb_addr <= 0; p3_discard <= 0;
+         p3_z_test <= 0; p3_z_write <= 0; p3_z_addr <= 0; p3_z_value <= 0;
++`ifdef GPU_DEPTH_SELECTIVE_ACTIVE
++        depth_read_tag <= 0;
++`endif
+ `ifdef INCLUDE_GPU_SELECTIVE_READ_WAIT
+         p3_fb_srw_tag <= 0; p3_z_srw_tag <= 0; blend_srw_tag <= 0;
+ `endif
+@@ -9602,6 +9674,9 @@
+                                 ? {8'b0, cmap_rd_data} : p2b_color;
+                 p3_flags     <= p2b_flags;
+                 p3_fb_addr   <= p2b_fb_addr;
++`ifdef GPU_DEPTH_SELECTIVE_ACTIVE
++                depth_read_tag <= depth_hazard_tag(p2b_z_addr);
++`endif
+ `ifdef INCLUDE_GPU_SELECTIVE_READ_WAIT
+                 p3_fb_srw_tag <= srw_tag(p2b_fb_addr);
+                 p3_z_srw_tag  <= srw_tag(p2b_z_addr);
+@@ -10092,12 +10167,11 @@
+                             ztest_cap_word = zw_word[p3_z_word_addr[ZW_LOW-1:2]];
+                             fbss               <= FBSS_ZTEST_ACC_EVAL;
+                         end else if (!zw_fill_busy && !tex_axi_arvalid && !tex_m0_in_flight
+-                                  && fb_read_barrier_clear) begin
+-                            // Z-window fill: burst read of the whole aligned
+-                            // depth line.  The drain barrier is the
+-                            // conservative fb_write_drain_complete: the whole
+-                            // fb write queue drains before the z line is read,
+-                            // so no z-read overlaps any pending write.
++                                  && depth_read_safe) begin
++                            // Z-window fill: depth_read_safe defaults to the
++                            // original barrier. The cache-specific experiment
++                            // permits unrelated queued writes while preserving
++                            // all prior writes to this read's 64-byte line.
+                             // GPU_Z_READ_WINDOW==1
+                             // degenerates to exactly that old shape: a
+                             // single-word read (arlen 0) of the word under
+@@ -11662,3 +11736,6 @@
+ // CPU uploads data via MMIO before use.
+ 
+ endmodule
++`ifdef GPU_DEPTH_SELECTIVE_ACTIVE
++`undef GPU_DEPTH_SELECTIVE_ACTIVE
++`endif

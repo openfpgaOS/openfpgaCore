@@ -1,0 +1,52 @@
+{
+  "passed": true,
+  "baseline": "baseline",
+  "candidate": "alias-v2",
+  "frames": [
+    {
+      "frame": 20,
+      "rgb565": {
+        "exact": true,
+        "different_pixels": 0
+      },
+      "depth": {
+        "exact": true,
+        "different_pixels": 0
+      }
+    },
+    {
+      "frame": 80,
+      "rgb565": {
+        "exact": true,
+        "different_pixels": 0
+      },
+      "depth": {
+        "exact": true,
+        "different_pixels": 0
+      }
+    },
+    {
+      "frame": 180,
+      "rgb565": {
+        "exact": true,
+        "different_pixels": 0
+      },
+      "depth": {
+        "exact": true,
+        "different_pixels": 0
+      }
+    },
+    {
+      "frame": 300,
+      "rgb565": {
+        "exact": true,
+        "different_pixels": 0
+      },
+      "depth": {
+        "exact": true,
+        "different_pixels": 0
+      }
+    }
+  ],
+  "limits": "Four exact command-composed color/depth RTL samples; no coupled CPU timing."
+}

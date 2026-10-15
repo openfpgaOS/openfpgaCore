@@ -1,0 +1,1 @@
+PASS: full FIFO skips rendering/PCM writes in 3000 software-pump calls; normal positive control and hardware bypass pass

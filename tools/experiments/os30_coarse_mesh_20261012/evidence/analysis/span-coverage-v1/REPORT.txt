@@ -1,0 +1,52 @@
+Exact F24 display-list grouping evidence
+========================================
+
+The warm native trace contains 354 G_VTX calls.326 use the raw hardware path;
+27 mutable command sources and one other call use CPU transform.320 calls have
+immutable dest0 VTX followed by own-slot TRI commands;7 immutable calls have no
+immediate triangles. The 320 spans contain 2479 input triangles and form 111
+straight-line chains, ending at every state/list boundary. The largest has 23
+LOADs and 212 triangles. This is structural coverage, not new material admission.
+
+Current async admission is 76 warm jobs/571 triangles. These form 27 contiguous
+chains, including runs of 9 LOADs. Every adjacent accepted pair has identical
+full 28-word context, cull mode, RGB/UV material and alpha. Thus preserving
+current admission could reduce 76 submissions to 27 without expanding numeric or
+canonical-lifetime scope. The cold trace has 98 jobs in 21 chains;22 repair hints
+subsequently split or remove groups. A group cache must honor this hint change
+if it claims to preserve the existing policy.
+
+The independently joined routing ledger attributes the 250 warm legacy raw
+LOADs to 171 conservative suffix rejections,48 material admission rejections,
+22 repair hints,2 topology-table probe failures and 7 no-adjacent-TRI calls.
+The material subtype (cold versus unsupported) was not passively recorded.
+
+Starting at each chain's first already accepted job and extending to its state
+boundary would cover 126 LOADs/971 triangles in 17 chains:76 accepted,16 repair-hinted,
+34 suffix-rejected. This extension needs additional canonical-slot semantics.
+Only 5 of these tails end with a LOAD that overwrites every earlier slot; the
+usual decreasing final vertex count leaves higher slots from earlier LOADs.
+Terminal-view preservation cannot silently discard those rows. The existing
+dead-slot proof avoids this problem, and remains the smallest safe scope.
+
+Suggested producer mechanism: cold-compile a chain key/member list and cache
+the physical descriptor array by both source-pool generation and hint epoch.
+Reuse the current per-member immutable VTX/TRI source APIs. If any allocation
+recycles the arena, retry the entire group's source binding. On a warm cache
+hit, submit one dynamic context/material plus the cached group pointer/count;
+do not re-scan every member. True final job completion still gates recycling.
+
+The RTL must explicitly preserve/restore group context across a priority
+legacy grant, or document a changed group ownership policy. One context in
+the ingress followed by several jobs is not enough when legacy MMIO can
+overwrite that context. Holding raw ownership through a large group could
+reintroduce CPU waits and must be measured rather than assumed beneficial.
+
+All 327 immutable VTX commands per phase use direct original ELF vertex
+pointers in this scene. Generic segmented pointers need explicit resolution.
+All 111 structural chains also match the exact consumed reference raw context.
+
+Reproduce: python3 analyze.py ; python3 join_admission.py
+Inputs are the frozen F24 ELF and existing same-ELF native traces. Scripts
+write only the adjacent JSON reports. No app, RTL, replay, or measurement was
+changed. Submission counts are not measured saved cycles or FPS.

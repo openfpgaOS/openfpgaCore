@@ -1,0 +1,5 @@
+patching file src/sdk/include/of_gpu.h
+patching file src/sm64/sm64/src/pc/gfx/gfx_gpu.c
+patching file src/sm64/sm64/src/pc/gfx/gfx_gpu.h
+patching file src/sm64/sm64/src/pc/gfx/gfx_pc.c
+patching file src/sm64/pocket/perf_pocket.c

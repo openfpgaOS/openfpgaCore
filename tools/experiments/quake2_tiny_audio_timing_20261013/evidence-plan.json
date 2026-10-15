@@ -1,0 +1,70 @@
+{
+  "status": "Source9a4e seed1 independently qualifies90.07MHz; awaiting root export authorization after pending comparisons",
+  "qualified_rtl": {
+    "src/fpga/common/os30/gpu_core.v": "5359411b9af35fd4619da978c3f508997ae1c0a2ba3281512c50c5a1d1e4e217",
+    "src/fpga/common/gpu_geometry_worker.v": "dc82691f019420352905292bb60d71943d989a42e4b2608feeefa218fe8f50f9",
+    "src/fpga/common/os30/audio_mixer.v": "9e4028bc2d32fa17d74d821f40b16daaf1cc6eed4f3383e23f22e12e3944255c",
+    "src/fpga/common/os30/gpu_color_depth_cache.sv": "8f320a9ffba4e2ab608250ced03f869b96de97651fb10bd2d345c22a670d6e41"
+  },
+  "note": "Narrow inherited receipts only; some references point to prior package/repository fixtures. Final package must also pass raw selected timing reports and exact-source checks. No complete new30-seed sweep claim.",
+  "files": {
+    "timing-next/task-scope.json": "e218ca17fa2bddd373e48800a3ef6b777405e370ebc86d2ef2e6097620a4cb80",
+    "timing-next/combined-routing/FULL-GPU-VALIDATION.json": "ede8c3d770018d2004a3fceee0609c8ea8aa34de3ad7077a0817b74a93ddef1b",
+    "timing-next/combined-routing/merge-receipt.json": "f8b89bbf11376f277d82b1c1740bbcc550ba66990fc092d29283c068226f29c2",
+    "timing-next/combined-routing/full-gpu-v1/receipt.json": "bb58f21ddd2a58bba3e3dd6b04d996f825615f7ad9ce5f93773b7c749a19ed55",
+    "timing-next/worker/qualification.json": "c8711ed9383d4e3c364b472238e32b9025351bf24e7c69b2f96cc92e82e7b918",
+    "timing-next/worker/README.txt": "6ce401dc01f0595c591898f6e5be494d67ff3279cd0e36f2e38789d0f2747e01",
+    "timing-next/worker/gates-v1/receipt.json": "ccaec3e5d25af8f9bd75714c1ec025f60ab0e1ca856695f66cc0e17ec65d71c5",
+    "timing-next/worker-local-copy/qualification.json": "3ff1103ea020504d83259d5e55946ff373149cb4ebcd1fe26eb38d1233c405a1",
+    "timing-next/worker-local-copy/README.txt": "4f702d3ef8659ab4727fb88a6c81b42e956ae9dabbb30ba0d7f796985ae7b3e5",
+    "timing-next/worker-local-copy/gates-v1/receipt.json": "dfcdcc8b24248f5b11927a322d00c185d2647063556b69ab3c507bec456bffc9",
+    "timing-next/worker-staged/qualification.json": "9730a5bcbcb0f60cbf08f90b8e2e06bf922eb0e423bd1c86babd29baa50bf54d",
+    "timing-next/worker-staged/README.txt": "878973447c2244b7cf77246dd9da4ec2b60b82a0fb8400331ac50d77effc6b15",
+    "timing-next/worker-staged/gates-v2/receipt.json": "d086083354f0b6c8fc0858c814b47417d4d95ed2459501819b7093e46ece5cf6",
+    "timing-next/feature-cuts/palette-disabled-shadow/FINAL-VALIDATION.json": "bef66f8c28cb6a68b3cdc6e2487176a420f6c3306eff4aeeac3fff82714565b4",
+    "timing-next/feature-cuts/palette-disabled-shadow/mmio-tests-v2/receipt.json": "49bbd672d3f628f31cd00da4b45d9e481783dd19ff0c9dd94c1ee4d238593e50",
+    "timing-next/feature-cuts/worker-projection-guard/combined-full-gpu/receipt.json": "a897c991bda9cc98fbc3a40dc41f29e56c2a99c86728f8c4846ed5f3e880c01f",
+    "timing-next/gpu-dsp-routing/FINAL-VALIDATION.json": "a4ac4fbff67777ee5936c54b0878370ebd185bb74c337392ac8b92a7015a2d98",
+    "timing-next/gpu-dsp-routing/PROOF.txt": "6ea3a66c5da080b236a177260b3de51dfd66ff1fc7757a425cc6b413ad116407",
+    "timing-next/gpu-dsp-routing/operand-control-v1/receipt.json": "c9eb4d31dd47fe9341da47c9452ed02bafcba7f812d61d3732d42e5ec551a3f9",
+    "timing-next/gpu-dsp-routing/operand-shadow-summary.json": "58487d891b42f69baca20e9d6860d435189e83bec16ef0b8a71b760b1e2c1d7a",
+    "timing-next/gpu-dsp-routing/legacy-preprocess-receipt.json": "2465f07206e1f511b0b1ae9a2302a556b36a6a9e1737d9463363be33154f21c4",
+    "integration-tests/audit-final-ring.json": "2f5448e5889570753df6fcfefeb164651782b3e936dd3f4dc9d113ae46d64936",
+    "integration-tests/portable-proof-final-ring/receipt.json": "49f28894256902f655b03c972b3f95c8e069f34a47ffebfea6584f9ac3fb6e17",
+    "contention/integrated-final-ring-v1/receipt.json": "ad798d6c9479480f78cd01e2ba43face7b5ee4248a0c8f4eed3fd962ea65f689",
+    "contention/integrated-final-ring-all22-v1/receipt.json": "45b645fe9fe6d5ed822b0f9673bb57cb120a1cdaa184a8b500e4857640abfea1",
+    "audio-path-readme.txt": "6748cc96ac43e10f53a4dbdecbee7d490e66b2429b031a8656628a97c2e54865",
+    "final-source-wrpath/final-receipt.json": "b10bdf60c9ee5962d2491a6477c28f0ea452ebb713f6b310b631adf0330cf6d7",
+    "timing-next/combined-routing/worker-qualification-binding.json": "fba956f4de0afdce5e1bfcece4d1f62df5c49213dedfaa11d4b9cc5a01dcc4f8",
+    "timing-next/combined-routing/full-write-path/FINAL-VALIDATION.json": "df54c4570d38cacdb6102b7d5dadf4101ba9e340c2ae048299d990c7f466abb3",
+    "timing-next/combined-routing/full-write-path/source-binding.json": "301f3d15b4ea1f2c11ba4315498e58d9d723a9a9da417b115908135603745a3c",
+    "timing-next/mixer-loop-valid/qualification.json": "87e5d8184566da64ad43ad050e5978ad6e65bb5a715d653c1bcdfd7fc84d25b3",
+    "timing-next/mixer-loop-valid/tests-v1/receipt.json": "4a3f890c1a7a95946dbbfdc970659bf29049f2167351a2ca2b4c4c3c35cd58c7",
+    "timing-next/mixer-loop-valid/lockstep-v3/receipt.json": "4a3f890c1a7a95946dbbfdc970659bf29049f2167351a2ca2b4c4c3c35cd58c7",
+    "timing-next/mixer-loop-valid/cache-integration-v1/receipt.json": "7589d076df9a622d9b3a520bef97876d78358f3c4285d5e0bae8f6431e364518",
+    "timing-next/mixer-loop-valid/relative-to-final-mixer.patch": "56bce4b8f528b071a0e0fba1ce112bd32e778cb816036a991aacc81f26a3bb5d",
+    "timing-next/cache-meta-routing/FINAL-VALIDATION.json": "449eb7c215d44f72fcb34b7136c0ec6f95e8d11808a63c13668509b45d9c46c0",
+    "timing-next/cache-meta-routing/unit-v2/receipt.json": "bda44d4e267e114a5d4ba2289a290659e93ca24f7b07c9f226774560fdb00fcb",
+    "timing-next/cache-meta-routing/full-write-path/receipt.json": "db7e2854585174b7e95b5b26e69452ca02ff31e49cf971eea358084ac023767a",
+    "timing-next/cache-meta-routing/full-write-path/input-pins.json": "7a2966dad4dcad4d3288eaee4d182b4f1cffec35953b7c59d65db86362e26c3d",
+    "timing-next/cache-meta-routing/source.patch": "f3878ab3ed93c6d96a2616b24118477367b4bc9c61b08914da39b0b52b02940a",
+    "timing-next/mixer-loop-valid/README.txt": "68c38c69887c410a002a7a08774baac9bda4099cf60e2209373ea0474d3ba5b4",
+    "timing-next/cache-meta-routing/compile-binding.json": "b2f96b5f337c136447bd8dff0452eb043b02b2a026339b63f6b353850850d6a7",
+    "timing-next/mixer-loop-valid-v2/qualification.json": "d6eaee3db846f8488958855aabcc90c69875025f062702c460ecc280d49d6d76",
+    "timing-next/mixer-loop-valid-v2/lockstep-v1/receipt.json": "be81a6030af6bef41df7869f5a39227757eea04f2c7ce790a301dabd83b9681e",
+    "timing-next/mixer-loop-valid-v2/README.txt": "5fbdbfb55c4e0aaed72204e6b63b4a92852c1610231c551d6abbe604b9e5a724",
+    "timing-next/independent-physical-audit/corrected-cache-mixer-winner-seed1-control16.json": "43565cad08c9ba280db8c241a04891e777ef1cafdfba1318fe03529a947b4aa7"
+  },
+  "profile": "staged GPU/worker + activeOS30 cache8f320 + mixer9e4028 (dead shared-ALU operand removed)",
+  "gpu_gate": {
+    "replay": {
+      "path": "timing-next/combined-routing/full-gpu-v1/receipt.json",
+      "sha256": "bb58f21ddd2a58bba3e3dd6b04d996f825615f7ad9ce5f93773b7c749a19ed55"
+    },
+    "aggregate": {
+      "path": "timing-next/combined-routing/FULL-GPU-VALIDATION.json",
+      "sha256": "ede8c3d770018d2004a3fceee0609c8ea8aa34de3ad7077a0817b74a93ddef1b"
+    }
+  },
+  "scope": "General CPU/full audio groups; eight targeted seeds, selected seed1 raw reports independently audited. No new full30 release selection."
+}

@@ -1,0 +1,189 @@
+{
+  "passed": true,
+  "baseline": "baseline",
+  "candidate": "alias-v2",
+  "original_strict_receipt": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/comparisons/alias-v2-vs-baseline.json",
+  "original_strict_sha256": "de465b658700fd4c7ffb923cdb24c13cbbd4e41058379c0c902615c954f57e61",
+  "original_strict_passed": true,
+  "raster_receipt": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-coarse-20261012/validation/raster/baseline-vs-alias-v2.json",
+  "raster_receipt_sha256": "950032c2e6a25ff66feaa6e94001dc066669a12107c656d8c20f943040c7d9d4",
+  "results": [
+    {
+      "workload": "main",
+      "passed": true,
+      "frame_count": 360,
+      "all_command_bytes_frame_assignment_and_fences_exact": true,
+      "fence_count": 359,
+      "all_full_width_cpu_frames_exact": true,
+      "sound_service_counts_exact": true,
+      "other_frame_fields_exact": true,
+      "only_changed_frame_field": "gpu_barriers",
+      "changed_barrier_frames": 0,
+      "baseline_sync": {
+        "publishes": 10005,
+        "published_words": 12908963,
+        "observations": {
+          "fence_read": 360,
+          "rdptr_read": 3159,
+          "kernel_wait": 0
+        },
+        "barriers": {
+          "fence_read": 359,
+          "rdptr_read": 3159,
+          "kernel_wait": 0
+        },
+        "barrier_px": 0,
+        "wait_px": 0,
+        "wait_words": 0,
+        "queue_max_words": 4093,
+        "queued_words_at_end": 0,
+        "ring_overflows": 0
+      },
+      "candidate_sync": {
+        "publishes": 10005,
+        "published_words": 12908963,
+        "observations": {
+          "fence_read": 360,
+          "rdptr_read": 3159,
+          "kernel_wait": 0
+        },
+        "barriers": {
+          "fence_read": 359,
+          "rdptr_read": 3159,
+          "kernel_wait": 0
+        },
+        "barrier_px": 0,
+        "wait_px": 0,
+        "wait_words": 0,
+        "queue_max_words": 4093,
+        "queued_words_at_end": 0,
+        "ring_overflows": 0
+      },
+      "steady_raw_load_packets": 50858,
+      "steady_indexed_triangle_packets": 139822,
+      "change_percent": -0.07205425856673386,
+      "baseline_cycles": 5520031.329411765,
+      "candidate_cycles": 5516053.911764706
+    },
+    {
+      "workload": "sound",
+      "passed": true,
+      "frame_count": 120,
+      "all_command_bytes_frame_assignment_and_fences_exact": true,
+      "fence_count": 119,
+      "all_full_width_cpu_frames_exact": true,
+      "sound_service_counts_exact": true,
+      "other_frame_fields_exact": true,
+      "only_changed_frame_field": "gpu_barriers",
+      "changed_barrier_frames": 0,
+      "baseline_sync": {
+        "publishes": 3983,
+        "published_words": 5170661,
+        "observations": {
+          "fence_read": 120,
+          "rdptr_read": 1265,
+          "kernel_wait": 0
+        },
+        "barriers": {
+          "fence_read": 119,
+          "rdptr_read": 1265,
+          "kernel_wait": 0
+        },
+        "barrier_px": 0,
+        "wait_px": 0,
+        "wait_words": 0,
+        "queue_max_words": 4090,
+        "queued_words_at_end": 0,
+        "ring_overflows": 0
+      },
+      "candidate_sync": {
+        "publishes": 3983,
+        "published_words": 5170661,
+        "observations": {
+          "fence_read": 120,
+          "rdptr_read": 1265,
+          "kernel_wait": 0
+        },
+        "barriers": {
+          "fence_read": 119,
+          "rdptr_read": 1265,
+          "kernel_wait": 0
+        },
+        "barrier_px": 0,
+        "wait_px": 0,
+        "wait_words": 0,
+        "queue_max_words": 4090,
+        "queued_words_at_end": 0,
+        "ring_overflows": 0
+      },
+      "steady_raw_load_packets": 15841,
+      "steady_indexed_triangle_packets": 43599,
+      "change_percent": 0.02326239746832659,
+      "baseline_cycles": 6597557.29,
+      "candidate_cycles": 6599092.04
+    },
+    {
+      "workload": "live",
+      "passed": true,
+      "frame_count": 120,
+      "all_command_bytes_frame_assignment_and_fences_exact": true,
+      "fence_count": 119,
+      "all_full_width_cpu_frames_exact": true,
+      "sound_service_counts_exact": true,
+      "other_frame_fields_exact": true,
+      "only_changed_frame_field": "gpu_barriers",
+      "changed_barrier_frames": 0,
+      "baseline_sync": {
+        "publishes": 3009,
+        "published_words": 3575731,
+        "observations": {
+          "fence_read": 120,
+          "rdptr_read": 875,
+          "kernel_wait": 0
+        },
+        "barriers": {
+          "fence_read": 119,
+          "rdptr_read": 875,
+          "kernel_wait": 0
+        },
+        "barrier_px": 0,
+        "wait_px": 0,
+        "wait_words": 0,
+        "queue_max_words": 4086,
+        "queued_words_at_end": 0,
+        "ring_overflows": 0
+      },
+      "candidate_sync": {
+        "publishes": 3009,
+        "published_words": 3575731,
+        "observations": {
+          "fence_read": 120,
+          "rdptr_read": 875,
+          "kernel_wait": 0
+        },
+        "barriers": {
+          "fence_read": 119,
+          "rdptr_read": 875,
+          "kernel_wait": 0
+        },
+        "barrier_px": 0,
+        "wait_px": 0,
+        "wait_words": 0,
+        "queue_max_words": 4086,
+        "queued_words_at_end": 0,
+        "ring_overflows": 0
+      },
+      "steady_raw_load_packets": 11929,
+      "steady_indexed_triangle_packets": 31295,
+      "change_percent": -0.01432389210120899,
+      "baseline_cycles": 5881152.93,
+      "candidate_cycles": 5880310.52
+    }
+  ],
+  "diagnosis": "qsim gpu.c q_observe counts progress observations with new work, including GPU ring read-pointer samples. Coarser reserve sizes change SDK stream flush/ensure boundaries. All fence words and fence observations are equal; command execution semantics and all actual pixels/depth are checked separately.",
+  "limitations": [
+    "Scalar OS25-derived model with OS30 cache sizes, not Vexii native or Pocket FPS.",
+    "Standalone raster maximal-rate producer excludes actual CPU-paced overlap/audio/display contention.",
+    "No reduction in GPU command words: packet reservation/copy bookkeeping only."
+  ]
+}

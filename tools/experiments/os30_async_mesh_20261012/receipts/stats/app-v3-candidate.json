@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "base": 288716592,
+  "bytes": 64,
+  "cached_psram": false,
+  "valid_lines": 1024,
+  "arena_lines": 0,
+  "cache_bytes": 0,
+  "forwarded_bank_write_bytes": 0,
+  "logical_vs_physical_changed_bytes": 0,
+  "pending_stores_outside_arena": 0,
+  "refill_valid_outside_arena": false,
+  "writeback_valid_outside_arena": false,
+  "arena_pending_state_checks_pass": true,
+  "host_clock_edges_added": 0
+}

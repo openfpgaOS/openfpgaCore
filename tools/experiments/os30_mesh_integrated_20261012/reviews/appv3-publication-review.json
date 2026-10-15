@@ -1,0 +1,40 @@
+{
+  "status": "PASS_READ_ONLY_SOURCE_AND_DISASSEMBLY_REVIEW",
+  "elf_sha256": "691aefd7d76351a512fed71c3b79d55f1832b5d0b7d7b9c0e38a6d0b5e9d5c81",
+  "source_delta": "Only mesh_packet forced kick to normal threshold kick, wait_source one initial status test that force-publishes for (status&0xa1)==0x21, and diagnostic label. SDK/source-cache/task topology unchanged.",
+  "liveness": [
+    "ARM precedes marker commit; every armed-task later source wait is reached after its marker is staged.",
+    "Owner+validated+not-published can wait for older committed packet credits; force kick exposes the staged older markers before polling.",
+    "Published means the complete descriptor+payload reservation exists. Raw copy then has no GPU-consumer dependency and completes independently.",
+    "A legacy/preflight/discard owner cannot become a new ARM credit wait while this single CPU is inside wait_source; all ARM/validation writes are CPU initiated.",
+    "Source-pool recycling calls the same publication-aware owner drain before invalidating old offsets.",
+    "Pre-LOAD survivor aliases are allowed during validated wait. Once reserved copy begins, accepted aliases drain and later aliases wait only for independent copy completion.",
+    "GPU finish/frame boundaries already publish staged commands; required ordinary GPU state remains in exact ring order."
+  ],
+  "fallback_PCs": {
+    "source_calls": "0x104dca32",
+    "vertex_success": "0x104dca3a",
+    "last_command_probe": "0x104dcb78",
+    "source_false_return": "0x104dcb7c",
+    "source_fallback_block": "0x104cece8",
+    "command_allocate_path": "0x104dcc98"
+  },
+  "instructions": {
+    "source_calls": "104dca32:\t9cfff0ef          \tjal\t104dc400 <gfx_gpu_cram_vertex_source>",
+    "vertex_success": "104dca3a:\t00092683          \tlw\ta3,0(s2)",
+    "last_command_probe": "104dcb78:\t12080063          \tbeqz\ta6,104dcc98 <gfx_gpu_mesh_sources+0x398>",
+    "source_false_return": "104dcb7c:\t5466                \tlw\ts0,120(sp)",
+    "source_fallback_block": "104cece8:\t501c                \tlw\ta5,32(s0)",
+    "command_allocate_path": "104dcc98:\taf41a803          \tlw\ta6,-1292(gp) # 10fdd204 <g_cram_vertex_top>"
+  },
+  "functional_gate": "Fresh same-ELF native control and candidate required. Existing strict full frames/depth/Surface/register/FCSR/draw oracle unchanged; four source-cache fallback omissions still require their exact retirement proof.",
+  "bindings_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/.obj/sm64-mesh-integrated-v3-perfdiag/app.elf": "691aefd7d76351a512fed71c3b79d55f1832b5d0b7d7b9c0e38a6d0b5e9d5c81",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/evidence/app-build-v3/app.dis": "1ac87e5a7812eb9ee269b11d494d6cb5e9698c333717eed1213dfe96b23c9559",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "36ff1e0e20da4c6eab7112e67fa4bf565aae69c9f41f41d1b5dfc8d3910c3b83",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "8dc5cfe5726622feaf6b1f0d9a31b58d8ba7ff085f0c067022163adffae54e00",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/phase10_load_alias.v": "322bea9ab96131f84d13edf6448f490e7190519b38a2dfa1ba027fa31fae116d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/geometry_mesh_queue.v": "a3ac412006c503332f4a6d8895155d869f367bb39924e8a6a4c4245d1ff230e4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/mesh3_lifetime_appv3.py": "ee24533f66d93ead71bdbef2054b41f2cb9d217b62581a70451d47bf0f07575b"
+  }
+}

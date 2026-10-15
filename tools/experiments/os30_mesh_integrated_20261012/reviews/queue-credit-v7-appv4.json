@@ -1,0 +1,105 @@
+{
+  "schema": 1,
+  "scope": "Exact queue capacity and overlapping raster residence only; independent strict functional receipt still pending. No RTL or frozen output changes.",
+  "semantics": "Pre-edge available words=512-((committed_ptr-read_ptr)&1023). Required reservation=5+9*popcount(used_mask)+2*live_count. Count only validated, armed, unpublished owners with no incomplete fill. Counters overlap CPU polling and GPU raster work; never add them as savings.",
+  "phases": {
+    "1": {
+      "cycles": {
+        "reservation_admission_cycle": 159,
+        "own_fill_header_or_alias_drain": 159,
+        "exact_credit_block": 483784,
+        "exact_credit_block_and_gpu_fragment": 459679,
+        "exact_credit_block_and_prior_ordinary_copy": 425552,
+        "exact_credit_block_and_prior_generated_stream": 45718
+      },
+      "blocked_tasks": 8,
+      "largest_task_waits": [
+        {
+          "serial": 26,
+          "cycles": 331567
+        },
+        {
+          "serial": 114,
+          "cycles": 57238
+        },
+        {
+          "serial": 133,
+          "cycles": 33948
+        },
+        {
+          "serial": 27,
+          "cycles": 30364
+        },
+        {
+          "serial": 37,
+          "cycles": 24260
+        },
+        {
+          "serial": 40,
+          "cycles": 3697
+        },
+        {
+          "serial": 36,
+          "cycles": 1395
+        },
+        {
+          "serial": 115,
+          "cycles": 1315
+        }
+      ]
+    },
+    "2": {
+      "cycles": {
+        "reservation_admission_cycle": 159,
+        "own_fill_header_or_alias_drain": 159,
+        "exact_credit_block": 550944,
+        "exact_credit_block_and_gpu_fragment": 525251,
+        "exact_credit_block_and_prior_ordinary_copy": 477888,
+        "exact_credit_block_and_prior_generated_stream": 49047
+      },
+      "blocked_tasks": 8,
+      "largest_task_waits": [
+        {
+          "serial": 344,
+          "cycles": 377822
+        },
+        {
+          "serial": 432,
+          "cycles": 63062
+        },
+        {
+          "serial": 451,
+          "cycles": 45631
+        },
+        {
+          "serial": 345,
+          "cycles": 29157
+        },
+        {
+          "serial": 355,
+          "cycles": 24511
+        },
+        {
+          "serial": 358,
+          "cycles": 4687
+        },
+        {
+          "serial": 354,
+          "cycles": 4461
+        },
+        {
+          "serial": 433,
+          "cycles": 1613
+        }
+      ]
+    }
+  },
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/analysis/paired-v7-appv4.json": "68886ccea31f436b74cc697ffe115832397692b4dac508a6710cd706bcef71c0",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv4/run/mesh-events.tsv": "e200659f74cfd13673a947d682f13e22e65bc65ff3afa40d69137ab8bf248b0a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/analysis/summarize_adaptive_v4.py": "ad72f61f5a01f2e6b5768c0db0800d32f53b9cbd8d3f17409b287d799c9ab18a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv4/run/boundaries.tsv": "f2c36793dc7b63581b807af59e9d473b7b783cf4b1058975088617f9a6e5fc1b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv4/run/manifest.json": "4adf87663960d01b2ede99b87398d89dcbbab6dec308ed02248ee7abf5ca8be8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/prepared.json": "4212a8790cd00675b2b71fe0ae3452b6ecfc37e6123ee22bd09517098841fe7d"
+  }
+}

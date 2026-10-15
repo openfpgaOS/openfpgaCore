@@ -1,0 +1,15 @@
+{
+  "passed": true,
+  "artifact_sha256": "10581bdb05e98c87dcd08abb2798549267793920f6c91e1c6be964b0dd9fb636",
+  "app_manifest_sha256": "40ce036cdd3ac724868217d4f763185100b5dd445ac28e4a8d7b729c8de9d8a0",
+  "build_recipe_sha256": "1d71fb7cfa87c1ccd16e1462f89f3f6a3098d285f57930d2acf31d153b0d3af7",
+  "test_recipe_sha256": "995c27a3e5781ebf21bc57bcc82fc839ea41978f14e240fb9a5a1d24df0611dd",
+  "test_overlay_sha256": "566e0ac378198445a86ea9251573bcdf6be9310fd6bf0337143ddf71c16f37bd",
+  "logs": {
+    "renderer.log": "4f029655ad5dde10bc6281b43f230d7b9f523003824d0dd896e9cd1c0388e0ae",
+    "geometry.log": "1487b3a8b72238f85df5663fe6e4c751470ec67f23ece9c5d858313184969203",
+    "textures.log": "3d94081f0b9775a1e0170d5bef17e79a33f843a2c037c2daf49f038d2c1fc4f1"
+  },
+  "scope": "All native6 renderer, geometry, texture host suites passed against archive-staged tiny-audio source; expanded host-only sound fixture maps actual fixed mixer MMIO and tests capability/control/shutdown. Production archive unchanged.",
+  "prior_attempt": "Unmodified native6 host sound fixture lacked mixer MMIO page and failed ASan; corrected in owned overlay, not production code."
+}

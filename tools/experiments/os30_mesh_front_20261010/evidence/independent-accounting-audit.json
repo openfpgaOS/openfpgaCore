@@ -1,0 +1,104 @@
+{
+  "status": "PASS_INDEPENDENT_RECEIPTS_AND_GEOMETRY_ACCOUNTING",
+  "reviewer_script_sha256": "b5405e7bb77a0b4970051c02acb423519ed06f843f0e6b005994dc87cecde34d",
+  "receipt_checks": [
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/test-v2/report.json",
+      "sha256": "1c6bca7704cc78342181dd5f6b5cf5e544cad6fed3033c21d92e12e2ab414dc1",
+      "recorded_input_output_checks": 4
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/packet/fetch-v2/report.json",
+      "sha256": "7f7426bb59485918e60e16efd428123d688a3db0e4bcd7a7ad5ca9829850def2",
+      "recorded_input_output_checks": 3
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/engine-v4/manifest.json",
+      "sha256": "d16dd0a269fb7f52020981f10e717d814cbb071423bf99884a69fadbb2c2b995",
+      "recorded_input_output_checks": 12
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/chain-v1/manifest.json",
+      "sha256": "94ce9356d2ae33e6333c005d8682d3720f13896747c9a9d239266c4921c85028",
+      "recorded_input_output_checks": 15
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/scene-chain-v1/manifest.json",
+      "sha256": "d582790692c975938d523b1d1bb607e08532972a5088be46c834b3e36d120031",
+      "recorded_input_output_checks": 32
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/scene-cull-oracle-v1/manifest.json",
+      "sha256": "b40fcea95b94252aa0187ba8ded612a31933969e67a094fe249d066ffb3311f0",
+      "recorded_input_output_checks": 14
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/producer-v1/result.json",
+      "sha256": "c365dfb86d96c8f7fe802ed4d7402a85ea4459b41b0a98bcaafc8c813dcbf02f",
+      "recorded_input_output_checks": 6
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/scene-stream-v2/manifest.json",
+      "sha256": "6cd54b0bef07f7af91bb557840a947fd3f99cc2cae1200153a044a2b9d18a8c1",
+      "recorded_input_output_checks": 33
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/stream-control-v3/manifest.json",
+      "sha256": "a3f3e19b2fdfecf6d2d0f3ef75bb43180091b5710177f8689f95e0d9f9b25224",
+      "recorded_input_output_checks": 16
+    }
+  ],
+  "historical_oracle_v2_v3_equalities": [
+    {
+      "old": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native-task-v2/run/task-raw-vertices.tsv",
+      "new": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native-task-v3/run/task-raw-vertices.tsv",
+      "sha256": "b71d96b20a57385d13e8e48320e2a7a83c8c8d6f92e435a8fc9d722ee41fc457"
+    },
+    {
+      "old": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native-task-v2/tasks-classified.json",
+      "new": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/review/native-task-v3/tasks-classified.json",
+      "sha256": "50201e4045f73a5f10dfbe77e1d08df501c6191ec540cf949c25ea4abca3fc0b"
+    }
+  ],
+  "scene_totals_independently_recomputed": {
+    "tasks": 638,
+    "raw_words_compared": 64544,
+    "triangles": 4918,
+    "fallback_tasks": 150,
+    "accepted_geometry_tasks": 488,
+    "kept_triangles": 1511,
+    "packet_words_compared": 26377
+  },
+  "per_phase_geometry_outcomes": {
+    "1": {
+      "8": 58,
+      "0": 244,
+      "9": 17
+    },
+    "2": {
+      "8": 58,
+      "0": 244,
+      "9": 17
+    }
+  },
+  "producer_review": [
+    "The host producer enforces hardware count/index limits, immutable task/context keys, bounded credits, ordered completion and drain-before-generation recycle.",
+    "Host allocations and detached source bytes do not prove hardware DMA leases, RV32 submission cost or a running application path.",
+    "Sequence/handle exhaustion and actual PSRAM address/cache/publication binding remain integration obligations."
+  ],
+  "stream_review": [
+    "Final source must ignore ordinary cancel after accepted packet launch, block repeat publication and automatically own raw/list ports during packet consumption.",
+    "Command prefetch must drain before fallback exposure or ACK; accepted raw DMA remains owned until raw completion.",
+    "Packet error is an explicit zero-output repair outcome. Reset after publication requires coupled packet-destination and AXI-responder reset."
+  ],
+  "claim_limits": [
+    "488 geometry-accepted tasks do not establish real material/shader eligibility; packet comparison uses controlled material state.",
+    "The two prepared intervals and component tests establish no new full-frame gain, physical fit, clock rate or hardware deployment.",
+    "Only synthetic component tests are portable without private fixtures; source-bound scene/oracle/producer receipts require their external recorded inputs."
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/native-vectors-v3/vectors.json": "cb1bb8ee2bd4474a4da37a69baf8ce947abd7f52903388e7d73a4e4b4491681b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/scene-cull-oracle-v1/inputs.json": "e84a58d7a9e80b4133b809f0a0e9daa236026875b17fa007fd228f629dc9f285",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-core/tests/scene-cull-oracle-v1/outputs.bin": "082db91cc1412fef6c013c7b567bee752f23ebe48ff3e4ed8b25d8e3e955ce9f"
+  }
+}

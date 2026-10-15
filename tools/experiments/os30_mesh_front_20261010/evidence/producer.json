@@ -1,0 +1,52 @@
+{
+  "passed": true,
+  "checks": 3867,
+  "actual_tasks_per_sequence": 319,
+  "mock_sequences": 3,
+  "tasks_registered": 276,
+  "cold_triangles_decoded": 2284,
+  "submissions": 957,
+  "publication_words": 3828,
+  "steady_words_per_sequence": 1276,
+  "steady_per_triangle_scans": 0,
+  "credit_stalls": 702,
+  "max_pending": 8,
+  "completed": 957,
+  "compile_command": [
+    "g++",
+    "-std=c++17",
+    "-O2",
+    "-g",
+    "-fsanitize=address,undefined",
+    "-fno-omit-frame-pointer",
+    "-I/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/producer-v1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/producer-v1/test_producer.cpp",
+    "-o",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/producer-v1/test_producer"
+  ],
+  "sanitizer_environment": {
+    "ASAN_OPTIONS": "detect_leaks=0",
+    "reason": "LeakSanitizer cannot run under this tool environment ptrace; address and undefined behavior checks remain enabled."
+  },
+  "physical_source_bindings": {
+    "kind": "Deterministic mechanism-test allocation in the existing256KiB arena; actual hardware offsets join from passive trace separately.",
+    "unique_sources": 276,
+    "allocated_bytes": 96128
+  },
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/producer-v1/run.py": "2639d217a8dce82a87d02338ffd903ac9579376acc2e5d5e0f662a9c30c3c1be",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/task-vectors-frame360.json": "0d262a8ad8f763554f14be15a62f3cafda0ff20fcf5a6754016ad58c321ff542",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/producer-v1/task_producer.hpp": "0c56f89b71a53b8e055ad1ce51215a037afc884d08f1d2226a19539488ddb698",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/producer-v1/test_producer.cpp": "afbcbfe51b4538bd84b23eafb6dd2db9ae28be6814c4f12eb7a6e033547230da",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/producer-v1/vectors.hpp": "1131000957c5902cda6b5dc2c95158459e7512459ba373d8795c96349759d45f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-front-v1/work-app/producer-v1/test_producer": "da07465de8c5bd0e37563c68e9ac4bbceb1a0f9a57485f7dc32caa44a255a149"
+  },
+  "limitations": [
+    "Not linked into SM64; no runtime or performance claim. Host std::map/shared_ptr costs are not RV32 cycle estimates.",
+    "Physical source addresses in this producer are PSRAM offsets0..0x01000000. The scene RTL harness source window may be CPU-address based; its adapter/parameter must explicitly translate the source override.",
+    "Source-range overlap checks model an arena lease. Detached std::vector bytes do not prove hardware DMA ownership: the real uploader must honor the lease before writing and must drain all worker/source/repair reads before recycle.",
+    "Three repetitions exercise immutable cache hits, not actual later frames or an assertion that dynamic instance state repeats.",
+    "Task source bytes are actual. Context words and physical offset allocation are mechanism-test inputs until joined to passive trace.",
+    "Real admission still needs exact material/fallback handling, source-pool worker fence, cache maintenance and an ordered CPU/GPU publication adapter."
+  ]
+}

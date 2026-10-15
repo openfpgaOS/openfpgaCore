@@ -1,0 +1,49 @@
+name	type	location	fanout_edge_count	endpoint_fanouts
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|ddio_ina[2]~DFFLO	reg	DDIOINCELL_X46_Y45_N88	0	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_h[2]	reg	DDIOINCELL_X46_Y45_N88	1	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_l[2]	reg	DDIOINCELL_X46_Y45_N88	1	{core_top:ic|io_sdram:isr0|word_q[2]} {core_top:ic|io_sdram:isr0|word_q[18]} {core_top:ic|io_sdram:isr0|burst_data[2]} {core_top:ic|io_sdram:isr0|burst_data[18]}
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|ddio_ina[8]~DFFLO	reg	DDIOINCELL_X42_Y45_N31	0	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_h[8]	reg	DDIOINCELL_X42_Y45_N31	1	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_l[8]	reg	DDIOINCELL_X42_Y45_N31	1	{core_top:ic|io_sdram:isr0|word_q[8]} {core_top:ic|io_sdram:isr0|word_q[24]} {core_top:ic|io_sdram:isr0|burst_data[8]} {core_top:ic|io_sdram:isr0|burst_data[24]}
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|ddio_ina[3]~DFFLO	reg	DDIOINCELL_X42_Y45_N48	0	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_h[3]	reg	DDIOINCELL_X42_Y45_N48	1	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_l[3]	reg	DDIOINCELL_X42_Y45_N48	1	{core_top:ic|io_sdram:isr0|word_q[19]} {core_top:ic|io_sdram:isr0|word_q[3]} {core_top:ic|io_sdram:isr0|burst_data[3]} {core_top:ic|io_sdram:isr0|burst_data[19]}
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|ddio_ina[6]~DFFLO	reg	DDIOINCELL_X42_Y45_N65	0	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_h[6]	reg	DDIOINCELL_X42_Y45_N65	1	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_l[6]	reg	DDIOINCELL_X42_Y45_N65	1	{core_top:ic|io_sdram:isr0|word_q[22]} {core_top:ic|io_sdram:isr0|word_q[6]} {core_top:ic|io_sdram:isr0|burst_data[6]} {core_top:ic|io_sdram:isr0|burst_data[22]}
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|ddio_ina[9]~DFFLO	reg	DDIOINCELL_X43_Y45_N48	0	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_h[9]	reg	DDIOINCELL_X43_Y45_N48	1	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_l[9]	reg	DDIOINCELL_X43_Y45_N48	1	{core_top:ic|io_sdram:isr0|word_q[9]} {core_top:ic|io_sdram:isr0|word_q[25]} {core_top:ic|io_sdram:isr0|burst_data[9]} {core_top:ic|io_sdram:isr0|burst_data[25]}
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|ddio_ina[5]~DFFLO	reg	DDIOINCELL_X36_Y45_N48	0	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_h[5]	reg	DDIOINCELL_X36_Y45_N48	1	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_l[5]	reg	DDIOINCELL_X36_Y45_N48	1	{core_top:ic|io_sdram:isr0|word_q[21]} {core_top:ic|io_sdram:isr0|word_q[5]} {core_top:ic|io_sdram:isr0|burst_data[5]} {core_top:ic|io_sdram:isr0|burst_data[21]}
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|ddio_ina[10]~DFFLO	reg	DDIOINCELL_X50_Y45_N65	0	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_h[10]	reg	DDIOINCELL_X50_Y45_N65	1	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_l[10]	reg	DDIOINCELL_X50_Y45_N65	1	{core_top:ic|io_sdram:isr0|word_q[26]} {core_top:ic|io_sdram:isr0|word_q[10]} {core_top:ic|io_sdram:isr0|burst_data[10]} {core_top:ic|io_sdram:isr0|burst_data[26]}
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|ddio_ina[15]~DFFLO	reg	DDIOINCELL_X52_Y45_N14	0	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_h[15]	reg	DDIOINCELL_X52_Y45_N14	1	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_l[15]	reg	DDIOINCELL_X52_Y45_N14	1	{core_top:ic|io_sdram:isr0|word_q[31]} {core_top:ic|io_sdram:isr0|word_q[15]} {core_top:ic|io_sdram:isr0|burst_data[15]} {core_top:ic|io_sdram:isr0|burst_data[31]}
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|ddio_ina[13]~DFFLO	reg	DDIOINCELL_X48_Y45_N48	0	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_h[13]	reg	DDIOINCELL_X48_Y45_N48	1	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_l[13]	reg	DDIOINCELL_X48_Y45_N48	1	{core_top:ic|io_sdram:isr0|word_q[29]} {core_top:ic|io_sdram:isr0|word_q[13]} {core_top:ic|io_sdram:isr0|burst_data[13]} {core_top:ic|io_sdram:isr0|burst_data[29]}
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|ddio_ina[1]~DFFLO	reg	DDIOINCELL_X43_Y45_N31	0	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_h[1]	reg	DDIOINCELL_X43_Y45_N31	1	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_l[1]	reg	DDIOINCELL_X43_Y45_N31	1	{core_top:ic|io_sdram:isr0|word_q[1]} {core_top:ic|io_sdram:isr0|word_q[17]} {core_top:ic|io_sdram:isr0|burst_data[17]} {core_top:ic|io_sdram:isr0|burst_data[1]}
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|ddio_ina[12]~DFFLO	reg	DDIOINCELL_X38_Y45_N14	0	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_h[12]	reg	DDIOINCELL_X38_Y45_N14	1	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_l[12]	reg	DDIOINCELL_X38_Y45_N14	1	{core_top:ic|io_sdram:isr0|word_q[12]} {core_top:ic|io_sdram:isr0|word_q[28]} {core_top:ic|io_sdram:isr0|burst_data[28]} {core_top:ic|io_sdram:isr0|burst_data[12]}
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|ddio_ina[14]~DFFLO	reg	DDIOINCELL_X38_Y45_N48	0	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_h[14]	reg	DDIOINCELL_X38_Y45_N48	1	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_l[14]	reg	DDIOINCELL_X38_Y45_N48	1	{core_top:ic|io_sdram:isr0|word_q[14]} {core_top:ic|io_sdram:isr0|word_q[30]} {core_top:ic|io_sdram:isr0|burst_data[14]} {core_top:ic|io_sdram:isr0|burst_data[30]}
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|ddio_ina[0]~DFFLO	reg	DDIOINCELL_X43_Y45_N14	0	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_h[0]	reg	DDIOINCELL_X43_Y45_N14	1	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_l[0]	reg	DDIOINCELL_X43_Y45_N14	1	{core_top:ic|io_sdram:isr0|word_q[16]} {core_top:ic|io_sdram:isr0|word_q[0]} {core_top:ic|io_sdram:isr0|burst_data[0]} {core_top:ic|io_sdram:isr0|burst_data[16]}
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|ddio_ina[7]~DFFLO	reg	DDIOINCELL_X36_Y45_N65	0	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_h[7]	reg	DDIOINCELL_X36_Y45_N65	1	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_l[7]	reg	DDIOINCELL_X36_Y45_N65	1	{core_top:ic|io_sdram:isr0|word_q[7]} {core_top:ic|io_sdram:isr0|word_q[23]} {core_top:ic|io_sdram:isr0|burst_data[7]} {core_top:ic|io_sdram:isr0|burst_data[23]}
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|ddio_ina[11]~DFFLO	reg	DDIOINCELL_X38_Y45_N31	0	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_h[11]	reg	DDIOINCELL_X38_Y45_N31	1	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_l[11]	reg	DDIOINCELL_X38_Y45_N31	1	{core_top:ic|io_sdram:isr0|word_q[27]} {core_top:ic|io_sdram:isr0|word_q[11]} {core_top:ic|io_sdram:isr0|burst_data[11]} {core_top:ic|io_sdram:isr0|burst_data[27]}
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|ddio_ina[4]~DFFLO	reg	DDIOINCELL_X46_Y45_N105	0	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_h[4]	reg	DDIOINCELL_X46_Y45_N105	1	
+core_top:ic|io_sdram:isr0|altddio_in:u_dq_ddio_in|ddio_in_gbf:auto_generated|dataout_l[4]	reg	DDIOINCELL_X46_Y45_N105	1	{core_top:ic|io_sdram:isr0|word_q[20]} {core_top:ic|io_sdram:isr0|word_q[4]} {core_top:ic|io_sdram:isr0|burst_data[20]} {core_top:ic|io_sdram:isr0|burst_data[4]}

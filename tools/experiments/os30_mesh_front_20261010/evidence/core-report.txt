@@ -1,0 +1,74 @@
+The isolated mesh-task RTL prototype passes functional testing. It consumes an
+original VTX descriptor and hardware-fetched original TRI1/TRI2 span, launches
+and owns the existing raw LOAD/DMA/transform/light/reciprocal hardware, shares
+one existing FMA with exact triangle culling, and emits ordinary GPU vertex and
+indexed-triangle packets. No CPU triangle decoding, admission or index-repacking
+loop supplies this prototype. It replaces the BIM2 snapshot ownership path.
+
+The final streamed chain was tested on all 638 captured native task instances
+(319 in each replay interval), using exact 24-byte vertices, matrices and raw
+transform/light context. It matched all 64,544 raw result words against the
+unchanged baseline and compared culling with 4,918 fresh executions of the
+nine-operation cull DAG on the actual unchanged native CPU. All 26,377 published
+GPU packet words matched an independent conversion reference under controlled
+material parameters. Real game material/raster state is not bound by this test.
+
+Each interval accepted 244 complete geometry tasks and returned 75 complete
+tasks for fallback (58 partial-clip, 17 W/equal-W cases). The first interval's
+accepted tasks cover 2,004 input triangles and emit 754; the second covers 2,008
+and emits 757. Fully rejected tasks remain accepted with no publication. These
+are functional coverage counts, not performance predictions.
+
+Ownership rules are enforced in geometry_mesh_stream.v: vertex DMA drains
+before command-fetch ownership; early fallback drains command prefetch before
+exposing the exception or accepting an ACK; ACK serial must match. Accepted
+packet launch owns raw/list ports automatically, runs once, and blocks owner
+release until completion. Cancel wins over simultaneous first packet launch;
+after launch ordinary cancel is ignored and the packet completes. Discarding
+published work requires the coupled consumer/fabric reset. Packet prevalidation
+errors publish zero words and remain a caller-handled whole-task repair case.
+
+Directed tests include delayed command AR/R, early clipping during prefetch,
+late RLAST, matching ACK attempted before drain, stale ACK, recovery after
+errors, a held/repeated packet-start signal, attempted list/raw port theft,
+cancel after the first published word, and simultaneous cancel/start.
+
+Final receipts:
+  tests/engine-v4/manifest.json          actual arithmetic/DMA synthetic cases
+  tests/controller-v3/manifest.json      recorded command decode + limits
+  tests/chain-v1/manifest.json            arithmetic to ordinary packets
+  tests/scene-cull-oracle-v1/manifest.json actual-current-CPU arithmetic oracle
+  tests/scene-chain-v1/manifest.json      captured contexts, externally fed words
+  tests/scene-stream-v2/manifest.json     final hardware command-fetch chain
+  tests/stream-control-v3/manifest.json   final shared-owner control scenarios
+
+Development failures are excluded from qualification. engine-v1 had a harness
+combinational-evaluation omission after deasserting matrix_we. engine-v2 passed
+functional checks but exposed a Verilator-generated signed shift in the matrix
+valid-mask expression; the equivalent explicit ternary removes that sanitizer
+issue. engine-v3 was a whitespace/Verilog-literal parsing error while making
+that change. stream-control-v1 assumed task_ready became true immediately after
+an error ACK; the interface needs one cleanup edge to clear fetch cancellation.
+The harness now waits for actual ready. That failure required no RTL repair.
+Separately, source review prompted enforced one-shot packet launch, internal
+raw/list ownership and post-publication cancel handling. scene-stream-v1 is the
+pre-hardening result; its exact RTL was saved there as a bound source copy.
+The final streamed scene and directed tests use the hardened source.
+
+Implementation/fit limits remain explicit. Command fetching is implemented,
+but live application queue submission, immutable source-pool recycling, prepared
+material state, ordered task-local clipping/equal-W repair, and the downstream
+GPU/raster integration are not implemented here. The current vertex-pool recycle
+assumes synchronous LOAD; async use must drain or retain a source lease. No
+full-frame speedup, FPGA resource fit or clock qualification is established.
+
+The qualified baseline has 311 ALMs and four M10Ks spare. Current added task
+storage is one 128x32 survivor RAM; no snapshot banks or second FPU are present.
+The command reader uses two word registers, and the packet converter adds no
+BRAM. A future 512-word output FIFO would consume two M10Ks, leaving one block
+for queued immutable context. Actual ALM use and timing remain unqualified;
+the four-block budget is an architecture allowance, not a synthesis result.
+
+All changes are confined to this new experiment. Production RTL, SD content,
+prior frozen evidence and sibling projects were not changed. No Quartus fit,
+seed sweep or deployment was run.

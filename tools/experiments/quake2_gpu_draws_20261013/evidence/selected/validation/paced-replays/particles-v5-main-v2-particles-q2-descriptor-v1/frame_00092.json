@@ -1,0 +1,279 @@
+{
+  "passed": true,
+  "frame": 92,
+  "whole_output_exact": true,
+  "executable_sha256": "b9750ca5ee64a51feb410502f82540b9d1f1cdfabd453bfdb3e9ca7a94788745",
+  "results": {
+    "unpaced": {
+      "command": [
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-gpu-draws-20261013/validation/paced-gpu/particles-q2-descriptor-v1/obj/Vtb_gpu",
+        "+fast_tex=1",
+        "+tagged_tex=1",
+        "+memory_traffic=0",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-gpu-draws-20261013/validation/paced-vectors/particles-v5-main-v2/frame_00092.vec",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-gpu-draws-20261013/validation/paced-replays/particles-v5-main-v2-particles-q2-descriptor-v1/frame_00092.unpaced.bin"
+      ],
+      "output_sha256": "1bd140c0d1e38fd401a1aa43357a73d1a1266cd6b6eafbfac37f2b5250d0c556",
+      "vector_sha256": "e054bcf809d37cfc7de05236aa4c33aa3d199453649ce12e0a2d80d070c1806a",
+      "stats": {
+        "RESULT": {
+          "cycles": 3683969,
+          "busy_cycles": 3683834,
+          "batches": 49
+        },
+        "ARBITER": {
+          "window_cycles": 3683969,
+          "gpu_service": 1448322,
+          "cpu_service": 0,
+          "bridge_service": 0,
+          "audio_service": 0,
+          "idle": 2235647,
+          "cpu_wait_gpu": 0,
+          "cpu_wait_cpu": 0,
+          "cpu_wait_bridge": 0,
+          "cpu_wait_audio": 0,
+          "cpu_wait_idle": 0,
+          "gpu_ar_wait": 100767,
+          "gpu_aw_wait": 307146,
+          "gpu_w_wait": 0,
+          "cpu_arrivals": 0,
+          "cpu_accepts": 0,
+          "cpu_completed": 0,
+          "cpu_ar_wait": 0,
+          "cpu_outstanding": 0,
+          "cpu_queue_n": 0,
+          "cpu_queue_sum": 0,
+          "cpu_queue_p50": 0,
+          "cpu_queue_p95": 0,
+          "cpu_queue_max": 0,
+          "cpu_service_n": 0,
+          "cpu_service_sum": 0,
+          "cpu_service_p50": 0,
+          "cpu_service_p95": 0,
+          "cpu_service_max": 0,
+          "cpu_total_n": 0,
+          "cpu_total_sum": 0,
+          "cpu_total_p50": 0,
+          "cpu_total_p95": 0,
+          "cpu_total_max": 0,
+          "audio_arrivals": 0,
+          "audio_accepts": 0,
+          "audio_completed": 0,
+          "audio_ar_wait": 0,
+          "audio_outstanding": 0,
+          "audio_queue_n": 0,
+          "audio_queue_sum": 0,
+          "audio_queue_p50": 0,
+          "audio_queue_p95": 0,
+          "audio_queue_max": 0,
+          "audio_service_n": 0,
+          "audio_service_sum": 0,
+          "audio_service_p50": 0,
+          "audio_service_p95": 0,
+          "audio_service_max": 0,
+          "audio_total_n": 0,
+          "audio_total_sum": 0,
+          "audio_total_p50": 0,
+          "audio_total_p95": 0,
+          "audio_total_max": 0,
+          "scan_arrivals": 0,
+          "scan_completed": 0,
+          "scan_latency_n": 0,
+          "scan_latency_sum": 0,
+          "scan_latency_p50": 0,
+          "scan_latency_p95": 0,
+          "scan_latency_max": 0
+        },
+        "TEXTURE": {
+          "fills": 19014,
+          "beats": 76056,
+          "request_wait": 38858,
+          "service_sum": 573077,
+          "preloads": 0,
+          "host_preload_bytes": 0,
+          "cram_errors": 0
+        },
+        "WORKER": {
+          "empty": 502102,
+          "output_stall": 1945488,
+          "active": 1236379,
+          "raster_overlap": 1026310
+        },
+        "MESH": {
+          "padding_beats": 5,
+          "padding_seed": 3735936685,
+          "fills": 7182,
+          "beats": 57456,
+          "request_wait": 19913,
+          "service_sum": 222642,
+          "raster_read_overlap": 162524,
+          "texture_requests_overlap": 0
+        },
+        "UPLOAD": {
+          "words": 9799,
+          "upload_cycles": 417704,
+          "word_cycles_max": 52,
+          "uploads_while_fill": 6644,
+          "fills_while_upload": 6662,
+          "concurrent_span": 0,
+          "readback_words": 9799
+        }
+      },
+      "fences": []
+    },
+    "paced": {
+      "command": [
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-gpu-draws-20261013/validation/paced-gpu/particles-q2-descriptor-v1/obj/Vtb_gpu",
+        "+fast_tex=1",
+        "+tagged_tex=1",
+        "+memory_traffic=0",
+        "+cpu_paced=1",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-gpu-draws-20261013/validation/paced-vectors/particles-v5-main-v2/frame_00092.paced.vec",
+        "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-gpu-draws-20261013/validation/paced-replays/particles-v5-main-v2-particles-q2-descriptor-v1/frame_00092.paced.bin"
+      ],
+      "output_sha256": "1bd140c0d1e38fd401a1aa43357a73d1a1266cd6b6eafbfac37f2b5250d0c556",
+      "vector_sha256": "2eee1fba550be50bc6d5f979a81e23ec40abb3df86cff15ef36a38740643747e",
+      "stats": {
+        "RESULT": {
+          "cycles": 6471577,
+          "busy_cycles": 3623404,
+          "batches": 49
+        },
+        "PACE": {
+          "cpu_cycles": 4900486,
+          "cpu_overlap": 2240448,
+          "ring_wait": 98082,
+          "fence_wait": 1284874,
+          "final_drain": 128,
+          "prior_frame_fences": 0,
+          "upload_wait": 188004
+        },
+        "ARBITER": {
+          "window_cycles": 6471577,
+          "gpu_service": 1446827,
+          "cpu_service": 0,
+          "bridge_service": 0,
+          "audio_service": 0,
+          "idle": 5024750,
+          "cpu_wait_gpu": 0,
+          "cpu_wait_cpu": 0,
+          "cpu_wait_bridge": 0,
+          "cpu_wait_audio": 0,
+          "cpu_wait_idle": 0,
+          "gpu_ar_wait": 96638,
+          "gpu_aw_wait": 320469,
+          "gpu_w_wait": 0,
+          "cpu_arrivals": 0,
+          "cpu_accepts": 0,
+          "cpu_completed": 0,
+          "cpu_ar_wait": 0,
+          "cpu_outstanding": 0,
+          "cpu_queue_n": 0,
+          "cpu_queue_sum": 0,
+          "cpu_queue_p50": 0,
+          "cpu_queue_p95": 0,
+          "cpu_queue_max": 0,
+          "cpu_service_n": 0,
+          "cpu_service_sum": 0,
+          "cpu_service_p50": 0,
+          "cpu_service_p95": 0,
+          "cpu_service_max": 0,
+          "cpu_total_n": 0,
+          "cpu_total_sum": 0,
+          "cpu_total_p50": 0,
+          "cpu_total_p95": 0,
+          "cpu_total_max": 0,
+          "audio_arrivals": 0,
+          "audio_accepts": 0,
+          "audio_completed": 0,
+          "audio_ar_wait": 0,
+          "audio_outstanding": 0,
+          "audio_queue_n": 0,
+          "audio_queue_sum": 0,
+          "audio_queue_p50": 0,
+          "audio_queue_p95": 0,
+          "audio_queue_max": 0,
+          "audio_service_n": 0,
+          "audio_service_sum": 0,
+          "audio_service_p50": 0,
+          "audio_service_p95": 0,
+          "audio_service_max": 0,
+          "audio_total_n": 0,
+          "audio_total_sum": 0,
+          "audio_total_p50": 0,
+          "audio_total_p95": 0,
+          "audio_total_max": 0,
+          "scan_arrivals": 0,
+          "scan_completed": 0,
+          "scan_latency_n": 0,
+          "scan_latency_sum": 0,
+          "scan_latency_p50": 0,
+          "scan_latency_p95": 0,
+          "scan_latency_max": 0
+        },
+        "TEXTURE": {
+          "fills": 19014,
+          "beats": 76056,
+          "request_wait": 37784,
+          "service_sum": 437322,
+          "preloads": 0,
+          "host_preload_bytes": 0,
+          "cram_errors": 0
+        },
+        "WORKER": {
+          "empty": 3617975,
+          "output_stall": 1628324,
+          "active": 1225278,
+          "raster_overlap": 975042
+        },
+        "MESH": {
+          "padding_beats": 5,
+          "padding_seed": 3735936685,
+          "fills": 7182,
+          "beats": 57456,
+          "request_wait": 18941,
+          "service_sum": 222642,
+          "raster_read_overlap": 150991,
+          "texture_requests_overlap": 0
+        },
+        "UPLOAD": {
+          "words": 9799,
+          "upload_cycles": 284171,
+          "word_cycles_max": 29,
+          "uploads_while_fill": 0,
+          "fills_while_upload": 0,
+          "concurrent_span": 0,
+          "readback_words": 9799
+        }
+      },
+      "fences": [
+        {
+          "pc": 272713258,
+          "token": 105,
+          "wait": 519294
+        },
+        {
+          "pc": 272713258,
+          "token": 106,
+          "wait": 43528
+        },
+        {
+          "pc": 272713258,
+          "token": 107,
+          "wait": 0
+        },
+        {
+          "pc": 272713258,
+          "token": 108,
+          "wait": 31303
+        },
+        {
+          "pc": 272713258,
+          "token": 109,
+          "wait": 690749
+        }
+      ]
+    }
+  },
+  "limits": "Run a timestamped producer and an unpaced rendering control on identical RTL."
+}

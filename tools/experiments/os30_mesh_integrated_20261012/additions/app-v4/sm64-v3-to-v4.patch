@@ -1,0 +1,34 @@
+--- a/src/sm64/pocket/perf_pocket.c
++++ b/src/sm64/pocket/perf_pocket.c
+@@ -381,7 +381,7 @@
+ #if SM64_PERF_DETAILS
+     print_text(12,210,"PERF P3 VERT");
+ #else
+-    print_text(12,210,"PERF F18 MESH3");
++    print_text(12,210,"PERF F19 MESH4");
+ #endif
+     if(!s->valid) {
+         print_text(12,178,"WAIT 5 SECONDS IN LEVEL");
+--- a/src/sm64/sm64/src/pc/gfx/gfx_gpu.c
++++ b/src/sm64/sm64/src/pc/gfx/gfx_gpu.c
+@@ -2088,9 +2088,17 @@
+     *packet++=(uint32_t)context->u_offset;
+     *packet++=(uint32_t)context->v_offset;
+     _gpu_ring_commit(5);g_vc_words+=5;
+-    /* Keep small mesh packets in the normal command batch. Source ownership
+-     * waits publish older staged markers if packet credit blocks progress. */
+-    of_gpu_kick();
++    /* Batch while published CPU-ring work remains, but feed the GPU before
++     * that queue runs dry. The staged cursor includes unpublished words;
++     * subtract them before comparing against the hardware read pointer. */
++    if(!_gpu_cpu_ring)of_gpu_kick_now();
++    else if(_gpu_cmd_words>=OF_GPU_KICK_MIN_WORDS||_gpu_unflushed_sync)
++        of_gpu_kick();
++    else {
++        const uint32_t published=(_gpu_wrptr-(_gpu_cmd_words<<2))&_gpu_ring_mask;
++        const uint32_t queued=(published-GPU_RING_RDPTR)&_gpu_ring_mask;
++        if(queued<512u)of_gpu_kick_now();
++    }
+ #else
+     (void)serial;(void)context;
+ #endif

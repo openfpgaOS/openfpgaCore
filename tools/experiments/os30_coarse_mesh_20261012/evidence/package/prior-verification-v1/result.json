@@ -1,0 +1,69 @@
+{
+  "status": "PASS",
+  "scope": "Read-only source inventory, exact forward/reverse patches and frozen evidence verification; no builds.",
+  "runner_sha256": "da61849aaa09e6cf945d6c5784a3b5bae017ac0830bbff7f126bae7a24613ef1",
+  "bundles": [
+    {
+      "label": "priority_mesh",
+      "bundle": "/home/alberto/Repos/openfpgaCore/tools/experiments/os30_priority_mesh_20261012",
+      "command": [
+        "/usr/bin/python3",
+        "-B",
+        "/home/alberto/Repos/openfpgaCore/tools/experiments/os30_priority_mesh_20261012/verify.py",
+        "--patches",
+        "--evidence"
+      ],
+      "returncode": 0,
+      "status": "PASS",
+      "manifest_sha256": "ca117645e4e4faa692c4ee244b7fc19c2923e08681e5d474a074e4aae9bd407f",
+      "verifier_sha256": "5ef1ceb6028b19e19a8d22a9c65935b61d3704f072b245c8d09c95a44593b1df",
+      "bundle_unchanged": true,
+      "files": 130,
+      "patch_round_trips": 6,
+      "native_inputs": 181,
+      "stdout": {
+        "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/package/prior-verification-v1/priority_mesh.stdout.txt",
+        "sha256": "bdd956d71182ab28b27f74700433f159e5ed12afa8fa60aa858a03bdbab0ebcb"
+      },
+      "stderr": {
+        "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/package/prior-verification-v1/priority_mesh.stderr.txt",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "inventory": {
+        "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/package/prior-verification-v1/priority_mesh.inventory.json",
+        "sha256": "a4bbdc10c4c4a3a85be839a5621232b98f7508d3d8e3b35178e9630df7815381"
+      }
+    },
+    {
+      "label": "async_mesh",
+      "bundle": "/home/alberto/Repos/openfpgaCore/tools/experiments/os30_async_mesh_20261012",
+      "command": [
+        "/usr/bin/python3",
+        "-B",
+        "/home/alberto/Repos/openfpgaCore/tools/experiments/os30_async_mesh_20261012/verify.py",
+        "--patches",
+        "--evidence"
+      ],
+      "returncode": 0,
+      "status": "PASS",
+      "manifest_sha256": "7b3cd052933f4f299befafc9930f14314d52184c0875b87c767975b0467ebaae",
+      "verifier_sha256": "5ef1ceb6028b19e19a8d22a9c65935b61d3704f072b245c8d09c95a44593b1df",
+      "bundle_unchanged": true,
+      "files": 135,
+      "patch_round_trips": 6,
+      "native_inputs": 181,
+      "stdout": {
+        "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/package/prior-verification-v1/async_mesh.stdout.txt",
+        "sha256": "bdd956d71182ab28b27f74700433f159e5ed12afa8fa60aa858a03bdbab0ebcb"
+      },
+      "stderr": {
+        "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/package/prior-verification-v1/async_mesh.stderr.txt",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "inventory": {
+        "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/package/prior-verification-v1/async_mesh.inventory.json",
+        "sha256": "c360f0158e6bc3ed5dda7a0a4ebe57a0ce29e3e952aa0dfddd32501a07c9ab8d"
+      }
+    }
+  ]
+}

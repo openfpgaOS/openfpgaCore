@@ -1,0 +1,164 @@
+{
+  "schema": "f28-display-list-observer-v1",
+  "elf_sha256": "7294008468ae3760e6aac7fda5539e5dadd255c604e3b4a6c66bc028f68e422b",
+  "entry_pc": 273507328,
+  "entry_instruction": 29009,
+  "vertex_entry_pc": 273486016,
+  "command_register": 9,
+  "parent_command_register": 9,
+  "parent_command_addend": -8,
+  "app_continuation_address": 285097384,
+  "root_return_pcs": [
+    273514552
+  ],
+  "recursive_return_pcs": [
+    273511122
+  ],
+  "vertex_return_pcs": [
+    273507530
+  ],
+  "return_instructions": [
+    {
+      "pc": 273509146,
+      "bits": 32898,
+      "bytes": 2
+    }
+  ],
+  "reviewed_instructions": [
+    {
+      "pc": 273507328,
+      "bits": 29009,
+      "bytes": 2,
+      "disassembly": "addi sp,sp,-240"
+    },
+    {
+      "pc": 273507364,
+      "bits": 33962,
+      "bytes": 2,
+      "disassembly": "mv s1,a0"
+    },
+    {
+      "pc": 273507366,
+      "bits": 49710,
+      "bytes": 2,
+      "disassembly": "sw a1,4(sp)"
+    },
+    {
+      "pc": 273507392,
+      "bits": 16512,
+      "bytes": 2,
+      "disassembly": "lw s0,0(s1)"
+    },
+    {
+      "pc": 273507506,
+      "bits": 16540,
+      "bytes": 2,
+      "disassembly": "lw a5,0(s1)"
+    },
+    {
+      "pc": 273507508,
+      "bits": 16592,
+      "bytes": 2,
+      "disassembly": "lw a2,4(s1)"
+    },
+    {
+      "pc": 273507526,
+      "bits": 3217006831,
+      "bytes": 4,
+      "disassembly": "jal 104d10c0 <gfx_sp_vertex>"
+    },
+    {
+      "pc": 273509146,
+      "bits": 32898,
+      "bytes": 2,
+      "disassembly": "ret"
+    },
+    {
+      "pc": 273509148,
+      "bits": 15996819,
+      "bytes": 4,
+      "disassembly": "slli a5,s0,0xf"
+    },
+    {
+      "pc": 273509152,
+      "bits": 16584,
+      "bytes": 2,
+      "disassembly": "lw a0,4(s1)"
+    },
+    {
+      "pc": 273509154,
+      "bits": 2047333475,
+      "bytes": 4,
+      "disassembly": "bgez a5,104d72ca <gfx_run_dl+0xeca>"
+    },
+    {
+      "pc": 273509158,
+      "bits": 33962,
+      "bytes": 2,
+      "disassembly": "mv s1,a0"
+    },
+    {
+      "pc": 273509160,
+      "bits": 47649,
+      "bytes": 2,
+      "disassembly": "j 104d6440 <gfx_run_dl+0x40>"
+    },
+    {
+      "pc": 273511114,
+      "bits": 1185,
+      "bytes": 2,
+      "disassembly": "addi s1,s1,8"
+    },
+    {
+      "pc": 273511116,
+      "bits": 34214,
+      "bytes": 2,
+      "disassembly": "mv a1,s1"
+    },
+    {
+      "pc": 273511118,
+      "bits": 2469392623,
+      "bytes": 4,
+      "disassembly": "jal 104d6400 <gfx_run_dl>"
+    },
+    {
+      "pc": 273511122,
+      "bits": 2532307055,
+      "bytes": 4,
+      "disassembly": "j 104d6440 <gfx_run_dl+0x40>"
+    },
+    {
+      "pc": 273514538,
+      "bits": 34086,
+      "bytes": 2,
+      "disassembly": "mv a0,s1"
+    },
+    {
+      "pc": 273514542,
+      "bits": 17793,
+      "bytes": 2,
+      "disassembly": "li a1,0"
+    },
+    {
+      "pc": 273514548,
+      "bits": 3167740143,
+      "bytes": 4,
+      "disassembly": "jal 104d6400 <gfx_run_dl>"
+    }
+  ],
+  "rationale": [
+    "The F28 gfx_run_dl prologue moves entry a0 to s1 and stores a1 at4(sp); opcode and VTX operands are loaded through s1.",
+    "At the gfx_sp_vertex entry s1 is still the current VTX command; the call returns to104d64ca.",
+    "A pushed G_DL loads its child target from4(s1), then advances s1 by8 before passing s1 in a1. At child entry the independent parent command witness is therefore s1-8, not s1.",
+    "The tail G_DL branch updates s1 from a0 and jumps to the interpreter loop without entering gfx_run_dl; the passive invocation stack keeps its original continuation.",
+    "The root gfx_run call explicitly loads a1=0. The single reviewed return instruction is followed by the actual retired caller resume; the stack pops exactly once."
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/bind_f28_dl_v1.py": "dc6164fe0367c58a5933badbfa270de974166f89bd70ef4635713fccc9081599",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v4/.obj/sm64-coarse-mesh-v4-perfdiag/app.elf": "7294008468ae3760e6aac7fda5539e5dadd255c604e3b4a6c66bc028f68e422b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v4/evidence/app-build-v4/build-result.json": "b9ade6d031ec6bab86e0100211ab047aa83cefd33a70613fd2f1849b2ccd08a2",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v4/evidence/app-build-v4/app.dis": "598beb4bc19a62385d2eb63491f3e83cc2a11f5273fc12563d15b85933f58044",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v4/evidence/app-build-v4/symbols.txt": "d592834d0609fca86b6b44fd27183fe54ba3a844e42d0ad8436c12b10e6044c6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v4/src/sm64/sm64/src/pc/gfx/gfx_pc.c": "6322db99282cc24f253125cf48cb21e7ff47910c98623f5f247c7e1886bd563d"
+  }
+}

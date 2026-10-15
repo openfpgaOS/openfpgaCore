@@ -1,0 +1,256 @@
+{
+  "outcome": "NO_GAIN",
+  "selected_app": "F28",
+  "comparisons": [
+    {
+      "app": "F25",
+      "elf_sha256": "7cc91763832915ca13c240db92d7623a550af908701d5b096f0ec29bb43b33af",
+      "control_cycles": [
+        4229536,
+        4594411
+      ],
+      "aj02_single_cycles": [
+        4744686,
+        4673434
+      ],
+      "aj03_group_cycles": [
+        4682326,
+        4669689
+      ],
+      "cycle_change_percent": [
+        10.705429626323081,
+        1.6384690007054115
+      ],
+      "combined_change_percent": 5.984487440824382,
+      "submissions": {
+        "1": {
+          "jobs": 98,
+          "input_triangles": 772,
+          "repairs": 22,
+          "groups": 12,
+          "single_jobs": 9,
+          "CPU_requests": 21,
+          "group_members": 89,
+          "skipped_CPU_LOAD_calls": 77
+        },
+        "2": {
+          "jobs": 76,
+          "input_triangles": 571,
+          "repairs": 0,
+          "groups": 14,
+          "single_jobs": 13,
+          "CPU_requests": 27,
+          "group_members": 63,
+          "skipped_CPU_LOAD_calls": 49
+        }
+      },
+      "original_cpu_load_calls": 708,
+      "actual_cpu_load_calls": 582,
+      "original_raw_loads": 652,
+      "legacy_raw_loads": 478,
+      "change_from_same_elf_aj02_percent": [
+        -1.3143124750510382,
+        -0.08013379455021896
+      ]
+    },
+    {
+      "app": "F26",
+      "elf_sha256": "725d6ffb0430260618e602be2e3887664471b53715f555c6590cdd0fae5ec7b5",
+      "control_cycles": [
+        4326462,
+        4673773
+      ],
+      "aj02_single_cycles": [
+        4836758,
+        4790865
+      ],
+      "aj03_group_cycles": [
+        4787216,
+        4751887
+      ],
+      "cycle_change_percent": [
+        10.64967171790714,
+        1.6713263566715764
+      ],
+      "combined_change_percent": 5.987265888057358,
+      "submissions": {
+        "1": {
+          "jobs": 98,
+          "input_triangles": 772,
+          "repairs": 22,
+          "groups": 12,
+          "single_jobs": 9,
+          "CPU_requests": 21,
+          "group_members": 89,
+          "skipped_CPU_LOAD_calls": 77
+        },
+        "2": {
+          "jobs": 76,
+          "input_triangles": 571,
+          "repairs": 0,
+          "groups": 14,
+          "single_jobs": 13,
+          "CPU_requests": 27,
+          "group_members": 63,
+          "skipped_CPU_LOAD_calls": 49
+        }
+      },
+      "original_cpu_load_calls": 708,
+      "actual_cpu_load_calls": 582,
+      "original_raw_loads": 652,
+      "legacy_raw_loads": 478,
+      "change_from_same_elf_aj02_percent": [
+        -1.0242811403836982,
+        -0.8135900301928789
+      ]
+    },
+    {
+      "app": "F27",
+      "elf_sha256": "a5b3b354f8cc0c6bdfbf037e3cb9ebbe6f2ff92e85ac8eab19f516b63b39a80d",
+      "control_cycles": [
+        4264850,
+        4649707
+      ],
+      "aj02_single_cycles": null,
+      "aj03_group_cycles": [
+        4757143,
+        4724262
+      ],
+      "cycle_change_percent": [
+        11.543031994091235,
+        1.6034343669396822
+      ],
+      "combined_change_percent": 6.3586782831721145,
+      "submissions": {
+        "1": {
+          "jobs": 98,
+          "input_triangles": 772,
+          "repairs": 22,
+          "groups": 12,
+          "single_jobs": 9,
+          "CPU_requests": 21,
+          "group_members": 89,
+          "skipped_CPU_LOAD_calls": 77
+        },
+        "2": {
+          "jobs": 76,
+          "input_triangles": 571,
+          "repairs": 0,
+          "groups": 14,
+          "single_jobs": 13,
+          "CPU_requests": 27,
+          "group_members": 63,
+          "skipped_CPU_LOAD_calls": 49
+        }
+      },
+      "original_cpu_load_calls": 708,
+      "actual_cpu_load_calls": 582,
+      "original_raw_loads": 652,
+      "legacy_raw_loads": 478
+    },
+    {
+      "app": "F28",
+      "elf_sha256": "7294008468ae3760e6aac7fda5539e5dadd255c604e3b4a6c66bc028f68e422b",
+      "control_cycles": [
+        4256732,
+        4631100
+      ],
+      "aj02_single_cycles": [
+        4877586,
+        4649518
+      ],
+      "aj03_group_cycles": [
+        4806008,
+        4630859
+      ],
+      "cycle_change_percent": [
+        12.903701712957272,
+        -0.005203947226362082
+      ],
+      "combined_change_percent": 6.1773782402727795,
+      "submissions": {
+        "1": {
+          "jobs": 126,
+          "input_triangles": 920,
+          "repairs": 23,
+          "groups": 15,
+          "single_jobs": 11,
+          "CPU_requests": 26,
+          "group_members": 115,
+          "skipped_CPU_LOAD_calls": 100
+        },
+        "2": {
+          "jobs": 103,
+          "input_triangles": 712,
+          "repairs": 0,
+          "groups": 19,
+          "single_jobs": 14,
+          "CPU_requests": 33,
+          "group_members": 89,
+          "skipped_CPU_LOAD_calls": 70
+        }
+      },
+      "original_cpu_load_calls": 708,
+      "actual_cpu_load_calls": 538,
+      "original_raw_loads": 652,
+      "legacy_raw_loads": 423,
+      "change_from_same_elf_aj02_percent": [
+        -1.4674882206074935,
+        -0.4013104154022007
+      ]
+    }
+  ],
+  "denominators": "GROUP counts replace eligible async JOB packets, not every GPU command or every CPU vertex LOAD.",
+  "physical_fit": false,
+  "deployed": false,
+  "limits": [
+    "Two bounded SM64 native CPU/raster/game/audio intervals with synthetic scan/audio services. No sustained Pocket FPS or Quake2/all-level claim.",
+    "Each row uses the identical ELF, fixture and workload for control and candidate. Different rows have different ELF placement and are not causal software A/B measurements.",
+    "Function attribution includes preceding retirement gaps. Overlapping hardware state counters must not be added into predicted savings.",
+    "Physical overlay is prepared only. Baseline timing and resource counts do not qualify AJ03."
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app/evidence/app-build-v1/build-result.json": "48d9fee63413e52b9d0327eec5a3d790a13189c0ffd1456164a82e33d62a856a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/phases-v1.json": "ade79c8661f246e8b7a5cb156768bcd5e8c6b86d81b4c2775bb89fce862699a7",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v1/check-independent-v1.json": "fa5b49ea9df30a7d84b977f261677d7fe9f9d5cc9bdbfe3c6f18a5e3bcd7ff39",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v1/check-independent-v1.json": "bbc258e47fe948537579a95b901b2c7c3e09eea9dae1fab5f4102f8cda7f4ddc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/single-v1/check-independent-v1.json": "4e3675a1b69e64d48437508cae426090845c2ef4bb1b27f46684dfddee577e22",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/single-v1/run/boundaries.tsv": "eaa1e95840ce9813a0eb6581287d6b5a84b292a2a8365c3ac8e306e82b2d1f06",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v2/evidence/app-build-v2/build-result.json": "f032c9f5b9c78fde366994d4c6cd2d03c8885e25e47dda749ff01c037d01dbad",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/phases-v2.json": "b854fedcf85d226fd9d0faccaf9627202a77de164d0548da03651717667831cd",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v2/check-independent-v2.json": "edd544b6a8127271e4a2f7986026f33e5238c25591cf5558a463c1b57a2cc455",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v2/check-independent-v2.json": "ce19b47a20ea8105a590d26fed365be33cb8a80bb80f9cff84cbc98aaa3c04d6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/single-v2/check-independent-v2.json": "a9ba400f57e94775a4df29da270635dbb3ea7375f30834c20a52bc24e8bab3b4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/single-v2/run/boundaries.tsv": "32219c0492fd050bbf7443d59c9dc6c1cd5d222b051e9b6e21bc53711478175b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v3/evidence/app-build-v3/build-result.json": "2c6831fac16d9e1ae42d30de6fbf896ac12354017f84978c5dbcc0d04c2ff336",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/phases-v3.json": "b9e0c74639ac2406d380bcd9c4fac558c4c1e15648ba6115967258d863efe837",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v3/check-independent-v2.json": "def4fd96716480eb6e294d1ed58d68ee7ff68c6a38df6fc607bfb535558b8ef9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v3/check-independent-v2.json": "e40a81cf8b44b7be9de36a08e1be3c5f26ac2b32f4d59fd728a0c31a868b68ec",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/work-app-v4/evidence/app-build-v4/build-result.json": "b9ade6d031ec6bab86e0100211ab047aa83cefd33a70613fd2f1849b2ccd08a2",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/phases-v4.json": "2c62c9941c42a86012f04019e0610275cce6f98e208f3b7a7bb81cd77f56609f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/control-v4/check-independent-v4.json": "c0dc733a5138a107fa7fff03d23d4377fbe509563bd83a6bfff4da92bd9b69b3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v4/check-independent-v4.json": "bed350ef8e75046d76c32fc36c3776e52084a294c1e17c81ef2cc003a14ac7a7",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/single-v4/check-independent-v4.json": "bbfda3bab27aaa42935fb85039c5bc6b1e83f9b7b569e70186b006ee751bfbea",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/single-v4/run/boundaries.tsv": "ed4a7c647cbee89a078f475fe8283948c89bff9da2dbc72809537f5baac1bd07",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/admission-v1/result.json": "1accbc3f29b488a073eb3c8202d5cd5cd63b8ac5f7ffdc99d9e1c66800e12c43",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/span-coverage-v1/result.json": "df5e6bedfb854f3cfc82cf6731ba9733ee5d20279a7a08e6102ba7cec781a7ce",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/span-coverage-v1/admission-join.json": "d32445be8ff6fd261ab811b93ea955bc8624abf441bfb9ed25c29723c057811f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/caller-liveness-v1/review.json": "5068467bda22c5c2c136b3ecc3b0ba905e90042f76e49d429c61e35649dc53a8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/caller-liveness-v1/native-traversal/result.json": "4d9edfae875c24589f89d8662610607ebd63d24b30081981e428e0bde43b6b8c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/state-liveness-v1/source-audit-v1.json": "f657997c723022919354016da4865bd22e46eaaf6b2c76fbb213e3c0ce76099d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/state-liveness-v1/native-traversal-v2/final.json": "3f0989afd1694677706a21b06f5fbbba6daf95758091a8236e542898abdfd5e3",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/group-start-delay-v1/result.json": "1ea0259df96c2a745880c6f15574529bee11e560a249c6456d93865b8a9be85f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/design/broad-handback-review-v1/result.json": "3997e0c426eb4185eebd2adb9deed9f6c0f4e13b3a91f442886210be4601a2f2",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/physical/prepared-v1/inputs.json": "8ddc7a3714f2dcfa17fc16d0c42f60a727c0735cbc35c50b69224a5397699bf6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/physical/review-v1.json": "6ec1f4f2c2b7a0e388f37431a874e8c2c30d663c2603de3a8202ac3abed81e1c",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/physical/resource-source-audit-v1.json": "534fad593d235b519389456f8c6735865cbd522b5e880ac043a6d7ed56fa310b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/package/prior-verification-v1/result.json": "995c93b19332f10c7c5668c8903f9e90c9ff68aa8ac1baf78e8cf867ea0beeef",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/remaining-submission-v1/result.json": "d94e2fa85028abee9d7490be708970e1642847e464030f5aca3892b7be8e87ce",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/remaining-submission-v2/result.json": "f9649a183094cce32bf181e0884468d6e4f77750511e344ac448e2f358cfe2e7",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/independent-negative-v1/result.json": "f73d5a678093cf72e9d124ddd190277bc776550c73efcac311807267f2dfc01b",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/independent-negative-v2/result.json": "d86beec76ecdd276129e59504a6bd9761435f027af9d86b06393eaf7dfc34c50",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/independent-negative-v3/result.json": "c36eb7dcc722aef9d48fadb477d94d8e572bedf5e622eddef1e6640677653d48",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/independent-negative-v5/result.json": "ad68bc9b5b60b1cef92bf2ce7ac9d137e46526f9f376965d0cd01c7a82efd3b1",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/package/finalize.py": "a373fd0752ba96a68718e576f4bfd4cf7b446928c1957351a7a4a6af6e1bb717"
+  }
+}

@@ -1,0 +1,131 @@
+{
+  "status": "REVIEW_COMPLETE_RETAIN_PRODUCTION_BASELINE",
+  "scope": "Read-only interpretation of frozen full native replay evidence; no new application variant, RTL change, test rerun, physical fit or deployment.",
+  "evidence_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/analysis/native-v1.json": "8eaeab3dc597426c013a013f7b233c0b6a6020c5684d279b236aaf3d57f92f07",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/analysis/native-v2-f23.json": "8a36a55f9de1eee102149278dfe6e6172caecefbcb3d7c8960f4e3292abe25bf",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/analysis/native-v2.json": "fafa0de77b2a3e79b00249691f1826a3d2b8f1eedb457eac1d9de8cc7ff1abe6",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/analysis/phases-v2.json": "efbbf8751fe98f5609b98693021d3a14bfe2cbd8a26bfeefb478fed21eba523d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v1/check-independent-v1.json": "7ee241f926476d7ae81d47a5f5521a05f1e801e084c5da58e5d410fde95ad618",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2-f23-a2/check-independent-v2.json": "366dcecc60b750a3e4a2b2e9ed3e7bd42025790bc993ab4b1a413b935f9decfe",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2/check-independent-v2.json": "40eaeb862177f104a3e54a9dbfc3df808155332d7e31c7d19961cbdc55c38eb9",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/control-v2/check-independent-v2.json": "29a4a2042b2134c34fc803164a9e6ca018f8ec1f53a3b69de7928196fe2073d7",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app-v2/evidence/app-build-v2/build-result.json": "f3c3a4bea092749532e7796a487d8a4b00188d68939760d3b2e9183e0f51d4e6"
+  },
+  "phase_profile_input_hashes_verified": [
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/analysis/phase_profile.py",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-app-v2/evidence/app-build-v2/symbols.txt",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2/run/boundaries.tsv",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2/run/manifest.json",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2/run/process.json",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2/build.json",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2/run/pc-phase-1.csv",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/candidate-v2/run/pc-phase-2.csv",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/control-v2/run/boundaries.tsv",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/control-v2/run/manifest.json",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/control-v2/run/process.json",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/control-v2/build.json",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/control-v2/run/pc-phase-1.csv",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/validation/control-v2/run/pc-phase-2.csv"
+  ],
+  "same_F23_ELF_hardware_isolation": {
+    "warm_cycles_before": 4794375,
+    "warm_cycles_snapshot": 4657010,
+    "warm_frame_cycles_saved": 137365,
+    "warm_lease_pending_before": 204231,
+    "warm_lease_pending_snapshot": 8372,
+    "warm_lease_pending_reduction_percent": 95.90072026283963,
+    "interpretation": "Separating immutable converted output from raw storage removes most of the warm CPU legacy-acquisition wait. The complete frame improves by less than the wait counter reduction because execution and stalls overlap or move."
+  },
+  "final_F24_same_ELF_comparison": {
+    "candidate_cycles": [
+      4619218,
+      4591166
+    ],
+    "control_cycles": [
+      4186769,
+      4536880
+    ],
+    "warm_extra_cycles": 54286,
+    "warm_cycle_change_percent": 1.1965491703549658,
+    "combined_extra_cycles": 486735,
+    "combined_cycle_change_percent": 5.579488583275194,
+    "warm_candidate_retired": 2114706,
+    "warm_control_retired": 2204840,
+    "warm_lease_pending_cycles": 9805,
+    "warm_output_full_cycles": 1143120,
+    "warm_output_full_overlapping_fragment_cycles": 1033860,
+    "warm_repair_pending_cycles": 0,
+    "first_interval_repair_pending_cycles": 694095,
+    "change_vs_prior_qualified_combined_percent": 10.334629421676578
+  },
+  "warm_function_attribution_delta": {
+    "gfx_async_try_load": {
+      "retired": 21592,
+      "preceding_retirement_gap_cycles": 65105
+    },
+    "gfx_mesh_lookup": {
+      "retired": 14382,
+      "preceding_retirement_gap_cycles": 49530
+    },
+    "gfx_gpu_async_raw_acquire": {
+      "retired": 17221,
+      "preceding_retirement_gap_cycles": 40844
+    },
+    "gfx_gpu_async_job": {
+      "retired": 13428,
+      "preceding_retirement_gap_cycles": 33488
+    },
+    "gfx_gpu_async_service": {
+      "retired": 12501,
+      "preceding_retirement_gap_cycles": 25105
+    },
+    "gfx_gpu_cram_vertex_source": {
+      "retired": -4834,
+      "preceding_retirement_gap_cycles": -17452
+    },
+    "gfx_gpu_cram_source_generation": {
+      "retired": 152,
+      "preceding_retirement_gap_cycles": 819
+    },
+    "gfx_cpu_indexed_run": {
+      "retired": -102087,
+      "preceding_retirement_gap_cycles": -145941
+    },
+    "gfx_gpu_vtx_cache_batch_impl": {
+      "retired": -37591,
+      "preceding_retirement_gap_cycles": -45553
+    },
+    "load_alias_copy": {
+      "retired": -29996,
+      "preceding_retirement_gap_cycles": -26737
+    }
+  },
+  "interpretation": [
+    "The ownership objective is implemented and functionally validated: output can continue from the immutable snapshot while CPU legacy LOAD/alias work reuses raw storage. This is not an overall throughput win in the measured workload.",
+    "Final warm raw-acquisition wait is only 9805 cycles, while admission, topology lookup, full-context/job construction and lease/repair service still add CPU work. The named function buckets identify where to investigate, not individually removable or exclusive cycle budgets.",
+    "The warm candidate retires fewer instructions than its control but still takes more elapsed cycles. Instruction-count reduction alone therefore does not establish a speed gain.",
+    "The output-full counter overlaps GPU fragment work for 1033860  of 1143120 cycles. It cannot be credited as CPU time recoverable with more queue capacity; the actual full-frame measurement already includes useful overlap.",
+    "The first interval retains repair/cold-lookup costs, so the warm near-tie does not establish a positive two-interval result. The tested current implementation remains slower than both its same-ELF control and the prior qualified implementation."
+  ],
+  "recommendation": {
+    "physical_fit": "Do not run a physical fit or promote/deploy this negative measured candidate. Keep the current production best; component correctness is not the performance gate.",
+    "next_architecture_hypothesis": "If work continues, investigate broader immutable batches that amortize admission, source resolution, context emission and legacy handoffs over multiple compatible vertex/triangle spans, instead of increasing queue capacity again.",
+    "required_next_measurement": "First classify real consecutive compatible spans and their state/fallback boundaries, then prototype the producer/controller with exact same-source-ELF full-frame A/B. Do not subtract current function or wait counters to predict the benefit.",
+    "correctness_gates": [
+      "Preserve original draw/material order and exact clipping/arithmetic fallback.",
+      "Bind all geometry and material context immutably until its real consumer completes.",
+      "Retain true source-reuse fencing and canonical survivor/fog lifetime across partial G_VTX updates.",
+      "Keep raw and output ownership distinct, with reset/cancellation epochs and bounded queue credits."
+    ],
+    "predicted_gain": null,
+    "additional_work_this_turn": "None: retain frozen evidence and stop app/core variants."
+  },
+  "limitations": [
+    "Measured two bounded native intervals, not sustained Pocket FPS.",
+    "Function buckets include gaps preceding retirement; they are not exclusive function execution time.",
+    "Do not add these diagnostic buckets or overlapping hardware states to predict savings.",
+    "Two prepared GPU-drained game/render/audio intervals with fixed synthetic display/audio arrivals and bounded services, not sustained Pocket FPS or full OS/interrupt qualification.",
+    "No FPGA area, timing, placement or physical fit conclusion is made."
+  ]
+}

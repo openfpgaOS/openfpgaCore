@@ -1,0 +1,64 @@
+{
+  "app_manifest_sha256": "c6d1d1b2c0a9e77b172cf1a0b4c41a6c259da86ff004b15d9c91cf239f5276eb",
+  "appearance": {
+    "bit_exact": false,
+    "decision": "Accept localized fixed-point particle sampling changes for the experimental build.",
+    "depth_memory_exact": true,
+    "max_changed_pixels": 252,
+    "max_depth_test_input_relative_error": 6.4661559813999346e-06,
+    "max_projected_xy_error_pixels": 0.0625,
+    "maximum_changed_percent": 0.328125
+  },
+  "appearance_review_decision": "Accept localized fixed-point particle sampling changes for the experimental build.",
+  "bitstream_sha256": "a45744ecf2181ccce580eaf0f1afc45e18b94075c7cf62f3b19281209d8d7a7e",
+  "configured_clock_MHz": 100,
+  "core_manifest_sha256": "bf4855ce20e202897fad48417981d0b316665fc9e583deb6aec9a300d46a6d1b",
+  "deployed": false,
+  "deployment_directory": "deployment-native-v6",
+  "deployment_manifest_sha256": "b2b0d408c7f7d268710d44d2bb43361d66dcb4ab43ff87f95060b6a9982718d5",
+  "evidence_scope": "Complete app/core sources and selected evidence summaries, logs and pins; full raw capture archives are not included.",
+  "legacy_pixel_exact": false,
+  "minimum_nonsetup_slack_ns": {
+    "hold": 0.043,
+    "pulse_width": 0.5,
+    "recovery": 4.01,
+    "removal": 0.274
+  },
+  "modeled_busy_aggregate_gain_percent": 22.892865962760702,
+  "modeled_sample_gain_range_percent": [
+    4.415446879813234,
+    34.73831929777062
+  ],
+  "normal_elf_sha256": "46d2206d655e663aab7c15b56ff0c88b7a1c547bb6b3516e921780d795c9b753",
+  "physical_FPS_improvement_established": false,
+  "physical_Pocket_tested": false,
+  "physical_receipt_sha256": "25f869becf4b58497eb524a456fd573abdf22c5e12a40ab19bbe8ac12ed8c0c9",
+  "profile_elf_sha256": "75db4eca10e3b7412771e977620770d0450047b283e9be68e33c64cbc512b0c7",
+  "resources": {
+    "ALMs": {
+      "available": 18480,
+      "used": 17948
+    },
+    "DSPs": {
+      "available": 66,
+      "used": 32
+    },
+    "LABs": {
+      "available": 1848,
+      "used": 1847
+    },
+    "M10Ks": {
+      "available": 308,
+      "used": 296
+    }
+  },
+  "restricted_slow_Fmax_MHz": {
+    "slow_0": 90.13,
+    "slow_85": 90.74
+  },
+  "scope": "Quake2 only; 320x240 RGB565; native particle projection; no additive color combiner; silent audio.",
+  "status": "READY_FOR_DEVICE_TRIAL",
+  "timing_qualified": false,
+  "validation_receipt_sha256": "7fd33920700e21d2e7c81ce47905bf1adfc8290a57814ada6ae2c8243309d6b6",
+  "worst_setup_ns": -1.095
+}

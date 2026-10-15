@@ -1,0 +1,46 @@
+AJ01 source-level physical/performance assessment
+
+The qualified physical baseline uses 18,169/18,480 ALMs and 304/308 M10Ks,
+with 90.28 MHz main-clock Fmax at a configured90 MHz, seed3, placement effort3.
+Only311 ALMs and4 M10Ks are spare; prior worst setup slack is0.033 ns. These
+figures describe the baseline, not a fit of AJ01.
+
+The active AJ01 hierarchy has one geometry FMA shared by LOAD and exact cull.
+Raw scalar CAPTURE_CONTEXT is already0. Existing transform/reciprocal RAMs
+are reused. The matrix repair copy occupies an unused row of the existing
+attributes RAM. The MTF2 private queue and marker bridge are not elaborated.
+AJ01 adds a512-word common output RAM (estimated2 M10Ks) and the existing
+mesh survivor-list RAM (estimated1 M10K). Thus the source-level target is307
+M10Ks; actual inference/packing and ALMs remain unqualified.
+
+The new packet numeric converter is integer logic, not another FPU. It still
+adds variable shifts, rounding, comparators and control. Exact-cull scheduling,
+raw/alias arbitration, repair metadata, legacy lease state and duplicate job
+field registers add logic beyond the very small ALM headroom. No fit is promised.
+The raw/cull read-address mux, extra attributes write selection and output-FIFO
+credit/pointer logic add timing cones near a baseline with little timing margin.
+
+Possible area cuts, only if measured performance justifies a revision:
+- Enforce destination0 at raw-engine wiring, after retaining descriptor rejection,
+  so generic destination adders/masks can be removed.
+- Remove duplicate descriptor captures only after making the existing front's
+  held-until-done fields an explicit tested lifetime contract. The frontend and
+  wrapper currently both retain many fields required for immutable repair.
+- Narrow integer converter shift/control arithmetic with exact existing tests;
+  this is an implementation reduction, not a change to rounding behavior.
+No source changes implementing these ideas have been made.
+
+Performance dependencies are explicit. Input/context/job decoding is independent
+of CPU progression once published. The sole raw owner remains held through
+conversion/output-copy or complete CPU repair; a full output queue can still
+stop the next LOAD. A legacy acquire waits all previously submitted jobs' output
+publication, without waiting for GPU raster completion. Whole-task clipping or
+raw failure invokes pure CPU repair at the ordered head, temporarily preventing
+later job decoding. Two-word command-fetch bursts also share PSRAM service with
+other masters. The focused tests prove liveness, not full-frame speed.
+
+The first full native run was reported by root as15.52% slower than its same-ELF
+control. Consequently no physical compile is justified at this point. The
+prepared-only project preserves the exact qualified clocks, seed, placement
+settings, memory controllers, pins, firmware and constraints. Any software
+revision must pass the complete paired native measurement before one fit is run.

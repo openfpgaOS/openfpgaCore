@@ -1,0 +1,38 @@
+{
+  "status": "PASS_READ_ONLY_SOURCE_AND_DISASSEMBLY_REVIEW",
+  "elf_sha256": "883e2b4cfcd105bddc032d89c4379cd72702621cd1923cacbd0b6596ad02ce9e",
+  "delta": "Only packet publication tail uses CPU-ring low-water indication; v3 publication-aware ownership wait is byte-identical. Diagnostic label updated.",
+  "pointer_proof": [
+    "SDK stream reservation checks capacity without advancing _gpu_wrptr. ring_write and ring_commit advance both staged-word count and reserved byte cursor by exactly the words stored.",
+    "In CPU-ring mode, published cursor equals (_gpu_wrptr-4*_gpu_cmd_words)&mask; completed flush has synchronously stored every staged word before publishing and clearing staged count.",
+    "GPU_RING_RDPTR returns bridge input upload_rdptr in bytes, so subtracting it from published cursor modulo mask yields offered input backlog, not expanded raster backlog.",
+    "Formula is evaluated only in CPU-ring mode below normal512word threshold with no staged sync token. DMA fallback remains unconditional publication; sync and threshold paths retain SDK semantics.",
+    "The strict threshold512bytes means fewer than128 ingress words. Unsigned arithmetic and mask preserve wrap; no unused reserved cursor gap exists at the complete packet boundary.",
+    "Input words are a feeding heuristic, not remaining GPU work: a small marker expands into a larger packet. Speed requires the fresh same-ELF native pair."
+  ],
+  "liveness": "All v3 raw-owner publication escape paths remain unchanged; force-before-credit-wait ensures progress if delayed markers own older queue capacity.",
+  "fallback_PCs": {
+    "source_calls": "0x104dca32",
+    "vertex_success": "0x104dca3a",
+    "last_command_probe": "0x104dcb78",
+    "source_false_return": "0x104dcb7c",
+    "source_fallback_block": "0x104cece8",
+    "command_allocate_path": "0x104dcc98"
+  },
+  "instructions": {
+    "source_calls": "104dca32:\t9cfff0ef          \tjal\t104dc400 <gfx_gpu_cram_vertex_source>",
+    "vertex_success": "104dca3a:\t00092683          \tlw\ta3,0(s2)",
+    "last_command_probe": "104dcb78:\t12080063          \tbeqz\ta6,104dcc98 <gfx_gpu_mesh_sources+0x398>",
+    "source_false_return": "104dcb7c:\t5466                \tlw\ts0,120(sp)",
+    "source_fallback_block": "104cece8:\t501c                \tlw\ta5,32(s0)",
+    "command_allocate_path": "104dcc98:\taf41a803          \tlw\ta6,-1292(gp) # 10fdd244 <g_cram_vertex_top>"
+  },
+  "bindings_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/.obj/sm64-mesh-integrated-v4-perfdiag/app.elf": "883e2b4cfcd105bddc032d89c4379cd72702621cd1923cacbd0b6596ad02ce9e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/evidence/app-build-v4/app.dis": "bf7a9e5152639719b282563e1a84f24faae19bdc36eee43a3d10bfa58d02c238",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "5944f0d2b983418eddc1711a1b39ae6be6ebc0ea4cfcc4c954402d23d805492d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/src/sdk/include/of_gpu.h": "7e4b105e444b7307b36010da87749eff445650b6983283eeab9223e6af3dc01d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v4/evidence/adaptive-feed-v1/result.json": "824ed53498bd441dfcacc39bffd1871155ed03898a259aafdfea63a73b592d6a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7/frozen/src/fpga/common/gpu_core.v": "f5483ea84933b3f02b953c147ec16e6ba0622cd76886dd3072e8f13f8f49e5ff"
+  }
+}

@@ -1,0 +1,300 @@
+{
+  "schema": 1,
+  "decision": "RETAIN_QUALIFIED_BASELINE_NO_PHYSICAL_FIT_OR_DEPLOYMENT",
+  "scope": "Two complete drained native frame intervals of this captured workload; no device timing claim.",
+  "comparisons": {
+    "forced_appv2_512": {
+      "elf_sha256": "271ef4b841f15e51f6176e13047f9b0af16129ae0b84b1aac12cdccf0e61b772",
+      "model": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7",
+      "control_intervals": [
+        4028163,
+        4409880
+      ],
+      "candidate_intervals": [
+        4293880,
+        4561537
+      ],
+      "control_total": 8438043,
+      "candidate_total": 8855417,
+      "same_elf_total_cycle_change_percent": 4.946336490582004,
+      "same_elf_warm_cycle_change_percent": 3.4390278193511037,
+      "warm_retired": 1935483,
+      "warm_source_wait_gap_cycles": 523932,
+      "warm_cache_flush_entries": 129,
+      "warm_idle_cache_drain_cycles": 239425,
+      "warm_arm_stage_cycles": 522365,
+      "different_elf_prior_qualified_total_change_percent": 6.0823471713464805
+    },
+    "batched_appv3_512": {
+      "elf_sha256": "691aefd7d76351a512fed71c3b79d55f1832b5d0b7d7b9c0e38a6d0b5e9d5c81",
+      "model": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7",
+      "control_intervals": [
+        4047861,
+        4438378
+      ],
+      "candidate_intervals": [
+        4308244,
+        4570541
+      ],
+      "control_total": 8486239,
+      "candidate_total": 8878785,
+      "same_elf_total_cycle_change_percent": 4.625676934151857,
+      "same_elf_warm_cycle_change_percent": 2.977731955232299,
+      "warm_retired": 1928094,
+      "warm_source_wait_gap_cycles": 547138,
+      "warm_cache_flush_entries": 51,
+      "warm_idle_cache_drain_cycles": 159404,
+      "warm_arm_stage_cycles": 580764,
+      "different_elf_prior_qualified_total_change_percent": 6.362281169790607
+    },
+    "adaptive128_appv4_512": {
+      "elf_sha256": "883e2b4cfcd105bddc032d89c4379cd72702621cd1923cacbd0b6596ad02ce9e",
+      "model": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v7",
+      "control_intervals": [
+        4067467,
+        4463823
+      ],
+      "candidate_intervals": [
+        4313050,
+        4588457
+      ],
+      "control_total": 8531290,
+      "candidate_total": 8901507,
+      "same_elf_total_cycle_change_percent": 4.339519580274498,
+      "same_elf_warm_cycle_change_percent": 2.7920909946474115,
+      "warm_retired": 1937720,
+      "warm_source_wait_gap_cycles": 552085,
+      "warm_cache_flush_entries": 137,
+      "warm_idle_cache_drain_cycles": 298782,
+      "warm_arm_stage_cycles": 551103,
+      "different_elf_prior_qualified_total_change_percent": 6.6344764929953115
+    },
+    "capacity_ceiling_appv2_16384": {
+      "elf_sha256": "271ef4b841f15e51f6176e13047f9b0af16129ae0b84b1aac12cdccf0e61b772",
+      "model": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/native-v9",
+      "control_intervals": [
+        4028163,
+        4409880
+      ],
+      "candidate_intervals": [
+        3887424,
+        4181382
+      ],
+      "control_total": 8438043,
+      "candidate_total": 8068806,
+      "same_elf_total_cycle_change_percent": -4.375860611281546,
+      "same_elf_warm_cycle_change_percent": -5.181501537456801,
+      "warm_retired": 1775967,
+      "warm_source_wait_gap_cycles": 12771,
+      "warm_cache_flush_entries": 97,
+      "warm_idle_cache_drain_cycles": 168513,
+      "warm_arm_stage_cycles": 158,
+      "different_elf_prior_qualified_total_change_percent": -3.340759746238542
+    }
+  },
+  "prior_qualified_app_intervals": [
+    3980965,
+    4366717
+  ],
+  "adaptive128_queue_pressure": {
+    "1": {
+      "cycles": {
+        "reservation_admission_cycle": 159,
+        "own_fill_header_or_alias_drain": 159,
+        "exact_credit_block": 483784,
+        "exact_credit_block_and_gpu_fragment": 459679,
+        "exact_credit_block_and_prior_ordinary_copy": 425552,
+        "exact_credit_block_and_prior_generated_stream": 45718
+      },
+      "blocked_tasks": 8,
+      "largest_task_waits": [
+        {
+          "serial": 26,
+          "cycles": 331567
+        },
+        {
+          "serial": 114,
+          "cycles": 57238
+        },
+        {
+          "serial": 133,
+          "cycles": 33948
+        },
+        {
+          "serial": 27,
+          "cycles": 30364
+        },
+        {
+          "serial": 37,
+          "cycles": 24260
+        },
+        {
+          "serial": 40,
+          "cycles": 3697
+        },
+        {
+          "serial": 36,
+          "cycles": 1395
+        },
+        {
+          "serial": 115,
+          "cycles": 1315
+        }
+      ]
+    },
+    "2": {
+      "cycles": {
+        "reservation_admission_cycle": 159,
+        "own_fill_header_or_alias_drain": 159,
+        "exact_credit_block": 550944,
+        "exact_credit_block_and_gpu_fragment": 525251,
+        "exact_credit_block_and_prior_ordinary_copy": 477888,
+        "exact_credit_block_and_prior_generated_stream": 49047
+      },
+      "blocked_tasks": 8,
+      "largest_task_waits": [
+        {
+          "serial": 344,
+          "cycles": 377822
+        },
+        {
+          "serial": 432,
+          "cycles": 63062
+        },
+        {
+          "serial": 451,
+          "cycles": 45631
+        },
+        {
+          "serial": 345,
+          "cycles": 29157
+        },
+        {
+          "serial": 355,
+          "cycles": 24511
+        },
+        {
+          "serial": 358,
+          "cycles": 4687
+        },
+        {
+          "serial": 354,
+          "cycles": 4461
+        },
+        {
+          "serial": 433,
+          "cycles": 1613
+        }
+      ]
+    }
+  },
+  "publication_report": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/analysis/ingress-publish-appv4.json",
+  "zero_credit_ceiling_report": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/analysis/queue-credit-v9.json",
+  "ceiling_warm_remaining_retirement_gap_cycles": {
+    "app:load_alias_vertex": 472290,
+    "app:gfx_run_dl": 322968,
+    "app:gfx_mesh_finish": 98307,
+    "app:gfx_gpu_mesh_sources": 81001,
+    "app:gfx_gpu_mesh_packet": 17641,
+    "app:gfx_cpu_indexed_run": 153169,
+    "app:load_alias_copy": 80033,
+    "app:gfx_clip_triangle.constprop.0": 144096,
+    "app:gfx_push_triangle.constprop.0.isra.0": 198253,
+    "app:gfx_gpu_draw_direct_records": 132516,
+    "app:gpu_project_clip": 121406,
+    "app:gfx_gpu_mesh_wait_source": 12771
+  },
+  "ceiling_warm_hardware_stages": {
+    "no_owner": 3255226,
+    "mesh_start_pending": 317,
+    "mesh_raw_load": 199875,
+    "mesh_command_fetch_and_cull": 130727,
+    "mesh_fallback_hold": 26906,
+    "mesh_material_prepare_hold": 492939,
+    "mesh_validation_alias_drain": 158,
+    "mesh_conversion_validation": 26652,
+    "mesh_validated_before_arm": 6966,
+    "mesh_arm_wait_credit_or_reservation": 158,
+    "mesh_armed_alias_drain_or_header": 158,
+    "mesh_private_prefill": 39656,
+    "legacy_load_owner": 1644
+  },
+  "strict_checks": {
+    "control_v4": {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/control-v4/check-independent.json",
+      "status": "PASS_SAME_ELF_CAPABILITY_OFF_NATIVE_ORACLE"
+    },
+    "candidate_appv4": {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv4/check-independent-v3.json",
+      "status": "PASS_MTF2_SAME_ELF_FULL_NATIVE_FUNCTIONAL_AND_ORDERED_SEMANTICS"
+    },
+    "candidate_appv3": {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/check-independent-v2.json",
+      "status": "PASS_MTF2_SAME_ELF_FULL_NATIVE_FUNCTIONAL_AND_ORDERED_SEMANTICS"
+    },
+    "candidate_appv2": {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7/check-independent.json",
+      "status": "PASS_MTF2_SAME_ELF_FULL_NATIVE_FUNCTIONAL_AND_ORDERED_SEMANTICS"
+    },
+    "capacity_ceiling": {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v9/check-independent.json",
+      "status": "PASS_MTF2_SAME_ELF_FULL_NATIVE_FUNCTIONAL_AND_ORDERED_SEMANTICS"
+    }
+  },
+  "checker_supersession": {
+    "status": "PASS_AFTER_ATTRIBUTED_SOURCE_CACHE_OMISSIONS",
+    "original_failure": "Appv3 source-key hash history does not apply to appv4: appv4 has exactly one failed count16 task per interval, rather than five failures. Original rendering/state checks passed; the incorrect omission assumption stopped lifetime validation.",
+    "intermediate_failure": "The initial replacement copied the context-only sequence matcher warm omission index598. Read-only per-call capture proves actual omission is597; adjacent started tasks have identical arithmetic contexts, so a context-only sequence matcher cannot identify source ownership. Intermediate failure is preserved.",
+    "replacement": "check-independent-v3.json",
+    "replacement_hook": "../mesh3_lifetime_appv4_v3.py",
+    "invariant": "Every actual LOAD call has the exact same vertex pointer/count/first/fog arguments as capability-off control. All638 mesh-source calls are independently replayed through the actual512-entry/16-probe cache from the zero initial table. Both failed probe windows match actual CPU cache contents. Omitted raw jobs271 and597 belong to those exact failed calls; no START occurs there. Every other START retains exact effective transform context. Rendering/draw-order/Surface/CPUregister/FCSR/deadline/protocol oracles remain unchanged.",
+    "proof": "../source-proof-v4.json",
+    "passivity": "Every preexisting output in both separately instrumented native runs is byte-identical to the originally measured pair, including all cycle counts.",
+    "files_sha256": {
+      "docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv4/check-independent.log": "1a5096d6970a95a07774709658d9c373ba88d9cda457194a053d00a52aa6d13f",
+      "docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv4/check-independent-v2.log": "75102cb55863b32c2aa013394e52a11bf36c4027ecf961eacbc8d0669c696e99",
+      "docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv4/check-independent-v3.json": "d794ac0697e328efde57e18fee4e55155fa2af2d0bb25b7b5a1322058f718ef4",
+      "docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/mesh3_lifetime_appv4.py": "0f1c3ad91fb036bad30d68f1bced0ab0453afd941d1d9369f55ef0f85391a03f",
+      "docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/mesh3_lifetime_appv4_v2.py": "6a1b06ffb78adeed5742fa3fe90db8d71c5ecee71d5df17c47d0870964590572",
+      "docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/mesh3_lifetime_appv4_v3.py": "c8001c466a29c084039188d63e42a4dd4dabffce4bbc8ad4d1f53abf2aca1422",
+      "docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/source-proof-v4.json": "81600a47ed71d4a951949af776d731e1622e7a26e17e8511321ff1ccdacb5f49",
+      "docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/check_source_proof_v1.py": "63917f66eedf048b247903bae097a2d8a44b7b63001e094a3002af494debfb5d",
+      "docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/source_proof_hooks_v1.py": "64e259b759c4b882ea5d3281370b91080b18093a74060ce00307107b9fe517ea"
+    }
+  },
+  "interpretation": [
+    "Adaptive128 is slower than its same-ELF control and both earlier 512-word publication policies in actual total elapsed cycles.",
+    "Small-queue capacity couples the CPU next-source poll to prior raster/command consumption. Exact queue-credit intersections establish this without treating every queue residence cycle as a CPU stall.",
+    "Offload reduces CPU quantization, canonical copy and vertex-cache packet emission, but synchronous LOAD/preflight, task setup/finish, display-list/material work and fallback clipping remain.",
+    "The large-queue run removes all capacity waits in this trace. Its remaining validation pass is small; retaining material and fallback ordering still requires CPU task handoffs.",
+    "The 16K diagnostic measures a capacity ceiling for this implementation and trace, not a universal accelerator speed limit. It is not physically qualified and exceeds available RAM as tested.",
+    "Whole-frame performance, not retired-instruction reductions or summed overlapping hardware counters, determines the recommendation.",
+    "This direct-output-queue design is not justified for deployment. A separate future experiment would need to target synchronous per-task input/context setup and fallback software; a coarse asynchronous job design has not been shown to win."
+  ],
+  "caveats": [
+    "Per-PC gap cycles charge the preceding retirement gap to the next instruction; they are not isolated self-times or guaranteed removable cost.",
+    "Busy, queue residency and GPU/CPU overlap counters are not additive savings.",
+    "Different-app comparisons include code-layout, driver and fallback-path overhead. Only each same-ELF pair isolates the hardware capability.",
+    "A large part of GPU idle time occurs after rendering during game/audio work; it is not all starvation caused by triangle submission."
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/analysis/paired-v7.json": "e8df840522a212c74fe8854a143babe5ba41b65d43695ce3bef650c514cdec92",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/analysis/paired-v7-appv3.json": "dac505efaab4819fe779d544b5518c0c0578542b3da7702e0d534690b325f61a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/analysis/paired-v7-appv4.json": "68886ccea31f436b74cc697ffe115832397692b4dac508a6710cd706bcef71c0",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/analysis/paired-v9.json": "5bcea867e6ecc504db57759c1e6df5f62936b17a6b535c6ac869e3a44ae93eb8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/analysis/ceiling-comparison-v9.json": "a6827c4daaa69382e0736b39eaff09f494fb7d9cc27b9177a0cf2715197ac74f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv4/run/mesh-events.tsv": "e200659f74cfd13673a947d682f13e22e65bc65ff3afa40d69137ab8bf248b0a",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/analysis/ingress-publish-appv4.json": "264ec7ab19ce7aabd64d1c90361e5c3ebb6d38e3663ba35c0325320db9bc39e2",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/analysis/queue-credit-v9.json": "f5ef10e0757d89a9d8e6f88b0e7a4a4dae454da9d126533bb6917f582a8ddc00",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/analysis/queue-credit-v7.json": "e2d7a39c6cea18696f6122e0938dce0697f8e703a543a29763cea995df6b9266",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/control-v4/check-independent.json": "df5cb6b519efbdcad74c60308d433b61a1c7f0164034874d2d853229aa919189",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv4/check-independent-v3.json": "d794ac0697e328efde57e18fee4e55155fa2af2d0bb25b7b5a1322058f718ef4",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv3/check-independent-v2.json": "b1ca835c771a8eed11d7d679d24d65ac2ab6fede502ff539ea751d1881db1e62",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7/check-independent.json": "b883e926c77d1c43c8d28df0985dff9ab03c4ae89c0dfe05d499515baefd745d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v9/check-independent.json": "b7d85e86dedad47b04a6e0a39e0f75f53736a44c00614220cc906ff7aaf09b2e",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/source-proof-v4.json": "81600a47ed71d4a951949af776d731e1622e7a26e17e8511321ff1ccdacb5f49",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/validation/candidate-v7-appv4/checker-supersession.json": "a65682cb14da905c3f4f73ff5c764f29082d83c365dd2bc325d54498023fe414",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/analysis/adaptive-v4-conclusion.txt": "5e048ad4e12e341d4d4bcb058702c9b0ec6d2367d95215dd704a0a717777b412",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/analysis/summarize_adaptive_v4_final.py": "a69b1ac77235ebf04fae3a40f19839d07ef301aa5c2f6126b9ff2cb4253c5f93"
+  }
+}

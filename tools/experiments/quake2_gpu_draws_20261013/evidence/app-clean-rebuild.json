@@ -1,0 +1,18 @@
+{
+  "passed": true,
+  "elf_sha256": "46d2206d655e663aab7c15b56ff0c88b7a1c547bb6b3516e921780d795c9b753",
+  "manifest_sha256": "c6d1d1b2c0a9e77b172cf1a0b4c41a6c259da86ff004b15d9c91cf239f5276eb",
+  "build_log_sha256": "0bd46da7059355bafd49364da287e850139fb05f0496e691d96fb1b614eb6241",
+  "source_date_epoch": 1791806400,
+  "cwd": "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-gpu-draws-20261013/staged-app-proof",
+  "command": [
+    "make",
+    "-C",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-gpu-draws-20261013/staged-app-proof/src/quake2",
+    "-j8",
+    "USE_SDK_CONTAINER=0",
+    "OBJ_DIR=/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-gpu-draws-20261013/staged-app-proof/obj",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/quake2-gpu-draws-20261013/staged-app-proof/obj/app.elf"
+  ],
+  "scope": "Standalone source package stage, source inventory checked before building; normal ELF byte-identical to selected and validated v5."
+}

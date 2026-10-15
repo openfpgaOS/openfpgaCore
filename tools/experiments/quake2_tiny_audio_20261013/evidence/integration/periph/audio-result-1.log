@@ -1,0 +1,45 @@
+=== axi_periph_slave test ===
+test_mixer_pos_read_registered_boundary:
+  OK  mixer-pos-registered-readback
+test_mixer_queue_backpressure:
+  OK  mixer-delayed-data
+  OK  mixer-full-queue-waits
+  OK  mixer-write-exactly-once
+  OK  mixer-response-exactly-once
+  OK  mixer-delayed-data
+  OK  mixer-full-queue-waits
+  OK  mixer-write-exactly-once
+  OK  mixer-response-exactly-once
+test_audio_cache_mmio:
+  OK  cache-reset-control
+  OK  cache-capability
+  OK  cache-ctrl-readback
+  OK  cache-ctrl-enable-output
+  OK  cache-ctrl-optin-output
+  OK  cache-ctrl-readback
+  OK  cache-ctrl-enable-output
+  OK  cache-ctrl-optin-output
+  OK  cache-ctrl-readback
+  OK  cache-ctrl-enable-output
+  OK  cache-ctrl-optin-output
+  OK  cache-ctrl-readback
+  OK  cache-ctrl-enable-output
+  OK  cache-ctrl-optin-output
+  OK  cache-ctrl-readback
+  OK  cache-ctrl-enable-output
+  OK  cache-ctrl-optin-output
+  OK  cache-ctrl-readback
+  OK  cache-ctrl-enable-output
+  OK  cache-ctrl-optin-output
+  OK  capability-readonly
+  OK  capability-no-irq-write
+  OK  capability-no-voice-write
+  OK  irq-still-at-824
+  OK  irq-write-exactly-once
+  OK  irq-write-data
+  OK  irq-no-voice-invalidation
+  OK  all512-voice-fields-invalidate-once
+  OK  cache-warm-reset-disables
+  OK  cache-warm-reset-preserves-cap
+
+=== Audio Results: 39 passed, 0 failed ===

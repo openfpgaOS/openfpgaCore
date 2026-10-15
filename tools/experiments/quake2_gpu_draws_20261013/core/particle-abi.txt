@@ -1,0 +1,80 @@
+Experimental native billboard command ABI (candidate, not a deployed contract)
+
+GPU_STATUS bit13 advertises INCLUDE_GPU_PARTICLES. Existing native mesh bit12
+and all old opcodes retain their meaning. Apps use their previous CPU path
+when bit13 is zero. This implementation is only enabled in the isolated os30
+QSF. Its common worker parameter defaults to disabled.
+
+0x61000010: bind 16-word private context. All values except cull are signedQ16:
+  0..2 camera-space up XYZ;3..5 camera-space right XYZ;
+  6,7 viewport center X/Y in pixels;8,9 viewport scales X/Y;
+  10 near depth;11 U0;12 U1;13 V0;14 V1;15 cull(0,1,2).
+Camera Y is positive up. Screen Y is center minus projected camera Y.
+This first specialization requires both basisZ words zero, positive scales
+and near, UV endpoints in [0,128), cull<=2. Invalid context disables native
+particle expansion until a subsequent valid bind. A malformed-length context
+is an unknown command and does not modify the preceding context.
+
+0x62 + payload length5*N: expand1..64 records in original input order:
+  camera center X,Y,Z Q16; particle size Q16; RGB565|alpha<<16.
+Upper color byte must be zero. Size must be positive and Z must lie in
+[max(near,16),4096]. Alpha0 produces no drawing. Unsupported records are
+consumed without a triangle; application admission must route them to the
+legacy path BEFORE submitting, never use rejection as an optimization.
+Each vertex is center, center+up*size, center+right*size. Products are rounded
+to nearest, ties to even atQ16, then added with an explicit overflow guard.
+
+One integer reciprocal per particle computes depth=floor(2^46 / ZQ16),
+equivalent to reciprocal depth inQ30. Geometry's texture inverse is separately
+normalized toZI=1<<24 at all3 vertices (constant-depth camera-facing plane).
+For each coordinate ratioQ20=floor(cameraQ16*depth /2^26).
+ScreenXQ4=RNE((ratioXQ20*viewportXSQ16 + centerXQ16*2^20)/2^32).
+ScreenYQ4=RNE((centerYQ16*2^20 - ratioYQ20*viewportYSQ16)/2^32).
+Only then is each packed screen coordinate saturated to signed16. Current
+Quake2 SET_TRI_STATE carries subpixelY bit31, making BOTH coordinatesQ4.
+A projected bounding box wholly below the lower clip edge or at/above the
+upper clip edge emits no triangle. Existing exact signed winding culling is
+reused. Vertex order and packed RGB565 never change.
+
+The worker emits0x63000001 plusalpha,3 existing0x5C cache-vertex commands into
+slots0,1,2, and0x54 indexed triangle. Its compact alpha command changes ONLY
+spanprod_const_alpha and spanprod_blend=(0<alpha<255), and only with valid
+prior SET_TRI_STATE. Texture, framebuffer, depth-test/write mask, clip rect,
+subpixel convention and all remaining surface fields stay unchanged. It must
+never resurrect invalid surface state. Apps invalidate their surface/alpha
+and vertex-slot shadows before any subsequent fallback or differently bound
+draw. All normal commands remain ordered through the worker's private queue.
+
+Resource/state ownership
+
+Context uses native_mem184..199, disjoint from native mesh coefficients0..23,
+palette32..159 and fetch lines160..183. Existing native viewport registers
+are staging only: every particle stream reloads its private context fromRAM,
+so a native MD2 draw between streams cannot corrupt it. No new BRAM or DSP is
+instantiated. The same multiplier and divider are reused. Divider width grows
+39->47 only with the capability; legacy numerators are aligned at itsMSB and
+retain their original iteration counts and exact quotient bits.
+
+Each output reservation is at most7 words (alpha2, cachedvertex7, triangle2);
+the entire expanded batch is never reserved. Producer and rasterizer can run
+concurrently and stall independently. Input payload is consumed incrementally.
+Clock-enable holds freeze multiplier operands/products and both contextRAM
+read stages together with the FSM. Reset invalidates context but never resets
+its dataRAM; a fresh context is required after soft/ring/media reset.
+
+Precision/admission and current scope
+
+The app validates finite fixed conversion, scale, bounds and the actual
+camera-facing basis before emission. It accepts abs(float upZ/rightZ)<1e-5
+and canonicalizes thoseZ deltas to zero. Near/overflow/unsupported projection
+cases retain the original CPU path. The canonical math is explicitly DIFFERENT
+from the legacy sequence of3 separately roundedFP32 transforms. Full rendered
+image and coordinate differences against that baseline must be measured before
+deployment; synthetic bit-exact hardware/reference tests alone do not prove
+visual equivalence or measuredFPS.
+
+Shared clipping groundwork currently consists of cameraQ16 data, explicit
+finite admission, true billboard near-plane rejection, captured clip rectangle,
+projected bbox rejection and preserved winding. General triangles intersecting
+the near plane are NOT clipped by this worker; they remain CPU work. No claim
+of a general geometry clipper is made.

@@ -1,0 +1,745 @@
+{
+  "status": "READ_ONLY_DESIGN_NO_IMPLEMENTATION",
+  "decision": "NO_GO_AS_MINIMAL_CPU_UNBLOCKING_CHANGE; technically feasible as a separately measured canonical-transfer architecture",
+  "measured_existing_groups": {
+    "1": {
+      "groups": 12,
+      "members": 89,
+      "group_residence": {
+        "sum": 949856,
+        "median": 19836.5,
+        "max": 386960
+      },
+      "legacy_raw_starts_during_groups": 31,
+      "legacy_raw_starts_after_first_member": 30,
+      "groups_with_legacy_raw_interposition": 9,
+      "residence_cycles": {
+        "legacy_lease": 109646,
+        "no_legacy_and_no_raw": 65305,
+        "output_pending": 843749,
+        "pending_lease": 450851,
+        "raster_fragment": 699180,
+        "raw_active": 794941,
+        "repair_pending": 659359,
+        "snapshot_detached": 68899
+      },
+      "after_last_snapshot": {
+        "sum": 3467,
+        "median": 331,
+        "max": 967
+      }
+    },
+    "2": {
+      "groups": 14,
+      "members": 63,
+      "group_residence": {
+        "sum": 374262,
+        "median": 12925.5,
+        "max": 121132
+      },
+      "legacy_raw_starts_during_groups": 25,
+      "legacy_raw_starts_after_first_member": 24,
+      "groups_with_legacy_raw_interposition": 8,
+      "residence_cycles": {
+        "legacy_lease": 75750,
+        "no_legacy_and_no_raw": 210832,
+        "output_pending": 351498,
+        "pending_lease": 5010,
+        "raster_fragment": 298058,
+        "raw_active": 104563,
+        "snapshot_detached": 263871
+      },
+      "after_last_snapshot": {
+        "sum": 8912,
+        "median": 331,
+        "max": 4919
+      }
+    }
+  },
+  "structural_terminal_view": {
+    "1": {
+      "chains": 111,
+      "loads": 320,
+      "chains_requiring_earlier_high_slots": 49,
+      "sum_terminal_high_slots_from_earlier_LOAD": 359,
+      "terminal_max_chains": 62,
+      "terminal_max_multiload_chains": 7,
+      "terminal_max_multiload_LOADs": 19
+    },
+    "2": {
+      "chains": 111,
+      "loads": 320,
+      "chains_requiring_earlier_high_slots": 49,
+      "sum_terminal_high_slots_from_earlier_LOAD": 359,
+      "terminal_max_chains": 62,
+      "terminal_max_multiload_chains": 7,
+      "terminal_max_multiload_LOADs": 19
+    }
+  },
+  "current_whole_phase_overlapping_counters": {
+    "1": {
+      "all_cycles": 4682326,
+      "retire": 2074056,
+      "gpu_busy": 2340011,
+      "raw_owner": 949644,
+      "async_owner_and_retire": 369312,
+      "raw_transform": 202920,
+      "raw_cull": 21275,
+      "output_word": 23540,
+      "cpu_repair_pending": 687812,
+      "gpu_fragment": 1449973,
+      "output_full": 444887,
+      "output_full_and_fragment": 400071,
+      "legacy_lease": 2049215,
+      "lease_pending": 468386,
+      "lease_wait_and_fragment": 358461
+    },
+    "2": {
+      "gpu_busy": 2173539,
+      "all_cycles": 4669689,
+      "retire": 2088833,
+      "raw_owner": 255645,
+      "async_owner_and_retire": 56391,
+      "raw_transform": 202841,
+      "raw_cull": 18204,
+      "output_word": 23000,
+      "gpu_fragment": 1453363,
+      "output_full": 1106209,
+      "output_full_and_fragment": 1003944,
+      "legacy_lease": 2219693,
+      "lease_pending": 7103,
+      "lease_wait_and_fragment": 2947
+    }
+  },
+  "groups": [
+    {
+      "phase": 1,
+      "firstseq": 1,
+      "members": 12,
+      "begin": 440683,
+      "legacy_raw_starts": 6,
+      "legacy_raw_starts_after_first_member": 5,
+      "residence_cycles": {
+        "pending_lease": 145961,
+        "raster_fragment": 269219,
+        "no_legacy_and_no_raw": 2197,
+        "legacy_lease": 26769,
+        "raw_active": 264518,
+        "output_pending": 261288,
+        "repair_pending": 247108,
+        "snapshot_detached": 752
+      },
+      "lastseq": 12,
+      "first_member": 444543,
+      "end": 730187,
+      "duration": 289504
+    },
+    {
+      "phase": 1,
+      "firstseq": 15,
+      "members": 7,
+      "begin": 1033975,
+      "legacy_raw_starts": 5,
+      "legacy_raw_starts_after_first_member": 5,
+      "residence_cycles": {
+        "raster_fragment": 90417,
+        "no_legacy_and_no_raw": 41680,
+        "raw_active": 41383,
+        "output_pending": 91531,
+        "repair_pending": 28242,
+        "pending_lease": 17733,
+        "legacy_lease": 18283,
+        "snapshot_detached": 53562
+      },
+      "lastseq": 21,
+      "first_member": 1034139,
+      "last_snapshot_detached": 1131582,
+      "end": 1131913,
+      "duration": 97938,
+      "after_last_snapshot": 331
+    },
+    {
+      "phase": 1,
+      "firstseq": 22,
+      "members": 6,
+      "begin": 1134080,
+      "legacy_raw_starts": 3,
+      "legacy_raw_starts_after_first_member": 3,
+      "residence_cycles": {
+        "raster_fragment": 37040,
+        "no_legacy_and_no_raw": 1224,
+        "raw_active": 49703,
+        "output_pending": 48909,
+        "repair_pending": 40923,
+        "pending_lease": 34739,
+        "legacy_lease": 6832,
+        "snapshot_detached": 767
+      },
+      "lastseq": 27,
+      "first_member": 1134266,
+      "last_snapshot_detached": 1189950,
+      "end": 1190281,
+      "duration": 56201,
+      "after_last_snapshot": 331
+    },
+    {
+      "phase": 1,
+      "firstseq": 28,
+      "members": 3,
+      "begin": 1192974,
+      "legacy_raw_starts": 0,
+      "legacy_raw_starts_after_first_member": 0,
+      "residence_cycles": {
+        "no_legacy_and_no_raw": 613,
+        "raster_fragment": 2631,
+        "raw_active": 2913,
+        "output_pending": 3165,
+        "snapshot_detached": 253
+      },
+      "lastseq": 30,
+      "first_member": 1193094,
+      "end": 1196500,
+      "duration": 3526
+    },
+    {
+      "phase": 1,
+      "firstseq": 31,
+      "members": 9,
+      "begin": 1196539,
+      "legacy_raw_starts": 2,
+      "legacy_raw_starts_after_first_member": 2,
+      "residence_cycles": {
+        "raster_fragment": 10881,
+        "no_legacy_and_no_raw": 2048,
+        "raw_active": 11212,
+        "output_pending": 10861,
+        "pending_lease": 296,
+        "legacy_lease": 7636,
+        "snapshot_detached": 1156
+      },
+      "lastseq": 39,
+      "first_member": 1196659,
+      "last_snapshot_detached": 1215680,
+      "end": 1215933,
+      "duration": 19394,
+      "after_last_snapshot": 253
+    },
+    {
+      "phase": 1,
+      "firstseq": 41,
+      "members": 9,
+      "begin": 1345227,
+      "legacy_raw_starts": 2,
+      "legacy_raw_starts_after_first_member": 2,
+      "residence_cycles": {
+        "raster_fragment": 2294,
+        "no_legacy_and_no_raw": 3066,
+        "raw_active": 13326,
+        "output_pending": 14225,
+        "pending_lease": 2250,
+        "legacy_lease": 5269,
+        "snapshot_detached": 2289
+      },
+      "lastseq": 49,
+      "first_member": 1345357,
+      "last_snapshot_detached": 1365253,
+      "end": 1365506,
+      "duration": 20279,
+      "after_last_snapshot": 253
+    },
+    {
+      "phase": 1,
+      "firstseq": 50,
+      "members": 20,
+      "begin": 1422929,
+      "legacy_raw_starts": 10,
+      "legacy_raw_starts_after_first_member": 10,
+      "residence_cycles": {
+        "raster_fragment": 263829,
+        "no_legacy_and_no_raw": 5310,
+        "raw_active": 351413,
+        "output_pending": 348140,
+        "repair_pending": 320081,
+        "pending_lease": 248624,
+        "legacy_lease": 36463,
+        "snapshot_detached": 2963
+      },
+      "lastseq": 69,
+      "first_member": 1423065,
+      "end": 1809889,
+      "duration": 386960
+    },
+    {
+      "phase": 1,
+      "firstseq": 70,
+      "members": 8,
+      "begin": 1812469,
+      "legacy_raw_starts": 1,
+      "legacy_raw_starts_after_first_member": 1,
+      "residence_cycles": {
+        "no_legacy_and_no_raw": 2160,
+        "raster_fragment": 13648,
+        "raw_active": 34622,
+        "output_pending": 35184,
+        "snapshot_detached": 1203,
+        "repair_pending": 23005,
+        "pending_lease": 445,
+        "legacy_lease": 3409
+      },
+      "lastseq": 77,
+      "first_member": 1812589,
+      "last_snapshot_detached": 1851732,
+      "end": 1852024,
+      "duration": 39555,
+      "after_last_snapshot": 292
+    },
+    {
+      "phase": 1,
+      "firstseq": 78,
+      "members": 7,
+      "begin": 1939571,
+      "legacy_raw_starts": 1,
+      "legacy_raw_starts_after_first_member": 1,
+      "residence_cycles": {
+        "raster_fragment": 4292,
+        "no_legacy_and_no_raw": 2475,
+        "raw_active": 10738,
+        "output_pending": 11814,
+        "snapshot_detached": 1783,
+        "pending_lease": 774,
+        "legacy_lease": 2609
+      },
+      "lastseq": 84,
+      "first_member": 1939691,
+      "last_snapshot_detached": 1954510,
+      "end": 1954693,
+      "duration": 15122,
+      "after_last_snapshot": 183
+    },
+    {
+      "phase": 1,
+      "firstseq": 85,
+      "members": 2,
+      "begin": 2004833,
+      "legacy_raw_starts": 0,
+      "legacy_raw_starts_after_first_member": 0,
+      "residence_cycles": {
+        "no_legacy_and_no_raw": 870,
+        "raw_active": 3403,
+        "output_pending": 4032,
+        "raster_fragment": 1795,
+        "snapshot_detached": 631
+      },
+      "lastseq": 86,
+      "first_member": 2004953,
+      "last_snapshot_detached": 2008732,
+      "end": 2009106,
+      "duration": 4273,
+      "after_last_snapshot": 374
+    },
+    {
+      "phase": 1,
+      "firstseq": 87,
+      "members": 4,
+      "begin": 2110301,
+      "legacy_raw_starts": 1,
+      "legacy_raw_starts_after_first_member": 1,
+      "residence_cycles": {
+        "no_legacy_and_no_raw": 1901,
+        "raw_active": 8536,
+        "output_pending": 9906,
+        "raster_fragment": 1720,
+        "snapshot_detached": 2018,
+        "pending_lease": 29,
+        "legacy_lease": 2376
+      },
+      "lastseq": 90,
+      "first_member": 2110421,
+      "last_snapshot_detached": 2121987,
+      "end": 2122470,
+      "duration": 12169,
+      "after_last_snapshot": 483
+    },
+    {
+      "phase": 1,
+      "firstseq": 97,
+      "members": 2,
+      "begin": 2804790,
+      "legacy_raw_starts": 0,
+      "legacy_raw_starts_after_first_member": 0,
+      "residence_cycles": {
+        "no_legacy_and_no_raw": 1761,
+        "raw_active": 3174,
+        "output_pending": 4694,
+        "raster_fragment": 1414,
+        "snapshot_detached": 1522
+      },
+      "lastseq": 98,
+      "first_member": 2804910,
+      "last_snapshot_detached": 2808758,
+      "end": 2809725,
+      "duration": 4935,
+      "after_last_snapshot": 967
+    },
+    {
+      "phase": 2,
+      "firstseq": 99,
+      "members": 3,
+      "begin": 5079962,
+      "legacy_raw_starts": 2,
+      "legacy_raw_starts_after_first_member": 2,
+      "residence_cycles": {
+        "no_legacy_and_no_raw": 35268,
+        "raw_active": 5852,
+        "output_pending": 46643,
+        "raster_fragment": 45332,
+        "snapshot_detached": 42339,
+        "pending_lease": 2,
+        "legacy_lease": 7430
+      },
+      "lastseq": 101,
+      "first_member": 5080082,
+      "last_snapshot_detached": 5126822,
+      "end": 5126966,
+      "duration": 47004,
+      "after_last_snapshot": 144
+    },
+    {
+      "phase": 2,
+      "firstseq": 106,
+      "members": 6,
+      "begin": 5700879,
+      "legacy_raw_starts": 10,
+      "legacy_raw_starts_after_first_member": 10,
+      "residence_cycles": {
+        "no_legacy_and_no_raw": 46905,
+        "raw_active": 15410,
+        "output_pending": 82726,
+        "raster_fragment": 80117,
+        "snapshot_detached": 74052,
+        "pending_lease": 866,
+        "legacy_lease": 31830
+      },
+      "lastseq": 111,
+      "first_member": 5700999,
+      "last_snapshot_detached": 5787963,
+      "end": 5788294,
+      "duration": 87415,
+      "after_last_snapshot": 331
+    },
+    {
+      "phase": 2,
+      "firstseq": 114,
+      "members": 2,
+      "begin": 5795415,
+      "legacy_raw_starts": 0,
+      "legacy_raw_starts_after_first_member": 0,
+      "residence_cycles": {
+        "no_legacy_and_no_raw": 626,
+        "raw_active": 2872,
+        "output_pending": 3384,
+        "raster_fragment": 354,
+        "snapshot_detached": 514,
+        "pending_lease": 1,
+        "legacy_lease": 127
+      },
+      "lastseq": 115,
+      "first_member": 5795535,
+      "last_snapshot_detached": 5798709,
+      "end": 5799040,
+      "duration": 3625,
+      "after_last_snapshot": 331
+    },
+    {
+      "phase": 2,
+      "firstseq": 116,
+      "members": 3,
+      "begin": 5831839,
+      "legacy_raw_starts": 0,
+      "legacy_raw_starts_after_first_member": 0,
+      "residence_cycles": {
+        "raster_fragment": 2701,
+        "no_legacy_and_no_raw": 613,
+        "raw_active": 2925,
+        "output_pending": 3177,
+        "snapshot_detached": 253
+      },
+      "lastseq": 118,
+      "first_member": 5831959,
+      "end": 5835377,
+      "duration": 3538
+    },
+    {
+      "phase": 2,
+      "firstseq": 119,
+      "members": 9,
+      "begin": 5835416,
+      "legacy_raw_starts": 0,
+      "legacy_raw_starts_after_first_member": 0,
+      "residence_cycles": {
+        "raster_fragment": 8570,
+        "no_legacy_and_no_raw": 2232,
+        "raw_active": 9656,
+        "output_pending": 10807,
+        "snapshot_detached": 1156
+      },
+      "lastseq": 127,
+      "first_member": 5835536,
+      "last_snapshot_detached": 5847051,
+      "end": 5847304,
+      "duration": 11888,
+      "after_last_snapshot": 253
+    },
+    {
+      "phase": 2,
+      "firstseq": 129,
+      "members": 9,
+      "begin": 5934260,
+      "legacy_raw_starts": 0,
+      "legacy_raw_starts_after_first_member": 0,
+      "residence_cycles": {
+        "raster_fragment": 4270,
+        "no_legacy_and_no_raw": 3432,
+        "raw_active": 12196,
+        "output_pending": 14477,
+        "snapshot_detached": 2289
+      },
+      "lastseq": 137,
+      "first_member": 5934402,
+      "last_snapshot_detached": 5949635,
+      "end": 5949888,
+      "duration": 15628,
+      "after_last_snapshot": 253
+    },
+    {
+      "phase": 2,
+      "firstseq": 138,
+      "members": 4,
+      "begin": 5959726,
+      "legacy_raw_starts": 5,
+      "legacy_raw_starts_after_first_member": 5,
+      "residence_cycles": {
+        "raster_fragment": 114945,
+        "no_legacy_and_no_raw": 97117,
+        "raw_active": 10009,
+        "output_pending": 119606,
+        "snapshot_detached": 113305,
+        "pending_lease": 5,
+        "legacy_lease": 17710
+      },
+      "lastseq": 141,
+      "first_member": 5959868,
+      "last_snapshot_detached": 6075939,
+      "end": 6080858,
+      "duration": 121132,
+      "after_last_snapshot": 4919
+    },
+    {
+      "phase": 2,
+      "firstseq": 142,
+      "members": 4,
+      "begin": 6112807,
+      "legacy_raw_starts": 3,
+      "legacy_raw_starts_after_first_member": 3,
+      "residence_cycles": {
+        "no_legacy_and_no_raw": 13759,
+        "raw_active": 7617,
+        "output_pending": 26008,
+        "pending_lease": 1253,
+        "raster_fragment": 23119,
+        "snapshot_detached": 20267,
+        "legacy_lease": 7874
+      },
+      "lastseq": 145,
+      "first_member": 6112927,
+      "last_snapshot_detached": 6139677,
+      "end": 6140185,
+      "duration": 27378,
+      "after_last_snapshot": 508
+    },
+    {
+      "phase": 2,
+      "firstseq": 146,
+      "members": 2,
+      "begin": 6164401,
+      "legacy_raw_starts": 0,
+      "legacy_raw_starts_after_first_member": 0,
+      "residence_cycles": {
+        "no_legacy_and_no_raw": 1863,
+        "raw_active": 2593,
+        "output_pending": 4466,
+        "raster_fragment": 2759,
+        "snapshot_detached": 1875,
+        "pending_lease": 271,
+        "legacy_lease": 251
+      },
+      "lastseq": 147,
+      "first_member": 6164521,
+      "last_snapshot_detached": 6168855,
+      "end": 6169108,
+      "duration": 4707,
+      "after_last_snapshot": 253
+    },
+    {
+      "phase": 2,
+      "firstseq": 149,
+      "members": 6,
+      "begin": 6280521,
+      "legacy_raw_starts": 1,
+      "legacy_raw_starts_after_first_member": 1,
+      "residence_cycles": {
+        "no_legacy_and_no_raw": 3123,
+        "raw_active": 8807,
+        "output_pending": 10480,
+        "raster_fragment": 6902,
+        "snapshot_detached": 2548,
+        "pending_lease": 920,
+        "legacy_lease": 2696
+      },
+      "lastseq": 154,
+      "first_member": 6280641,
+      "last_snapshot_detached": 6293984,
+      "end": 6294276,
+      "duration": 13755,
+      "after_last_snapshot": 292
+    },
+    {
+      "phase": 2,
+      "firstseq": 155,
+      "members": 7,
+      "begin": 6339723,
+      "legacy_raw_starts": 2,
+      "legacy_raw_starts_after_first_member": 1,
+      "residence_cycles": {
+        "raster_fragment": 4151,
+        "no_legacy_and_no_raw": 2326,
+        "pending_lease": 186,
+        "legacy_lease": 5134,
+        "raw_active": 11488,
+        "output_pending": 11796,
+        "snapshot_detached": 1783
+      },
+      "lastseq": 161,
+      "first_member": 6342617,
+      "last_snapshot_detached": 6357020,
+      "end": 6357203,
+      "duration": 17480,
+      "after_last_snapshot": 183
+    },
+    {
+      "phase": 2,
+      "firstseq": 162,
+      "members": 2,
+      "begin": 6399720,
+      "legacy_raw_starts": 1,
+      "legacy_raw_starts_after_first_member": 1,
+      "residence_cycles": {
+        "no_legacy_and_no_raw": 498,
+        "raster_fragment": 1537,
+        "raw_active": 3447,
+        "output_pending": 4032,
+        "snapshot_detached": 631,
+        "pending_lease": 819,
+        "legacy_lease": 372
+      },
+      "lastseq": 163,
+      "first_member": 6399840,
+      "last_snapshot_detached": 6403619,
+      "end": 6403993,
+      "duration": 4273,
+      "after_last_snapshot": 374
+    },
+    {
+      "phase": 2,
+      "firstseq": 164,
+      "members": 4,
+      "begin": 6750963,
+      "legacy_raw_starts": 1,
+      "legacy_raw_starts_after_first_member": 1,
+      "residence_cycles": {
+        "no_legacy_and_no_raw": 1901,
+        "raw_active": 8517,
+        "output_pending": 9844,
+        "raster_fragment": 2241,
+        "snapshot_detached": 1979,
+        "pending_lease": 687,
+        "legacy_lease": 2326
+      },
+      "lastseq": 167,
+      "first_member": 6751083,
+      "last_snapshot_detached": 6762576,
+      "end": 6763059,
+      "duration": 12096,
+      "after_last_snapshot": 483
+    },
+    {
+      "phase": 2,
+      "firstseq": 173,
+      "members": 2,
+      "begin": 7371581,
+      "legacy_raw_starts": 0,
+      "legacy_raw_starts_after_first_member": 0,
+      "residence_cycles": {
+        "no_legacy_and_no_raw": 1169,
+        "raw_active": 3174,
+        "output_pending": 4052,
+        "raster_fragment": 1060,
+        "snapshot_detached": 880
+      },
+      "lastseq": 174,
+      "first_member": 7371701,
+      "last_snapshot_detached": 7375336,
+      "end": 7375924,
+      "duration": 4343,
+      "after_last_snapshot": 588
+    }
+  ],
+  "requirements": [
+    "Only immutable contiguous VTX/TRI chains with fixed transform/light/UV/fog/material context; stop before state/list boundaries. The111structural chains are not111material-qualified jobs.",
+    "Track group touched mask and actual raw valid_slots. For dest0-only members, touched mask is prefix[0,maxcount). Preserve incoming canonical slots outside that prefix before enqueue, and invalidate touched GPU cache slots.",
+    "A hold-raw GROUP flag must prohibit every legacy raw overwrite across all members and terminal handback. Priority context restoration alone cannot reconstruct aggregate high-slot raw rows.",
+    "After final numeric snapshot commit and accepted DMA drain, transfer raw alias to a unique terminal CPU lease while final packet may keep draining from snapshot RAM. Terminal alias ownership and true final output completion are separate fences.",
+    "CPU may defer canonical copying until first actual consumer or overlapping producer, but must copy retained rows or prove them dead and release before every wait requiring later queued work to progress.",
+    "Expose touched_mask and final_valid_mask, not just maxcount. A failed LOAD partially overwrites/invalidates its incoming rows; clip/cull/packet exceptions after a successful LOAD do not.",
+    "On a raw-failure repair, store exact canonical rows in a group-owned CPU side record indexed byslot. Later failed LOADs overwrite those saved rows. At terminal handback select raw rows for final-valid bits and saved latest-failure canonical rows for invalid touched bits. This requires extending the pure repair helper; it currently emits draw packets only.",
+    "Source descriptors, CPU/PSRAM vertex inputs, transform/projection/fog values and any failure records must survive until BOTH terminal canonical obligation and final ordered output obligation are discharged.",
+    "The smallest design allows only one pending terminal canonical owner. Queueing another group must first materialize retained rows or prove them dead and arrange terminal release; otherwise the next group can wait behind a raw lease that the CPU forgot to service.",
+    "Fog coefficients and incoming canonical rows outside the touched mask belong to the CPU task record. The existing28 hardware context words alone do not capture all deferred canonical/fog bookkeeping.",
+    "Consumer reset while a canonical obligation is pending cannot merely revoke it. Preserve an already-granted terminal raw lease, or mark the canonical obligation invalid and reconstruct from retained descriptors/context before CPUuse. Partial-group reset requires final last-writer provenance for submittedmembers; no stale raw alias may be trusted.",
+    "Group preflight/repair/material setup must not wait on a GPU fence that includes its own unavailable terminal handback. Head repair continues streaming independently of ingress fullness; CPU never repairs via ordinary ringtail."
+  ],
+  "ownership_tradeoff": [
+    "The present one-snapshot design cannot start memberN+1 until all outputwords frommemberN enter the511usable-word output FIFO. Holding raw across a longchain therefore retains it during raster-dependent output backpressure, not just raw transform time.",
+    "Terminal handback removes per-member CPU submissions/readback but makes the first legacy raw request or canonicalconsumer wait for the wholechain. It can overlap independentCPUwork before that boundary; it cannot guarantee an additional CPU unblock.",
+    "A terminal raw lease can overlap the final snapshot output drain, but cannot remove waiting for preceding members. Retaining it lazily can block every later GROUP, ordinaryfence and source-pool recycle unless software releases before those progresswaits.",
+    "The observed residence/overlap counts describe the unchanged scheduling only. They cannot be added or subtracted to predict the proposed locked-group runtime."
+  ],
+  "smaller_alternative": [
+    "If the finalLOAD count covers the entire group touchedprefix, earlymember rawrows need not survive legacypreemption. Keep ordinary priority betweenmembers, then reserve only the terminal snapshot rawview for CPUhandoff.",
+    "This structural shortcut covers only7multiLOAD chains/19LOADs among111chains in this scene (beforematerialqualification);55otherterminal-maxchains are singletons. It does not recovermost171dead-suffix legacyloads.",
+    "Another path is a stronger cached canonical liveness proof through known displaylistreturns, but this needs real caller-sensitive control-flow evidence. It is not implied by ENDDL and is not implemented."
+  ],
+  "limits": [
+    "Current measured groups intentionally contain only individually dead-slot-proven tasks. No broadhandback runtime or FPS was simulated here.",
+    "111chains/320LOADs is a structural ceiling; preparedmaterial eligibility and clipping/rawfailure handling remain necessary.",
+    "Event residence spans are exclusive between groups, but the state categories overlap eachother and CPU/GPUexecution. Counts have at mostoneedge convention difference; do not treat them as recoverable criticalpathtime.",
+    "No extraM10K/FPU is required for the proposed masks/terminal lease if CPU provenance lives in normalSDRAM; added control/software/ALMcost remainsunqualified.",
+    "Candidate-v1 is the fixedF25 initialGROUP trace. F26/F27 cache/publication variants were being measured separately and are not included."
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/design/broad-handback-review-v1/analyze.py": "11cedc044881d55dcb592d0d4c544220abcfe4f566fb4e396f70999cd4fa9ae0",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v1/run/async-events.tsv": "324ddd3c0389234285d431b7bb32376719ddd52831699cd77c7bdba59f3492aa",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/native-v1.json": "807044b61763c6bf739814219b4a3055b2b6df112e44ced71ee9bfaa22b14dd8",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/span-coverage-v1/ledger.json": "5c6e7738604939eca3b644d3e8fbcd45f5f32231ac3bb4039ce81aff5bb61d0f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/span-coverage-v1/result.json": "df5e6bedfb854f3cfc82cf6731ba9733ee5d20279a7a08e6102ba7cec781a7ce",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/span-coverage-v1/admission-join.json": "d32445be8ff6fd261ab811b93ea955bc8624abf441bfb9ed25c29723c057811f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/admission-v1/result.json": "1accbc3f29b488a073eb3c8202d5cd5cd63b8ac5f7ffdc99d9e1c66800e12c43",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/validation/candidate-v1/check-independent-v1.json": "bbc258e47fe948537579a95b901b2c7c3e09eea9dae1fab5f4102f8cda7f4ddc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/native-v2/prepared.json": "88e3f0a3d76a6c90a7a677e153c2564015dbb810aaa9610a52b472a1499fd5a0",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/native-v2/frozen/src/fpga/common/geometry_async_mesh.v": "4cf923a0f63f3e39c6e8fcba5fdb5aa3bda1ba008aa0284f16c2db800f70ee20",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/native-v2/frozen/src/fpga/common/geometry_raw_load.v": "fc0396d92eeed2ba22a89af7a844fa85bf24353fb00b1c0b4b681574799cc4cf",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/native-v2/frozen/src/fpga/common/geometry_mesh_stream.v": "d6b5d7b0b7ff71ceaba3498b2a438b8087441155f3a977a061b261d722c0383f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/native-v2/frozen/src/fpga/common/geometry_mesh_packet.v": "59781cee057d8fbeaec43f96ed9eb4cca8b44484be8dd125f0466a1080b694fc",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/native-v2/frozen/src/fpga/common/geometry_mesh_task_ctrl.v": "49a70c3174f91d698916dd6eca0e826f00e91a6f641cfc015ed30c0848740133"
+  }
+}

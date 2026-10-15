@@ -1,0 +1,797 @@
+/*
+ * Copyright (C) 1997-2001 Id Software, Inc.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or (at
+ * your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ *
+ * See the GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
+ * 02111-1307, USA.
+ *
+ * =======================================================================
+ *
+ * Lightmaps and dynamic lighting
+ *
+ * =======================================================================
+ */
+
+#include "header/local.h"
+
+int r_dlightframecount;
+vec3_t pointcolor;
+cplane_t *lightplane; /* used as shadow plane */
+vec3_t lightspot;
+static float s_blocklights[34 * 34 * 3];
+
+unsigned char minlight[256];
+
+void
+R_RenderDlight(dlight_t *light)
+{
+	const float rad = light->intensity * 0.35;
+	int i, j, clr[3];
+	float vtx[3], a;
+
+	R_SetBufferIndices(GL_TRIANGLE_FAN, 18);
+
+	for ( i = 0; i < 3; i++ )
+	{
+		vtx [ i ] = light->origin [ i ] - vpn [ i ] * rad;
+		clr [ i ] = light->color [ i ] * 51;	// 255 * 0.2 = 51
+	}
+
+	GLBUFFER_VERTEX( vtx[0], vtx[1], vtx[2] )
+	GLBUFFER_COLOR( clr[0], clr[1], clr[2], 255 )
+
+	for ( i = 16; i >= 0; i-- )
+	{
+		a = i / 16.0 * M_PI * 2;
+
+		for ( j = 0; j < 3; j++ )
+		{
+			vtx[ j ] = light->origin [ j ] + vright [ j ] * cos( a ) * rad
+				+ vup [ j ] * sin( a ) * rad;
+		}
+
+		GLBUFFER_VERTEX( vtx[0], vtx[1], vtx[2] )
+		GLBUFFER_COLOR( 0, 0, 0, 255 )
+	}
+}
+
+void
+R_RenderDlights(void)
+{
+	int i;
+	dlight_t *l;
+
+	if (!gl1_flashblend->value)
+	{
+		return;
+	}
+	R_UpdateGLBuffer(buf_flash, 0, 0, 0, 1);
+
+	/* because the count hasn't advanced yet for this frame */
+	r_dlightframecount = r_framecount + 1;
+
+	glDepthMask(GL_FALSE);
+	glDisable(GL_TEXTURE_2D);
+	glShadeModel(GL_SMOOTH);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_ONE, GL_ONE);
+
+	l = r_newrefdef.dlights;
+
+	for (i = 0; i < r_newrefdef.num_dlights; i++, l++)
+	{
+		R_RenderDlight(l);
+	}
+	R_ApplyGLBuffer();
+
+	glColor4f(1, 1, 1, 1);
+	glDisable(GL_BLEND);
+	glEnable(GL_TEXTURE_2D);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glDepthMask(GL_TRUE);
+}
+
+void
+R_MarkSurfaceLights(dlight_t *light, int bit, mnode_t *node, int lightframecount)
+{
+	msurface_t	*surf;
+	int			i;
+
+	/* mark the polygons */
+	surf = r_worldmodel->surfaces + node->firstsurface;
+
+	for (i = 0; i < node->numsurfaces; i++, surf++)
+	{
+		int sidebit;
+		float dist;
+
+		dist = DotProduct(light->origin, surf->plane->normal) - surf->plane->dist;
+
+		if (dist >= 0)
+		{
+			sidebit = 0;
+		}
+		else
+		{
+			sidebit = SURF_PLANEBACK;
+		}
+
+		if ((surf->flags & SURF_PLANEBACK) != sidebit)
+		{
+			continue;
+		}
+
+		if (surf->dlightframe != lightframecount)
+		{
+			surf->dlightbits = 0;
+			surf->dlightframe = lightframecount;
+		}
+
+		surf->dlightbits |= bit;
+	}
+}
+
+void
+R_PushDlights(void)
+{
+	int i;
+	dlight_t *l;
+
+	if (gl1_flashblend->value)
+	{
+		return;
+	}
+
+	/* because the count hasn't advanced yet for this frame */
+	r_dlightframecount = r_framecount + 1;
+
+	l = r_newrefdef.dlights;
+
+	for (i = 0; i < r_newrefdef.num_dlights; i++, l++)
+	{
+		R_MarkLights(l, 1 << i, r_worldmodel->nodes, r_dlightframecount,
+			R_MarkSurfaceLights);
+	}
+}
+
+int
+R_RecursiveLightPoint(mnode_t *node, vec3_t start, vec3_t end)
+{
+	float front, back, frac;
+	int side;
+	cplane_t *plane;
+	vec3_t mid;
+	msurface_t *surf;
+	int s, t, ds, dt;
+	int i;
+	mtexinfo_t *tex;
+	byte *lightmap;
+	int maps;
+	int r;
+
+	if (node->contents != CONTENTS_NODE)
+	{
+		return -1;     /* didn't hit anything */
+	}
+
+	/* calculate mid point */
+	plane = node->plane;
+	front = DotProduct(start, plane->normal) - plane->dist;
+	back = DotProduct(end, plane->normal) - plane->dist;
+	side = front < 0;
+
+	if ((back < 0) == side)
+	{
+		return R_RecursiveLightPoint(node->children[side], start, end);
+	}
+
+	frac = front / (front - back);
+	mid[0] = start[0] + (end[0] - start[0]) * frac;
+	mid[1] = start[1] + (end[1] - start[1]) * frac;
+	mid[2] = start[2] + (end[2] - start[2]) * frac;
+
+	/* go down front side */
+	r = R_RecursiveLightPoint(node->children[side], start, mid);
+
+	if (r >= 0)
+	{
+		return r;     /* hit something */
+	}
+
+	if ((back < 0) == side)
+	{
+		return -1;     /* didn't hit anuthing */
+	}
+
+	/* check for impact on this node */
+	VectorCopy(mid, lightspot);
+	lightplane = plane;
+
+	surf = r_worldmodel->surfaces + node->firstsurface;
+
+	for (i = 0; i < node->numsurfaces; i++, surf++)
+	{
+		if (surf->flags & (SURF_DRAWTURB | SURF_DRAWSKY))
+		{
+			continue; /* no lightmaps */
+		}
+
+		tex = surf->texinfo;
+
+		s = DotProduct(mid, tex->vecs[0]) + tex->vecs[0][3];
+		t = DotProduct(mid, tex->vecs[1]) + tex->vecs[1][3];
+
+		if ((s < surf->texturemins[0]) ||
+			(t < surf->texturemins[1]))
+		{
+			continue;
+		}
+
+		ds = s - surf->texturemins[0];
+		dt = t - surf->texturemins[1];
+
+		if ((ds > surf->extents[0]) || (dt > surf->extents[1]))
+		{
+			continue;
+		}
+
+		if (!surf->samples)
+		{
+			return 0;
+		}
+
+		ds >>= 4;
+		dt >>= 4;
+
+		lightmap = surf->samples;
+		VectorCopy(vec3_origin, pointcolor);
+
+		lightmap += 3 * (dt * ((surf->extents[0] >> 4) + 1) + ds);
+
+		for (maps = 0; maps < MAXLIGHTMAPS && surf->styles[maps] != 255;
+			 maps++)
+		{
+			const float *rgb;
+			int j;
+
+			rgb = r_newrefdef.lightstyles[surf->styles[maps]].rgb;
+
+			/* Apply light level to models */
+			for (j = 0; j < 3; j++)
+			{
+				float	scale;
+
+				scale = rgb[j] * r_modulate->value;
+				pointcolor[j] += lightmap[j] * scale * (1.0 / 255);
+			}
+
+			lightmap += 3 * ((surf->extents[0] >> 4) + 1) *
+						((surf->extents[1] >> 4) + 1);
+		}
+
+		return 1;
+	}
+
+	/* go down back side */
+	return R_RecursiveLightPoint(node->children[!side], mid, end);
+}
+
+void
+R_LightPoint(entity_t *currententity, vec3_t p, vec3_t color)
+{
+	vec3_t end;
+	float r;
+	int lnum;
+	dlight_t *dl;
+	vec3_t dist;
+	float add;
+
+	if (!r_worldmodel->lightdata || !currententity)
+	{
+		color[0] = color[1] = color[2] = 1.0;
+		return;
+	}
+
+	end[0] = p[0];
+	end[1] = p[1];
+	end[2] = p[2] - 2048;
+
+	r = R_RecursiveLightPoint(r_worldmodel->nodes, p, end);
+
+	if (r == -1)
+	{
+		VectorCopy(vec3_origin, color);
+	}
+	else
+	{
+		VectorCopy(pointcolor, color);
+	}
+
+	/* add dynamic lights */
+	dl = r_newrefdef.dlights;
+
+	for (lnum = 0; lnum < r_newrefdef.num_dlights; lnum++, dl++)
+	{
+		VectorSubtract(currententity->origin,
+				dl->origin, dist);
+		add = dl->intensity - VectorLength(dist);
+		add *= (1.0 / 256);
+
+		if (add > 0)
+		{
+			VectorMA(color, add, dl->color, color);
+		}
+	}
+
+	VectorScale(color, r_modulate->value, color);
+}
+
+void
+R_AddDynamicLights(msurface_t *surf)
+{
+	int lnum;
+	int sd, td;
+	float fdist, frad, fminlight;
+	vec3_t impact, local;
+	int s, t, first;
+	int i;
+	int smax, tmax;
+	mtexinfo_t *tex;
+	dlight_t *dl;
+	float *pfBL;
+	int sdist[34];
+
+	smax = (surf->extents[0] >> 4) + 1;
+	tmax = (surf->extents[1] >> 4) + 1;
+	tex = surf->texinfo;
+
+	for (lnum = 0; lnum < r_newrefdef.num_dlights; lnum++)
+	{
+		if (!(surf->dlightbits & (1 << lnum)))
+		{
+			continue; /* not lit by this light */
+		}
+
+		dl = &r_newrefdef.dlights[lnum];
+		frad = dl->intensity;
+		fdist = DotProduct(dl->origin, surf->plane->normal) -
+				surf->plane->dist;
+		frad -= fabs(fdist);
+
+		/* rad is now the highest intensity on the plane */
+		fminlight = DLIGHT_CUTOFF;
+
+		if (frad < fminlight)
+		{
+			continue;
+		}
+
+		fminlight = frad - fminlight;
+
+		for (i = 0; i < 3; i++)
+		{
+			impact[i] = dl->origin[i] -
+						surf->plane->normal[i] * fdist;
+		}
+
+		local[0] = DotProduct(impact,
+				   tex->vecs[0]) + tex->vecs[0][3] - surf->texturemins[0];
+		local[1] = DotProduct(impact,
+				   tex->vecs[1]) + tex->vecs[1][3] - surf->texturemins[1];
+
+		/* Each horizontal distance is shared by every row. Work in bounded
+		 * chunks so unusually wide BSP surfaces need no larger stack array. */
+		for (first = 0; first < smax; first += 34)
+		{
+			int count = Q_min(smax - first, 34);
+			int start = count, end = 0;
+
+			for (s = 0; s < count; s++)
+			{
+				sd = Q_ftol(local[0] - (float)((first + s) * 16));
+				if (sd < 0)
+				{
+					sd = -sd;
+				}
+				sdist[s] = sd;
+				if (sd < fminlight)
+				{
+					if (start == count) start = s;
+					end = s + 1;
+				}
+			}
+
+			if (start == count)
+			{
+				continue;
+			}
+
+			for (t = 0; t < tmax; t++)
+			{
+				td = local[1] - (float)(t * 16);
+				if (td < 0)
+				{
+					td = -td;
+				}
+
+				/* The approximate distance is at least each axis distance. */
+				if (td >= fminlight)
+				{
+					continue;
+				}
+				pfBL = s_blocklights + (t * smax + first + start) * 3;
+				for (s = start; s < end; s++, pfBL += 3)
+				{
+					sd = sdist[s];
+					if (sd > td)
+					{
+						fdist = sd + (td >> 1);
+					}
+					else
+					{
+						fdist = td + (sd >> 1);
+					}
+
+					if (fdist < fminlight)
+					{
+						pfBL[0] += (frad - fdist) * dl->color[0];
+						pfBL[1] += (frad - fdist) * dl->color[1];
+						pfBL[2] += (frad - fdist) * dl->color[2];
+					}
+				}
+			}
+		}
+	}
+}
+
+void
+R_SetCacheState(msurface_t *surf)
+{
+	int maps;
+
+	for (maps = 0; maps < MAXLIGHTMAPS && surf->styles[maps] != 255;
+		 maps++)
+	{
+		surf->cached_light[maps] =
+			r_newrefdef.lightstyles[surf->styles[maps]].white;
+	}
+}
+
+/*
+ * Combine and scale multiple lightmaps into the floating format in blocklights
+ */
+void
+R_BuildLightMap(msurface_t *surf, byte *dest, int stride)
+{
+	int smax, tmax;
+	int r, g, b, a, max;
+	int i, j, size;
+	byte *lightmap;
+	float scale[4];
+	int nummaps;
+	float *bl;
+
+	if (surf->texinfo->flags &
+		(SURF_SKY | SURF_TRANS33 | SURF_TRANS66 | SURF_WARP))
+	{
+		Com_Error(ERR_DROP, "%s called for non-lit surface", __func__);
+	}
+
+	smax = (surf->extents[0] >> 4) + 1;
+	tmax = (surf->extents[1] >> 4) + 1;
+	size = smax * tmax;
+
+	if (size > (sizeof(s_blocklights) >> 4))
+	{
+		Com_Error(ERR_DROP, "%s: Bad s_blocklights size", __func__);
+	}
+
+	/* set to full bright if no light data */
+	if (!surf->samples)
+	{
+		for (i = 0; i < size * 3; i++)
+		{
+			s_blocklights[i] = 255;
+		}
+
+		goto store;
+	}
+
+	/* count the # of maps */
+	for (nummaps = 0; nummaps < MAXLIGHTMAPS && surf->styles[nummaps] != 255;
+		 nummaps++)
+	{
+	}
+
+	lightmap = surf->samples;
+
+	/* add all the lightmaps */
+	if (nummaps == 1)
+	{
+		int maps;
+
+		for (maps = 0; maps < MAXLIGHTMAPS && surf->styles[maps] != 255; maps++)
+		{
+			bl = s_blocklights;
+
+			for (i = 0; i < 3; i++)
+			{
+				scale[i] = r_modulate->value *
+						   r_newrefdef.lightstyles[surf->styles[maps]].rgb[i];
+			}
+
+			if ((scale[0] == 1.0F) &&
+				(scale[1] == 1.0F) &&
+				(scale[2] == 1.0F))
+			{
+				for (i = 0; i < size; i++, bl += 3)
+				{
+					bl[0] = lightmap[i * 3 + 0];
+					bl[1] = lightmap[i * 3 + 1];
+					bl[2] = lightmap[i * 3 + 2];
+				}
+			}
+			else
+			{
+				for (i = 0; i < size; i++, bl += 3)
+				{
+					bl[0] = lightmap[i * 3 + 0] * scale[0];
+					bl[1] = lightmap[i * 3 + 1] * scale[1];
+					bl[2] = lightmap[i * 3 + 2] * scale[2];
+				}
+			}
+
+			lightmap += size * 3; /* skip to next lightmap */
+		}
+	}
+	else
+	{
+		int maps;
+
+		memset(s_blocklights, 0, sizeof(s_blocklights[0]) * size * 3);
+
+		for (maps = 0; maps < MAXLIGHTMAPS && surf->styles[maps] != 255; maps++)
+		{
+			bl = s_blocklights;
+
+			for (i = 0; i < 3; i++)
+			{
+				scale[i] = r_modulate->value *
+						   r_newrefdef.lightstyles[surf->styles[maps]].rgb[i];
+			}
+
+			if ((scale[0] == 1.0F) &&
+				(scale[1] == 1.0F) &&
+				(scale[2] == 1.0F))
+			{
+				for (i = 0; i < size; i++, bl += 3)
+				{
+					bl[0] += lightmap[i * 3 + 0];
+					bl[1] += lightmap[i * 3 + 1];
+					bl[2] += lightmap[i * 3 + 2];
+				}
+			}
+			else
+			{
+				for (i = 0; i < size; i++, bl += 3)
+				{
+					bl[0] += lightmap[i * 3 + 0] * scale[0];
+					bl[1] += lightmap[i * 3 + 1] * scale[1];
+					bl[2] += lightmap[i * 3 + 2] * scale[2];
+				}
+			}
+
+			lightmap += size * 3; /* skip to next lightmap */
+		}
+	}
+
+	/* add all the dynamic lights */
+	if (surf->dlightframe == r_framecount)
+	{
+		R_AddDynamicLights(surf);
+	}
+
+store:
+
+	stride -= (smax << 2);
+	bl = s_blocklights;
+
+	for (i = 0; i < tmax; i++, dest += stride)
+	{
+		for (j = 0; j < smax; j++)
+		{
+			r = Q_ftol(bl[0]);
+			g = Q_ftol(bl[1]);
+			b = Q_ftol(bl[2]);
+
+			/* catch negative lights */
+			if (r < 0)
+			{
+				r = 0;
+			}
+
+			if (g < 0)
+			{
+				g = 0;
+			}
+
+			if (b < 0)
+			{
+				b = 0;
+			}
+
+			/* determine the brightest of the three color components */
+			if (r > g)
+			{
+				max = r;
+			}
+			else
+			{
+				max = g;
+			}
+
+			if (b > max)
+			{
+				max = b;
+			}
+
+			/* alpha is ONLY used for the mono lightmap case. For this
+			   reason we set it to the brightest of the color components
+			   so that things don't get too dim. */
+			a = max;
+
+			/* rescale all the color components if the
+			   intensity of the greatest channel exceeds
+			   1.0 */
+			if (max > 255)
+			{
+				float t = 255.0F / max;
+
+				r = r * t;
+				g = g * t;
+				b = b * t;
+				a = a * t;
+			}
+
+			if (gl_state.minlight_set)
+			{
+				r = minlight[r];
+				g = minlight[g];
+				b = minlight[b];
+			}
+
+			dest[0] = gammatable[r];
+			dest[1] = gammatable[g];
+			dest[2] = gammatable[b];
+			dest[3] = a;
+
+			bl += 3;
+			dest += 4;
+		}
+	}
+}
+
+
+#ifdef YQ2_OPENFPGA
+/* This backend reads lightmaps at original BSP vertices, then interpolates
+ * their RGB565 colours during clipping/rasterization. Rebuild exactly those
+ * texels; the general/full lightmap path remains available for other callers.
+ * Collect every polygon before writing so unsupported inputs fall back cleanly. */
+int
+R_BuildVertexLightMap(msurface_t *surf, byte *dest, int stride, uint16_t *indices)
+{
+	int sx[64], sy[64], count = 0, visits = 0;
+	float values[64][3];
+	int smax = (surf->extents[0] >> 4) + 1;
+	int tmax = (surf->extents[1] >> 4) + 1;
+	int size = smax * tmax;
+	if (!surf->polys || smax <= 0 || tmax <= 0 ||
+		size > (sizeof(s_blocklights) >> 4) ||
+		(surf->texinfo->flags & (SURF_SKY | SURF_TRANS33 | SURF_TRANS66 | SURF_WARP)))
+		return false;
+	for (glpoly_t *p = surf->polys; p; p = p->next)
+	{
+		if (p->numverts <= 0 || p->numverts > 256 - visits) return false;
+		visits += p->numverts;
+		for (int v = 0; v < p->numverts; v++)
+		{
+			float u = p->verts[v][5] * BLOCK_WIDTH;
+			float vcoord = p->verts[v][6] * BLOCK_HEIGHT;
+			/* Also rejects NaNs before float-to-integer conversion. */
+			if (!(u >= 0 && u < BLOCK_WIDTH && vcoord >= 0 && vcoord < BLOCK_HEIGHT))
+				return false;
+			int x = (int)u - surf->light_s, y = (int)vcoord - surf->light_t;
+			if (x < 0 || x >= smax || y < 0 || y >= tmax) return false;
+			int k;
+			for (k = 0; k < count; k++) if (sx[k] == x && sy[k] == y) break;
+			if (k < count) continue;
+			if (count == 64) return false;
+			sx[count] = x; sy[count] = y; count++;
+		}
+	}
+	if (!count) return false;
+
+	int nummaps = 0;
+	while (nummaps < MAXLIGHTMAPS && surf->styles[nummaps] != 255) nummaps++;
+	for (int k = 0; k < count; k++)
+		for (int c = 0; c < 3; c++) values[k][c] = surf->samples ? 0 : 255;
+	if (surf->samples)
+	{
+		for (int map = 0; map < nummaps; map++)
+		{
+			float scale[3];
+			for (int c = 0; c < 3; c++)
+				scale[c] = r_modulate->value * r_newrefdef.lightstyles[surf->styles[map]].rgb[c];
+			int unity = scale[0] == 1.0f && scale[1] == 1.0f && scale[2] == 1.0f;
+			for (int k = 0; k < count; k++)
+			{
+				const byte *in = surf->samples + (map * size + sy[k] * smax + sx[k]) * 3;
+				for (int c = 0; c < 3; c++)
+				{
+					float value = unity ? in[c] : in[c] * scale[c];
+					if (nummaps == 1) values[k][c] = value;
+					else values[k][c] += value;
+				}
+			}
+		}
+		/* Preserve light order and the original truncation of axis distances. */
+		if (surf->dlightframe == r_framecount)
+		for (int lnum = 0; lnum < r_newrefdef.num_dlights; lnum++)
+		{
+			if (!(surf->dlightbits & (1u << lnum))) continue;
+			dlight_t *dl = &r_newrefdef.dlights[lnum];
+			float fdist = DotProduct(dl->origin, surf->plane->normal) - surf->plane->dist;
+			float frad = dl->intensity;
+			frad -= fabs(fdist);
+			if (frad < DLIGHT_CUTOFF) continue;
+			float fminlight = frad - DLIGHT_CUTOFF;
+			vec3_t impact;
+			for (int c = 0; c < 3; c++) impact[c] = dl->origin[c] - surf->plane->normal[c] * fdist;
+			float ls = DotProduct(impact, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3] - surf->texturemins[0];
+			float lt = DotProduct(impact, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3] - surf->texturemins[1];
+			for (int k = 0; k < count; k++)
+			{
+				int sd = Q_ftol(ls - (float)(sx[k] * 16));
+				int td = lt - (float)(sy[k] * 16);
+				if (sd < 0) sd = -sd;
+				if (td < 0) td = -td;
+				fdist = sd > td ? sd + (td >> 1) : td + (sd >> 1);
+				if (fdist < fminlight)
+					for (int c = 0; c < 3; c++) values[k][c] += (frad - fdist) * dl->color[c];
+			}
+		}
+	}
+	for (int k = 0; k < count; k++)
+	{
+		int r = Q_ftol(values[k][0]), g = Q_ftol(values[k][1]), b = Q_ftol(values[k][2]);
+		if (r < 0) r = 0;
+		if (g < 0) g = 0;
+		if (b < 0) b = 0;
+		int max = r > g ? r : g;
+		if (b > max) max = b;
+		int a = max;
+		if (max > 255)
+		{
+			float t = 255.0f / max;
+			r = r * t; g = g * t; b = b * t; a = a * t;
+		}
+		if (gl_state.minlight_set) { r = minlight[r]; g = minlight[g]; b = minlight[b]; }
+		byte *out = dest + sy[k] * stride + sx[k] * 4;
+		out[0] = gammatable[r]; out[1] = gammatable[g]; out[2] = gammatable[b]; out[3] = a;
+		if (indices) indices[k] = (surf->light_t + sy[k]) * BLOCK_WIDTH + surf->light_s + sx[k];
+	}
+	return count;
+}
+#endif

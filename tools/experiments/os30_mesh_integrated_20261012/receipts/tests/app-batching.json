@@ -1,0 +1,32 @@
+{
+  "pass": true,
+  "checks": 12308,
+  "status_combinations": 4096,
+  "command": [
+    "gcc",
+    "-std=c11",
+    "-O2",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-fsanitize=address,undefined",
+    "-fno-omit-frame-pointer",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/evidence/batching-liveness-v1/actual_wait_test.c",
+    "-o",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/evidence/batching-liveness-v1/actual_wait_test"
+  ],
+  "stderr": "",
+  "sanitizer_environment": {
+    "ASAN_OPTIONS": "detect_leaks=0"
+  },
+  "sanitizer_note": "LeakSanitizer cannot run under the execution harness ptrace; this test allocates no dynamic memory. AddressSanitizer and UBSan remain enabled.",
+  "limitation": "Actual C bodies and SDK threshold logic; mocked publication/credit progress. Full RTL/native liveness remains a separate validation.",
+  "input_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/src/sm64/sm64/src/pc/gfx/gfx_gpu.c": "36ff1e0e20da4c6eab7112e67fa4bf565aae69c9f41f41d1b5dfc8d3910c3b83",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/src/sdk/include/of_gpu.h": "7e4b105e444b7307b36010da87749eff445650b6983283eeab9223e6af3dc01d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/evidence/app-build-v3/build-result.json": "0573249b3104faea60b31aed99ce9e4ed1cf4cb6f934626ebff9c8eda1f4f772",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/evidence/batching-liveness-v1/test_wait.py": "f9b80899caafb66382b15780be31b59a86a6d82deed5c20ddcc8800e838a239d",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/mesh-integrated-v1/work-app-v3/evidence/batching-liveness-v1/actual_wait_test.c": "f48014b492aad1e9b63a7fe81713ecd2897ef30c840ebc57d093bed6a9117678"
+  },
+  "extracted_wait_sha256": "93f046f9610b1a1db124a01d9dce1d675c5d1a485a25026d0132c8140ff0c00f"
+}

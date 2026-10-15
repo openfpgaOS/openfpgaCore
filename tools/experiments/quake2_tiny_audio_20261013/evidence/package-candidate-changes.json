@@ -1,0 +1,39 @@
+{
+  "scope": "Prepared final ring-audio source; final artifact selection requires all 30 seed attempts.",
+  "frozen_sha256": "f63613efe348448c45af303972d6804a41d15724ac3a716f17eff4b40e6eb2d3",
+  "native6_manifest_sha256": "bf4855ce20e202897fad48417981d0b316665fc9e583deb6aec9a300d46a6d1b",
+  "changes": {
+    "src/fpga/common/axi_sdram_arbiter.v": {
+      "before": "9d1bfed762e317ad937f67c34219ca3ac44fa5e8781c989e7a92aceefad1d706",
+      "after": "5e9e06dca5ccf978a89f0aaacba05aa295ed7706636d8abed85ef2601ee037f1"
+    },
+    "src/fpga/common/gpu_geometry_worker.v": {
+      "before": "164d5ce2eeeb478eb7504660b8a4afef4d8f6a16cf75372ba5eff26917305892",
+      "after": "e0f4ffbd20f2a20ab416543a0e9d830d7ec6b4d8d55df094479428b67f933fbb"
+    },
+    "src/fpga/common/os30/audio_mixer.v": {
+      "before": "f9cbfe37da81ae6d5564df076e75c6d28f46feabb992bb695392d06aa55e0ba4",
+      "after": "c6d2517af662f356b44617230c27aa880c449928282e738c374a2db86663f73a"
+    },
+    "src/fpga/common/os30/audio_sample_cache.v": {
+      "before": null,
+      "after": "ac018efd17a7e1012d1456f12375575a4c4f57784ab6a03c2132bb00795c111d"
+    },
+    "src/fpga/common/os30/axi_periph_slave.v": {
+      "before": "1777c679b86d380c10d4e8f29ec7fe54ede9298a99bfcee33b1856a850015acc",
+      "after": "2ad87cc989af89b56492fa898d3f51dea55029fe6b8947c7e385e0859a100444"
+    },
+    "src/fpga/common/os30/cpu_system.v": {
+      "before": "a83c95135940b50e814b272f7a520e7c845a3dca22ca41bb5d020a344498f483",
+      "after": "64ee4a7a7c646f49c7cef1d5b90cd17f1ca37be6bff0589a0eb3e58213caf1f0"
+    },
+    "src/fpga/targets/pocket/ap_core.qsf": {
+      "before": "3fc898b5110f1a47c73c93ddbfd903f46274de2ea1863328bffd2fb0dd76b4e8",
+      "after": "351431b8158de34a5a18361c8ae8a9d5d94a81b714c3853dfa3d315a47c1f1d1"
+    },
+    "src/fpga/targets/pocket/os30/core_top.v": {
+      "before": "4d29bfc0b98fdd9c36e13a5048fe7a80f6082372124d32c04d6acca2a0d5a3f8",
+      "after": "bc1846e6f148496d5fb41c329fc4c34fe3fd312c65b9316f36ac5a36336a60e5"
+    }
+  }
+}

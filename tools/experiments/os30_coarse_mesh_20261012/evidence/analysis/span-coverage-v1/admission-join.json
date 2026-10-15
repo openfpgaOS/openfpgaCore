@@ -1,0 +1,1252 @@
+{
+  "status": "PASS_INDEPENDENT_ROUTE_JOIN",
+  "phases": {
+    "1": {
+      "counts": {
+        "tails_starting_with_observed_accepted_job": 18,
+        "tail_loads": 134,
+        "tail_triangles": 1051,
+        "tail_route_async": 98,
+        "tail_route_suffix_opcode": 36,
+        "all_terminal_max_chains": 62,
+        "all_terminal_max_loads": 74,
+        "multi_terminal_max_chains": 7,
+        "multi_terminal_max_loads": 19,
+        "tail_terminal_max_groups": 5,
+        "tail_terminal_max_loads": 12
+      },
+      "tails": [
+        {
+          "calls": [
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25
+          ],
+          "source_begin": 274242848,
+          "source_end": 274243552,
+          "vertex_counts": [
+            15,
+            14,
+            16,
+            15,
+            16,
+            15,
+            16,
+            16,
+            16,
+            14,
+            16,
+            16,
+            16,
+            14,
+            14,
+            9
+          ],
+          "routes": [
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "suffix_opcode",
+            "async",
+            "suffix_opcode",
+            "suffix_opcode"
+          ],
+          "triangles": 132,
+          "terminal_LOAD_overwrites_all_prior_slots": false
+        },
+        {
+          "calls": [
+            33,
+            34,
+            35,
+            36
+          ],
+          "source_begin": 274215064,
+          "source_end": 274215184,
+          "vertex_counts": [
+            16,
+            16,
+            14,
+            3
+          ],
+          "routes": [
+            "async",
+            "suffix_opcode",
+            "suffix_opcode",
+            "suffix_opcode"
+          ],
+          "triangles": 20,
+          "terminal_LOAD_overwrites_all_prior_slots": false
+        },
+        {
+          "calls": [
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53
+          ],
+          "source_begin": 274214376,
+          "source_end": 274214976,
+          "vertex_counts": [
+            15,
+            15,
+            15,
+            15,
+            15,
+            15,
+            15,
+            16,
+            14,
+            15,
+            15,
+            14,
+            15,
+            15,
+            15,
+            7
+          ],
+          "routes": [
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "suffix_opcode",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "suffix_opcode",
+            "suffix_opcode"
+          ],
+          "triangles": 105,
+          "terminal_LOAD_overwrites_all_prior_slots": false
+        },
+        {
+          "calls": [
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69
+          ],
+          "source_begin": 274213832,
+          "source_end": 274214304,
+          "vertex_counts": [
+            15,
+            15,
+            15,
+            16,
+            15,
+            15,
+            15,
+            15,
+            15,
+            15,
+            15,
+            15,
+            15,
+            15,
+            6
+          ],
+          "routes": [
+            "async",
+            "async",
+            "async",
+            "suffix_opcode",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "suffix_opcode",
+            "suffix_opcode"
+          ],
+          "triangles": 75,
+          "terminal_LOAD_overwrites_all_prior_slots": false
+        },
+        {
+          "calls": [
+            75,
+            76,
+            77,
+            78
+          ],
+          "source_begin": 274213464,
+          "source_end": 274213584,
+          "vertex_counts": [
+            16,
+            16,
+            15,
+            8
+          ],
+          "routes": [
+            "async",
+            "suffix_opcode",
+            "suffix_opcode",
+            "suffix_opcode"
+          ],
+          "triangles": 21,
+          "terminal_LOAD_overwrites_all_prior_slots": false
+        },
+        {
+          "calls": [
+            100,
+            101,
+            102,
+            103,
+            104,
+            105,
+            106,
+            107,
+            108,
+            109,
+            110
+          ],
+          "source_begin": 274212360,
+          "source_end": 274212712,
+          "vertex_counts": [
+            16,
+            15,
+            16,
+            14,
+            14,
+            14,
+            15,
+            15,
+            15,
+            16,
+            12
+          ],
+          "routes": [
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "suffix_opcode",
+            "suffix_opcode"
+          ],
+          "triangles": 62,
+          "terminal_LOAD_overwrites_all_prior_slots": false
+        },
+        {
+          "calls": [
+            112,
+            113,
+            114,
+            115,
+            116,
+            117,
+            118,
+            119,
+            120,
+            121,
+            122,
+            123,
+            124,
+            125,
+            126,
+            127,
+            128,
+            129,
+            130,
+            131,
+            132,
+            133
+          ],
+          "source_begin": 274192560,
+          "source_end": 274193584,
+          "vertex_counts": [
+            16,
+            16,
+            16,
+            14,
+            15,
+            16,
+            15,
+            16,
+            16,
+            16,
+            15,
+            16,
+            15,
+            16,
+            14,
+            16,
+            14,
+            16,
+            14,
+            16,
+            16,
+            6
+          ],
+          "routes": [
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "suffix_opcode",
+            "suffix_opcode"
+          ],
+          "triangles": 204,
+          "terminal_LOAD_overwrites_all_prior_slots": false
+        },
+        {
+          "calls": [
+            141,
+            142,
+            143,
+            144,
+            145,
+            146,
+            147,
+            148,
+            149,
+            150
+          ],
+          "source_begin": 274191856,
+          "source_end": 274192272,
+          "vertex_counts": [
+            15,
+            16,
+            14,
+            14,
+            15,
+            14,
+            15,
+            15,
+            16,
+            4
+          ],
+          "routes": [
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "suffix_opcode",
+            "suffix_opcode"
+          ],
+          "triangles": 79,
+          "terminal_LOAD_overwrites_all_prior_slots": false
+        },
+        {
+          "calls": [
+            159,
+            160,
+            161,
+            162,
+            163,
+            164,
+            165,
+            166,
+            167
+          ],
+          "source_begin": 278073488,
+          "source_end": 278073840,
+          "vertex_counts": [
+            14,
+            16,
+            15,
+            15,
+            15,
+            15,
+            16,
+            16,
+            14
+          ],
+          "routes": [
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "suffix_opcode",
+            "suffix_opcode"
+          ],
+          "triangles": 66,
+          "terminal_LOAD_overwrites_all_prior_slots": false
+        },
+        {
+          "calls": [
+            173,
+            174,
+            175
+          ],
+          "source_begin": 278057272,
+          "source_end": 278057432,
+          "vertex_counts": [
+            14,
+            15,
+            15
+          ],
+          "routes": [
+            "async",
+            "async",
+            "suffix_opcode"
+          ],
+          "triangles": 32,
+          "terminal_LOAD_overwrites_all_prior_slots": true
+        },
+        {
+          "calls": [
+            185,
+            186,
+            187,
+            188,
+            189,
+            190
+          ],
+          "source_begin": 278050480,
+          "source_end": 278050816,
+          "vertex_counts": [
+            16,
+            15,
+            16,
+            15,
+            16,
+            13
+          ],
+          "routes": [
+            "async",
+            "async",
+            "async",
+            "async",
+            "suffix_opcode",
+            "suffix_opcode"
+          ],
+          "triangles": 68,
+          "terminal_LOAD_overwrites_all_prior_slots": false
+        },
+        {
+          "calls": [
+            192,
+            193
+          ],
+          "source_begin": 278050304,
+          "source_end": 278050416,
+          "vertex_counts": [
+            15,
+            15
+          ],
+          "routes": [
+            "async",
+            "suffix_opcode"
+          ],
+          "triangles": 23,
+          "terminal_LOAD_overwrites_all_prior_slots": true
+        },
+        {
+          "calls": [
+            202,
+            203,
+            204
+          ],
+          "source_begin": 278069784,
+          "source_end": 278069952,
+          "vertex_counts": [
+            14,
+            15,
+            10
+          ],
+          "routes": [
+            "async",
+            "suffix_opcode",
+            "suffix_opcode"
+          ],
+          "triangles": 35,
+          "terminal_LOAD_overwrites_all_prior_slots": false
+        },
+        {
+          "calls": [
+            206,
+            207,
+            208
+          ],
+          "source_begin": 278068192,
+          "source_end": 278068320,
+          "vertex_counts": [
+            16,
+            16,
+            9
+          ],
+          "routes": [
+            "async",
+            "suffix_opcode",
+            "suffix_opcode"
+          ],
+          "triangles": 24,
+          "terminal_LOAD_overwrites_all_prior_slots": false
+        },
+        {
+          "calls": [
+            211,
+            212
+          ],
+          "source_begin": 278066352,
+          "source_end": 278066504,
+          "vertex_counts": [
+            14,
+            15
+          ],
+          "routes": [
+            "async",
+            "suffix_opcode"
+          ],
+          "triangles": 33,
+          "terminal_LOAD_overwrites_all_prior_slots": true
+        },
+        {
+          "calls": [
+            220,
+            221
+          ],
+          "source_begin": 278062048,
+          "source_end": 278062144,
+          "vertex_counts": [
+            16,
+            16
+          ],
+          "routes": [
+            "async",
+            "suffix_opcode"
+          ],
+          "triangles": 20,
+          "terminal_LOAD_overwrites_all_prior_slots": true
+        },
+        {
+          "calls": [
+            227,
+            228,
+            229
+          ],
+          "source_begin": 277569240,
+          "source_end": 277569392,
+          "vertex_counts": [
+            16,
+            16,
+            11
+          ],
+          "routes": [
+            "async",
+            "suffix_opcode",
+            "suffix_opcode"
+          ],
+          "triangles": 30,
+          "terminal_LOAD_overwrites_all_prior_slots": false
+        },
+        {
+          "calls": [
+            265,
+            266,
+            267
+          ],
+          "source_begin": 277660880,
+          "source_end": 277661000,
+          "vertex_counts": [
+            15,
+            15,
+            16
+          ],
+          "routes": [
+            "async",
+            "async",
+            "suffix_opcode"
+          ],
+          "triangles": 22,
+          "terminal_LOAD_overwrites_all_prior_slots": true
+        }
+      ]
+    },
+    "2": {
+      "counts": {
+        "tails_starting_with_observed_accepted_job": 17,
+        "tail_loads": 126,
+        "tail_triangles": 971,
+        "tail_route_async": 76,
+        "tail_route_repair_hint": 16,
+        "tail_route_suffix_opcode": 34,
+        "all_terminal_max_chains": 62,
+        "all_terminal_max_loads": 74,
+        "multi_terminal_max_chains": 7,
+        "multi_terminal_max_loads": 19,
+        "tail_terminal_max_groups": 5,
+        "tail_terminal_max_loads": 12
+      },
+      "tails": [
+        {
+          "calls": [
+            365,
+            366,
+            367,
+            368,
+            369,
+            370,
+            371,
+            372,
+            373,
+            374,
+            375,
+            376,
+            377,
+            378,
+            379
+          ],
+          "source_begin": 274242896,
+          "source_end": 274243552,
+          "vertex_counts": [
+            14,
+            16,
+            15,
+            16,
+            15,
+            16,
+            16,
+            16,
+            14,
+            16,
+            16,
+            16,
+            14,
+            14,
+            9
+          ],
+          "routes": [
+            "async",
+            "async",
+            "async",
+            "repair_hint",
+            "repair_hint",
+            "repair_hint",
+            "repair_hint",
+            "async",
+            "repair_hint",
+            "async",
+            "repair_hint",
+            "suffix_opcode",
+            "async",
+            "suffix_opcode",
+            "suffix_opcode"
+          ],
+          "triangles": 123,
+          "terminal_LOAD_overwrites_all_prior_slots": false
+        },
+        {
+          "calls": [
+            387,
+            388,
+            389,
+            390
+          ],
+          "source_begin": 274215064,
+          "source_end": 274215184,
+          "vertex_counts": [
+            16,
+            16,
+            14,
+            3
+          ],
+          "routes": [
+            "async",
+            "suffix_opcode",
+            "suffix_opcode",
+            "suffix_opcode"
+          ],
+          "triangles": 20,
+          "terminal_LOAD_overwrites_all_prior_slots": false
+        },
+        {
+          "calls": [
+            393,
+            394,
+            395,
+            396,
+            397,
+            398,
+            399,
+            400,
+            401,
+            402,
+            403,
+            404,
+            405,
+            406,
+            407
+          ],
+          "source_begin": 274214416,
+          "source_end": 274214976,
+          "vertex_counts": [
+            15,
+            15,
+            15,
+            15,
+            15,
+            15,
+            16,
+            14,
+            15,
+            15,
+            14,
+            15,
+            15,
+            15,
+            7
+          ],
+          "routes": [
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "suffix_opcode",
+            "async",
+            "repair_hint",
+            "async",
+            "repair_hint",
+            "async",
+            "async",
+            "suffix_opcode",
+            "suffix_opcode"
+          ],
+          "triangles": 98,
+          "terminal_LOAD_overwrites_all_prior_slots": false
+        },
+        {
+          "calls": [
+            409,
+            410,
+            411,
+            412,
+            413,
+            414,
+            415,
+            416,
+            417,
+            418,
+            419,
+            420,
+            421,
+            422,
+            423
+          ],
+          "source_begin": 274213832,
+          "source_end": 274214304,
+          "vertex_counts": [
+            15,
+            15,
+            15,
+            16,
+            15,
+            15,
+            15,
+            15,
+            15,
+            15,
+            15,
+            15,
+            15,
+            15,
+            6
+          ],
+          "routes": [
+            "async",
+            "async",
+            "async",
+            "suffix_opcode",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "suffix_opcode",
+            "suffix_opcode"
+          ],
+          "triangles": 75,
+          "terminal_LOAD_overwrites_all_prior_slots": false
+        },
+        {
+          "calls": [
+            429,
+            430,
+            431,
+            432
+          ],
+          "source_begin": 274213464,
+          "source_end": 274213584,
+          "vertex_counts": [
+            16,
+            16,
+            15,
+            8
+          ],
+          "routes": [
+            "async",
+            "suffix_opcode",
+            "suffix_opcode",
+            "suffix_opcode"
+          ],
+          "triangles": 21,
+          "terminal_LOAD_overwrites_all_prior_slots": false
+        },
+        {
+          "calls": [
+            454,
+            455,
+            456,
+            457,
+            458,
+            459,
+            460,
+            461,
+            462,
+            463,
+            464
+          ],
+          "source_begin": 274212360,
+          "source_end": 274212712,
+          "vertex_counts": [
+            16,
+            15,
+            16,
+            14,
+            14,
+            14,
+            15,
+            15,
+            15,
+            16,
+            12
+          ],
+          "routes": [
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "suffix_opcode",
+            "suffix_opcode"
+          ],
+          "triangles": 62,
+          "terminal_LOAD_overwrites_all_prior_slots": false
+        },
+        {
+          "calls": [
+            469,
+            470,
+            471,
+            472,
+            473,
+            474,
+            475,
+            476,
+            477,
+            478,
+            479,
+            480,
+            481,
+            482,
+            483,
+            484,
+            485,
+            486,
+            487
+          ],
+          "source_begin": 274192728,
+          "source_end": 274193584,
+          "vertex_counts": [
+            14,
+            15,
+            16,
+            15,
+            16,
+            16,
+            16,
+            15,
+            16,
+            15,
+            16,
+            14,
+            16,
+            14,
+            16,
+            14,
+            16,
+            16,
+            6
+          ],
+          "routes": [
+            "async",
+            "async",
+            "async",
+            "async",
+            "repair_hint",
+            "repair_hint",
+            "async",
+            "async",
+            "async",
+            "async",
+            "repair_hint",
+            "repair_hint",
+            "repair_hint",
+            "async",
+            "async",
+            "repair_hint",
+            "repair_hint",
+            "suffix_opcode",
+            "suffix_opcode"
+          ],
+          "triangles": 170,
+          "terminal_LOAD_overwrites_all_prior_slots": false
+        },
+        {
+          "calls": [
+            495,
+            496,
+            497,
+            498,
+            499,
+            500,
+            501,
+            502,
+            503,
+            504
+          ],
+          "source_begin": 274191856,
+          "source_end": 274192272,
+          "vertex_counts": [
+            15,
+            16,
+            14,
+            14,
+            15,
+            14,
+            15,
+            15,
+            16,
+            4
+          ],
+          "routes": [
+            "async",
+            "repair_hint",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "suffix_opcode",
+            "suffix_opcode"
+          ],
+          "triangles": 79,
+          "terminal_LOAD_overwrites_all_prior_slots": false
+        },
+        {
+          "calls": [
+            513,
+            514,
+            515,
+            516,
+            517,
+            518,
+            519,
+            520,
+            521
+          ],
+          "source_begin": 278073488,
+          "source_end": 278073840,
+          "vertex_counts": [
+            14,
+            16,
+            15,
+            15,
+            15,
+            15,
+            16,
+            16,
+            14
+          ],
+          "routes": [
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "async",
+            "suffix_opcode",
+            "suffix_opcode"
+          ],
+          "triangles": 66,
+          "terminal_LOAD_overwrites_all_prior_slots": false
+        },
+        {
+          "calls": [
+            527,
+            528,
+            529
+          ],
+          "source_begin": 278057272,
+          "source_end": 278057432,
+          "vertex_counts": [
+            14,
+            15,
+            15
+          ],
+          "routes": [
+            "async",
+            "async",
+            "suffix_opcode"
+          ],
+          "triangles": 32,
+          "terminal_LOAD_overwrites_all_prior_slots": true
+        },
+        {
+          "calls": [
+            539,
+            540,
+            541,
+            542,
+            543,
+            544
+          ],
+          "source_begin": 278050480,
+          "source_end": 278050816,
+          "vertex_counts": [
+            16,
+            15,
+            16,
+            15,
+            16,
+            13
+          ],
+          "routes": [
+            "async",
+            "async",
+            "async",
+            "async",
+            "suffix_opcode",
+            "suffix_opcode"
+          ],
+          "triangles": 68,
+          "terminal_LOAD_overwrites_all_prior_slots": false
+        },
+        {
+          "calls": [
+            546,
+            547
+          ],
+          "source_begin": 278050304,
+          "source_end": 278050416,
+          "vertex_counts": [
+            15,
+            15
+          ],
+          "routes": [
+            "async",
+            "suffix_opcode"
+          ],
+          "triangles": 23,
+          "terminal_LOAD_overwrites_all_prior_slots": true
+        },
+        {
+          "calls": [
+            556,
+            557,
+            558
+          ],
+          "source_begin": 278069784,
+          "source_end": 278069952,
+          "vertex_counts": [
+            14,
+            15,
+            10
+          ],
+          "routes": [
+            "async",
+            "suffix_opcode",
+            "suffix_opcode"
+          ],
+          "triangles": 35,
+          "terminal_LOAD_overwrites_all_prior_slots": false
+        },
+        {
+          "calls": [
+            560,
+            561,
+            562
+          ],
+          "source_begin": 278068192,
+          "source_end": 278068320,
+          "vertex_counts": [
+            16,
+            16,
+            9
+          ],
+          "routes": [
+            "async",
+            "suffix_opcode",
+            "suffix_opcode"
+          ],
+          "triangles": 24,
+          "terminal_LOAD_overwrites_all_prior_slots": false
+        },
+        {
+          "calls": [
+            565,
+            566
+          ],
+          "source_begin": 278066352,
+          "source_end": 278066504,
+          "vertex_counts": [
+            14,
+            15
+          ],
+          "routes": [
+            "async",
+            "suffix_opcode"
+          ],
+          "triangles": 33,
+          "terminal_LOAD_overwrites_all_prior_slots": true
+        },
+        {
+          "calls": [
+            574,
+            575
+          ],
+          "source_begin": 278062048,
+          "source_end": 278062144,
+          "vertex_counts": [
+            16,
+            16
+          ],
+          "routes": [
+            "async",
+            "suffix_opcode"
+          ],
+          "triangles": 20,
+          "terminal_LOAD_overwrites_all_prior_slots": true
+        },
+        {
+          "calls": [
+            619,
+            620,
+            621
+          ],
+          "source_begin": 277660880,
+          "source_end": 277661000,
+          "vertex_counts": [
+            15,
+            15,
+            16
+          ],
+          "routes": [
+            "async",
+            "async",
+            "suffix_opcode"
+          ],
+          "triangles": 22,
+          "terminal_LOAD_overwrites_all_prior_slots": true
+        }
+      ]
+    }
+  },
+  "limits": [
+    "Tail membership is structural, not newly measured async admission or a speed prediction.",
+    "A previously accepted job establishes material eligibility at that point; this report does not fabricate cold-material state for preceding jobs.",
+    "A terminal smaller LOAD leaves older higher slots live. Preserving only its current-count alias view is insufficient.",
+    "Existing-admission group caches must honor repair-hint changes, e.g. invalidate on a global hint epoch; source generation alone does not preserve current routing.",
+    "A common group context must be restored after any priority legacy grant, or the ownership policy must explicitly hold the group. Context correctness cannot be inferred from upload order."
+  ],
+  "inputs_sha256": {
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/span-coverage-v1/join_admission.py": "a40e89b05a3a44ef71e06aa1bf0de23adc54eeb7fab58abf4c6b08fa7f69a399",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/span-coverage-v1/ledger.json": "5c6e7738604939eca3b644d3e8fbcd45f5f32231ac3bb4039ce81aff5bb61d0f",
+    "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/coarse-mesh-v1/analysis/admission-v1/result.json": "1accbc3f29b488a073eb3c8202d5cd5cd63b8ac5f7ffdc99d9e1c66800e12c43"
+  }
+}

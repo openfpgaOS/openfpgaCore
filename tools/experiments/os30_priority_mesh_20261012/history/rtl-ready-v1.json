@@ -1,0 +1,70 @@
+{
+  "status": "FOCUSED_RTL_PASS_READY_FOR_NATIVE_AB",
+  "capability": "AJ02 0x414a3032",
+  "source_baseline": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/async-mesh-v1/native-v2/frozen",
+  "changed_inputs": [
+    {
+      "path": "src/fpga/common/geometry_async_mesh.v",
+      "before_sha256": "9e781e30512c8b55e54112c1aedc2d77ac5c759424ab30bd5d7041b73dca867f",
+      "after_sha256": "09131cd1181097a3c94d871dbdb793a24bfb6af8b7e85798dd241f4d1d902eda"
+    },
+    {
+      "path": "src/fpga/common/gpu_mesh_job_front.v",
+      "before_sha256": "6ce9d7549958228fe7e5a03446a8a00208c6aaea34d5e70b386fcf02ffd59c78",
+      "after_sha256": "8257e2cfe49d7d4186206fa539d7563de829cd63a695a0ebefefca0f631a3d99"
+    }
+  ],
+  "abi": {
+    "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/design/abi.json",
+    "sha256": "d750f22b753be58b8fb2d4d67ee948ea65b160a977a756d1acaf8d31ded3bc4f"
+  },
+  "receipts": [
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-core/tests/wrapper-v1/manifest.json",
+      "sha256": "dfd5b7440c54ca64a52be5f3d5728076a5d3187243ea0adf344706980318dc1d",
+      "status": "PASS",
+      "result": {
+        "status": "PASS",
+        "cases": 66,
+        "checks": 2531,
+        "cycles": 27750,
+        "AXI_bursts": 187
+      },
+      "keys": [
+        "status",
+        "inputs_sha256",
+        "build_command",
+        "result"
+      ]
+    },
+    {
+      "path": "/home/alberto/Repos/openfpgaCore/docs/measurements/os30-psram32-20261009/priority-mesh-v1/work-core/tests/combined-v1/manifest.json",
+      "sha256": "0b8a6795281e9b0270bd5bdc6dc2b263f4f3f3ba3a51cda2fd477f0fef0f0f9c",
+      "status": "PASS",
+      "result": {
+        "status": "PASS",
+        "cases": 8,
+        "checks": 54771,
+        "cycles": 29786,
+        "AXI_bursts": 14,
+        "ingress_full_cycles": 1695,
+        "output_full_cycles": 366
+      },
+      "keys": [
+        "status",
+        "inputs_sha256",
+        "build_command",
+        "result"
+      ]
+    }
+  ],
+  "scope": [
+    "Priority lease may interpose before queued but unstarted jobs, never between context and its matching JOB or before current output/repair completion.",
+    "Context framing and all 28 words are mandatory before every JOB.",
+    "No new FPU, BRAM or arithmetic datapath. No physical fit or performance claim.",
+    "Focused actual RTL tests include ingress/output pressure, source/raw ownership, full legacy context overwrite and exact restoration, reset and malformed frames."
+  ],
+  "limitations": [
+    "Native complete-frame comparison and independent semantic/lifetime validation are still required."
+  ]
+}

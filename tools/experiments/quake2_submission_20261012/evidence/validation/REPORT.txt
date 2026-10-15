@@ -1,0 +1,29 @@
+Quake2 cached packet/admission batching validation, 2026-10-12
+
+REJECT BOTH: neither candidate provides a meaningful modeled CPU improvement.
+
+Candidate  Mode    Workload   Baseline cycles/frame  Candidate cycles/frame  Change
+world-v1   worker  main            5,520,031.33          5,513,142.64 -0.125%
+world-v1   worker  sound           6,597,557.29          6,590,626.61 -0.105%
+world-v1   worker  live            5,881,152.93          5,871,016.52 -0.172%
+world-v1   cpu     main            5,812,523.23          5,797,953.96 -0.251%
+world-v1   inline  main            5,530,330.02          5,524,359.92 -0.108%
+alias-v2   worker  main            5,520,031.33          5,516,053.91 -0.072%
+alias-v2   worker  sound           6,597,557.29          6,599,092.04 +0.023%
+alias-v2   worker  live            5,881,152.93          5,880,310.52 -0.014%
+alias-v2   cpu     main            5,812,523.23          5,831,407.74 +0.325%
+alias-v2   inline  main            5,530,330.02          5,524,008.27 -0.114%
+
+SDK already caches known ring free space and stages large batches. These candidates amortize per-call admission bookkeeping but leave all GPU payload words and triangles intact. Alias actual publication counts stay exact; world publication counts change by only +32/+16/-9 over whole workloads.
+
+World worker original strict bench is failed only because gpu_barriers observation counts differ in 105/40/43 frames. Original receipts retained. Separate bounded semantic gate proves identical fence commands/observations, all other frame fields, full command/framebuffer/sound outputs, zero hazards/overflow/queued work and full selected-RTL color/depth samples. All alias strict receipts and all CPU-only/inline compatibility strict receipts pass.
+
+Both candidates: all command bytes/order/frame assignments and complete CPU RGB565 frames equal; all four selected-RTL sample color/depth outputs byte-exact.
+
+Modeled scalar OS25-derived CPU latencies with OS30 caches, not native Vexii or Pocket FPS.
+CPU model runs demo360/sound120/live120 frames, excludes first20 from timing; exact checks include all frames and trailing commands.
+Full320x240 color/depth RTL samples20/80/180/300 use selected existing Q2 worker RTL and maximal-rate producer with no CPU/audio/scanout contention.
+Functional CPU framebuffers independently checked; CPU HUD snapshots removed from RTL GPU replay.
+Same compiled control built from frozen current source with GCC15.2; candidates same compiler. No physical fit, full seed sweep or deployment.
+
+See final-result.json for source, binary and receipt pins.

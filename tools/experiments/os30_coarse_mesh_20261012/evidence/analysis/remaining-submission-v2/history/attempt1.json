@@ -1,0 +1,7 @@
+{
+  "status": "ANALYZER_FAILURE_BEFORE_RESULT_WRITE",
+  "error": "KeyError: ('gpu_state', 'job_take', 'front_job_take', 'group_take')",
+  "cause": "Text-based adaptation accidentally widened one dictionary key as well as the intended input field list.",
+  "impact": "Read-only analysis exited before writing a result. Native evidence and models were untouched.",
+  "source_sha256": "02d2cda6d88d7ce96eac1d0692f179545ff1dedb30c757ab906e7c78f3220e7b"
+}
