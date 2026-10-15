@@ -1,0 +1,17 @@
+{
+  "recorded_utc": "2026-10-14T19:10:36.890444+00:00",
+  "source": "User report after the verified I64 rollback",
+  "user_statement": "performance is back",
+  "prior_user_report": "I tested it is about 10-20 perfcent slower",
+  "performance_recovery_confirmed_by_user": true,
+  "performance_measured_by_agent": false,
+  "exact_fps_or_scene_supplied": false,
+  "interpretation": "Recovery after restoring the only functional source change strongly supports the I64-to-I32 instruction-cache reduction as the cause of the reported slowdown.",
+  "decision": "Retain the I64 seed16 core as the performance baseline; do not promote the standalone I32 reduction.",
+  "current_core_sha256": "7c7021e65b0bf02b5522be9b184bb9e36497f989f403149b9f98fe1ebbe82551",
+  "instruction_cache_kib": 64,
+  "data_cache_kib": 64,
+  "selected_seed": 16,
+  "completion_receipt_sha256": "b9451b8955347d179cdabdf3763cf1a999a18fcbfd532485f0fc45c3bdc0bf70",
+  "future_validation": "Cache capacity reductions require a representative Pocket performance comparison; scalar cache estimates and fixed CPU publication GPU replay do not establish performance parity."
+}

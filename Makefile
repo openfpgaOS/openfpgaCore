@@ -245,7 +245,9 @@ sdk: check-target
 		mkdir -p "$$dir/src/sdk/pc"; \
 		rsync -a --delete src/firmware/api/pc/ "$$dir/src/sdk/pc/"; \
 		printf "  $(C_OK)pc SDL backend$(C_RESET) → src/sdk/pc/\n"; \
+		cp LICENSE "$$dir/src/sdk/LICENSE"; \
 		mkdir -p "$$dir/src/sdk/musl/include" "$$dir/src/sdk/musl/lib"; \
+		cp src/firmware/musl/COPYRIGHT src/firmware/musl/README.txt "$$dir/src/sdk/musl/"; \
 		rsync -a --delete src/firmware/musl/include/ "$$dir/src/sdk/musl/include/"; \
 		cp src/firmware/musl/lib/libc.a    "$$dir/src/sdk/musl/lib/"; \
 		cp src/firmware/musl/lib/libm.a    "$$dir/src/sdk/musl/lib/" 2>/dev/null || true; \

@@ -1,0 +1,134 @@
+{
+  "schema": 1,
+  "profile": "os30-quake2",
+  "status": "retained-hardware-tested-pair",
+  "qualification": {
+    "source_sha256": "f3685d901a8688ff9c62cb9e4259a61d04e45fe646532ebc6c744e617df81b1b",
+    "selected_seed": 16,
+    "selection": {
+      "all_seeds_attempted": true,
+      "eligible_seeds": [
+        16,
+        30
+      ],
+      "selected_seed": 16,
+      "selected_timing_closed_at_100_mhz": false,
+      "criterion": "100 MHz closure first, then highest worst-corner restricted main Fmax among >90 MHz candidates with clean cross-clock/input setup and nonsetup/nonmain checks."
+    },
+    "configured_mhz": 100,
+    "minimum_main_restricted_fmax_mhz": 90.69,
+    "timing_closed_at_configured_100_mhz": false,
+    "bitstream_sha256": "7c7021e65b0bf02b5522be9b184bb9e36497f989f403149b9f98fe1ebbe82551",
+    "app_sha256": "10581bdb05e98c87dcd08abb2798549267793920f6c91e1c6be964b0dd9fb636",
+    "resources": {
+      "ALMs": {
+        "used": 17995,
+        "available": 18480
+      },
+      "M10Ks": {
+        "used": 308,
+        "available": 308
+      },
+      "DSPs": {
+        "used": 42,
+        "available": 66
+      },
+      "LABs": {
+        "used": 1848,
+        "available": 1848
+      }
+    }
+  },
+  "archive": "qualification.tar.gz",
+  "files": {
+    "README.txt": {
+      "sha256": "ffaaf2b1530b0550300b5518e8ff80b675e17549d4f0bbcd9d8921e3ddd6bf4a",
+      "bytes": 2837
+    },
+    "hardware-confirmation.json": {
+      "sha256": "e46139b90a8e068ebad3a137e82dbfe46f8f2740031f42662c455e069c05e582",
+      "bytes": 1135
+    },
+    "licenses/LICENSE": {
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "bytes": 11357
+    },
+    "licenses/NOTICE": {
+      "sha256": "7cb329ad127207f60ed80e6f50b139deb1acb1b6c64ee01c51642a7389985ffa",
+      "bytes": 3013
+    },
+    "licenses/Quake2-LICENSE": {
+      "sha256": "71cedf562c786b4c2a617419206ad77d43d37c1020fbc3bf6ecf1fa110d58e05",
+      "bytes": 32404
+    },
+    "licenses/Quake2-port-LICENSE": {
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "bytes": 11357
+    },
+    "licenses/SDK-LICENSE": {
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "bytes": 11357
+    },
+    "licenses/core-licenses/Apache-2.0.txt": {
+      "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff",
+      "bytes": 10280
+    },
+    "licenses/core-licenses/BSD-1-Clause.txt": {
+      "sha256": "244e17b6f02493de568a8ddfd7f4349996a6c332c0585d304ceaf5394becea52",
+      "bytes": 1086
+    },
+    "licenses/core-licenses/CC0-1.0.txt": {
+      "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+      "bytes": 7048
+    },
+    "licenses/core-licenses/GPL-2.0-or-later.txt": {
+      "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3",
+      "bytes": 17337
+    },
+    "licenses/core-licenses/GPL-3.0-or-later.txt": {
+      "sha256": "fb981668c18a279e285fc4d83fba1e836cc84dd4daa73c9697d3cfd2d8aca6e0",
+      "bytes": 34674
+    },
+    "licenses/core-licenses/LicenseRef-Analogue-Pocket-Framework.txt": {
+      "sha256": "8a15921e0ae554dc858e19aaa6c160b2710c9a9a52ae61e994aea1c8a3ac9ac8",
+      "bytes": 2709
+    },
+    "licenses/core-licenses/LicenseRef-ISC1.txt": {
+      "sha256": "5605b736e320ae2dd9ec2b35c79bd0a5a00eb7c4ee8703d5700e6acd194b9ac7",
+      "bytes": 755
+    },
+    "licenses/core-licenses/LicenseRef-Intel-FPGA-IP.txt": {
+      "sha256": "cd1907b1af979ac26e472072a5fbdc61da2ab0846553b0837117f8b1d6e0d9b8",
+      "bytes": 1685
+    },
+    "licenses/core-licenses/LicenseRef-Proprietary-SampleData.txt": {
+      "sha256": "5ae5208030e918d8384d872d34a2f71fc4d7b8624a0322d1bff3b40c603a7ea0",
+      "bytes": 912
+    },
+    "licenses/core-licenses/MIT-0.txt": {
+      "sha256": "59746d6285ffa44bfc7ecada352aa5d6a20dc8eab418a60ce091cc739012c135",
+      "bytes": 915
+    },
+    "licenses/core-licenses/MIT.txt": {
+      "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+      "bytes": 1078
+    },
+    "licenses/musl-COPYRIGHT": {
+      "sha256": "f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af",
+      "bytes": 6204
+    },
+    "licenses/musl-README.txt": {
+      "sha256": "76bac4036ceced96a39f5d353badddc6d987c212eb6203b8c1b75abf162f0724",
+      "bytes": 1308
+    },
+    "qualification.tar.gz": {
+      "sha256": "07252a39d6670d7f0478221fe4b85175ebfc54cf22569b13f009164d8dd2dc22",
+      "bytes": 29053418
+    }
+  },
+  "rejected": [
+    "os30 I32: user reported 10\u201320% regression; reverted",
+    "os30 I64 BRAM repack: zero qualifying seeds in full 1\u201330 sweep; best 89.07 MHz"
+  ],
+  "scope": "Quake2 only. Does not replace SM64, generic SDK, os20 or os25 runtimes."
+}

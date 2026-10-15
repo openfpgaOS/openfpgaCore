@@ -1,0 +1,87 @@
+Applicability to OS20 and OS25 — source audit, 2026-10-14
+
+Some earlier improvements already help these variants. The most recent Quake2
+and I64 experiments do not automatically transfer, and this review measures no
+new OS20/OS25 FPS improvement. References below are paths in openfpgaCore.
+
+Already enabled
+OS25: radix-4 integer/FP division is selected by
+src/fpga/vendor/vexriscv/configs/os25.cfg:35 and applied by
+generate_vexii.sh:216 in that directory. CPU command-ring uploads, framebuffer
+write bursts, per-bank SDRAM open-row tracking and dedicated span multiplication
+are enabled in src/fpga/targets/pocket/variants/os25.mk:31-35. The same file:37-50
+records the span replay proof and explains the existing burst/row mechanisms.
+These are active OS25 benefits from the broader optimization family, not new
+benefits introduced by today's cleanup.
+
+OS20: CPU rendering and optional affine palette/translucency usage are explicit
+in src/fpga/targets/pocket/variants/os20.mk:8-13. Its existing dual-issue CPU,
+4-slot/32-op store buffer and frontend/FPU timing factoring are selected by
+src/fpga/vendor/vexriscv/configs/os20.cfg:49,58-59,63-79. Thus CPU-heavy Diablo and
+ScummVM already have variant-specific work. OS20 does not select radix4: the
+shared generator defaults DIV_RADIX=2 at generate_vexii.sh:109. A radix4 port is
+a possible future divide-heavy-workload experiment, not an inherited result;
+dual-issue area/timing and actual software use must be checked first.
+
+SDK source-level ring selection/fallback and audio ownership/scheduler fixes can
+serve clients of either variant when rebuilt against this SDK. CPU-ring use is
+capability gated, so OS20 retains its old-core DMA fallback. Existing ELFs do not
+change merely because an SDK source file was cleaned up.
+
+Latest I64 RAM repacking
+OS20 already has I32/D64 (configs/os20.cfg:23-24); OS25 has I32/D128
+(configs/os25.cfg:18-19). Both existing instruction caches already infer two
+2048x64 banks, each 13 M10Ks, with OLD_DATA mode. Actual fitted evidence:
+  docs/measurements/os20-timing-closure-20261001/artifacts/ap_core.fit.rpt:17496
+  docs/measurements/os25-boot-debug-20261001/rollback/ap_core.fit.rpt:6372
+The OS30 I64 experiment split two 4096x64 banks into four 2048x64 banks, preserving
+64 KiB and cycles while saving 12 M10Ks. The analogous 4096-deep waste is absent
+in these OS20/25 instruction RAMs; there is no additional 12-M10K saving to claim.
+That OS30 repack also failed all 30 timing acceptance attempts (best89.07MHz),
+so it remains rejected even for OS30. Shrinking I64 to I32 instead was reverted
+after the user reported 10-20% lower Quake2 performance. Neither is a shipping
+change for the other variants.
+
+Potential memory-placement transfers, needing separate qualification
+The retained Quake2 core moves synchronous audio pos_latch, SDRAM write buffer
+and synchronous texture-request storage from MLAB to M10K. This changes physical
+placement, not scheduled hardware cycles, and cannot itself establish FPS gain.
+Generic audio pos_latch is still MLAB, with a registered read at
+src/fpga/common/audio_mixer.v:376-384. The generic SDRAM wbuf MLAB constraint is
+src/fpga/targets/pocket/ap_core.qsf:947-950. These are plausible small, separately
+qualified OS20/25 resource/timing experiments. Full mixer/MIDI behavior and
+inferred RAM ports, read-during-write modes, placement and all timing corners
+must remain valid; extra block RAM is not free on every variant.
+
+The texture request case is not a blind attribute copy. The synchronous queue is
+under INCLUDE_TEX_QUEUE_RAM at src/fpga/common/gpu_core.v:5282, with registered
+read and collision forwarding at:5339-5346. OS20/25 do not enable that macro and
+instead use the asynchronous head at:5394-5404. M10K requires the synchronous
+queue arrangement; changing the other branch would need a new scheduling proof.
+The rejected framebuffer-queue M10K trial is not part of the approved trio.
+
+Quake2-specific GPU/backend work
+src/fpga/targets/pocket/variants/os30.sources:1-10 selects separate OS30 snapshots
+for GPU, cache, CPU wrapper, mixer, top and SDRAM controller. OS20/25 use generic
+sources, so an improvement in an OS30 copy does not change their compiled logic.
+Native MD2, BSP/particle command offload, render-cache depth changes and span
+lookahead target the OS30 triangle pipeline and its matching app capability ABI.
+OS25 explicitly omits triangles/truecolor/transform/fast textures
+(variants/os25.mk:22-25); OS20 omits perspective/depth (os20.mk:11-13).
+The render cache is conditional in src/fpga/targets/pocket/core_top.v:3829 and its
+generic SET_BITS6 instance:3856 is not selected by either variant. Their palette
+and translucency support remains needed; Quake2-specific feature cuts cannot be
+copied to them. The compact OS30 mixer/sample-cache experiment likewise needs
+separate review for the general full-audio workloads, not a blind replacement.
+
+Texture32, larger queues/render cache, resident-window early Z and clean-fill
+read overlap were measured or investigated but not promoted. Their small
+Quake2 results are not evidence of speedup on OS25's palette/colormap workloads
+or OS20's CPU renderer. They require workload-specific stall evidence first.
+
+For CPU-heavy OS20 ports, preserving cache capacity and improving measured CPU
+hot loops/cache use is more directly relevant than Quake2 triangle offload.
+For OS25, command batching, its already-enabled bursts/row tracking, and measured
+span/texture bottlenecks are the relevant path. A future physical RAM-placement
+trial may create room or improve timing in either core, but it needs its own
+qualification. No new OS20/25 synthesis, behavioral trial or deployment occurred.
