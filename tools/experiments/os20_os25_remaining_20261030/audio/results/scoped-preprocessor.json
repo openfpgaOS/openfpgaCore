@@ -1,0 +1,30 @@
+{
+  "passed": true,
+  "cases": [
+    {
+      "enabled": false,
+      "lite": false,
+      "identical": true,
+      "preprocessed_sha256": "c31f43824f91b333b0c1815bedbf42492473d314fe7e33c5c9d1b8af03a4c40b"
+    },
+    {
+      "enabled": true,
+      "lite": false,
+      "identical": true,
+      "preprocessed_sha256": "c35263ea8fb053de8a00fffa64c83d260a4a22c742a92c29ff797c6d24ce07ce"
+    },
+    {
+      "enabled": false,
+      "lite": true,
+      "identical": true,
+      "preprocessed_sha256": "c7491704dd76f16576ea73c6af02c7f726b6d82c15d6e5e5a6ea2e9f87cfbd0d"
+    },
+    {
+      "enabled": true,
+      "lite": true,
+      "identical": true,
+      "preprocessed_sha256": "c7491704dd76f16576ea73c6af02c7f726b6d82c15d6e5e5a6ea2e9f87cfbd0d"
+    }
+  ],
+  "scope": "Exact scoped transformation in root prepare.py; normalized Verilator preprocessing matches direct proven candidate or unchanged baseline."
+}

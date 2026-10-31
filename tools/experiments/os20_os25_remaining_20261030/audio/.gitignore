@@ -1,0 +1,7 @@
+# Keep generated simulations and raw measurements out of the source package.
+__pycache__/
+obj/
+*.log
+*.raw
+*.vcd
+work/

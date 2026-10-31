@@ -55,8 +55,8 @@ tested core. Generic `make build`, `make package` and `make sdk` operate on
 the development tree and do not reproduce these specialized release pairs.
 No release-profile command writes to an SD card or publishes a release.
 
-See [os20/os25 applicability](release/OS20-OS25.txt) for inherited improvements,
-variant-specific limits and candidates requiring separate qualification.
+See [os20/os25 qualification](release/OS20-OS25.txt) for the faster os20 divider,
+the retained os25 build, rejected trials and scoped SDK update instructions.
 
 ## Acknowledgments
 

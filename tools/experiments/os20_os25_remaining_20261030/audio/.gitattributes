@@ -1,0 +1,4 @@
+# Preserve the byte-exact, hash-pinned simulator inputs across checkouts.
+fixtures/* -text
+# The upstream APF snapshot contains CRLF and trailing spaces; retain it verbatim.
+fixtures/common.v whitespace=-blank-at-eol

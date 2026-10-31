@@ -1,0 +1,58 @@
+Scoped SDK export — 2026-10-30
+=============================
+
+export_sdk.py prepares a reviewable update before writing an SDK. It never
+calls make, Quartus or firmware generation. The selected os20/os25 physical
+campaigns must already have complete strict qualification/results.json files.
+Use the final selected os25 campaign and seed explicitly; os25-control/20 is
+the qualified fallback, not an automatic selection of the latest fit.
+
+From the Core root, prepare with:
+
+  python3 tools/experiments/os20_os25_remaining_20261030/export_sdk.py \
+    --os20-fit docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4 \
+    --os20-seed 35 \
+    --os25-fit docs/measurements/os20-os25-remaining-20261030/physical/os25-control \
+    --os25-seed 20 \
+    --output docs/measurements/os20-os25-remaining-20261030/integration/sdk-export
+
+Review plan.json and runtime/MANIFEST in that new output directory. The full
+projected runtime, exact raw RBF/SOF pairs and all hashes are saved there.
+The default read-only SDK reference is ../openfpgaSDK; its entire runtime
+must still match integration/sdk-runtime-before.json. The existing shared
+OS 054abd4b... and loader fc1f8d37... are retained and paired with the exact
+fitted e505071d... boot ROM by the same-ELF extraction receipt.
+
+To apply that reviewed package, the authorized caller runs:
+
+  python3 tools/experiments/os20_os25_remaining_20261030/export_sdk.py \
+    --output docs/measurements/os20-os25-remaining-20261030/integration/sdk-export \
+    --sdk ../openfpgaSDK
+
+Only runtime/pocket/os20.rbf_r, os25.rbf_r, ap_core.sof (the selected os25 SOF)
+and runtime/MANIFEST change. All other runtime bytes, including every os30
+variant, os25zf, shared OS, loader, MiSTer and soundfont, are preserved. A
+full backup and receipts are written inside the prepared output. Individual
+files are replaced atomically, MANIFEST last; a caught failure restores the
+files already replaced unless another writer changed them. Do not run other
+SDK publishers concurrently. A killed process can leave a mixed manifest;
+the SDK assembly guard rejects it, and backup/runtime preserves the old set.
+
+The exporter re-parses all four corners with the retained strict parser,
+requires >=94 MHz restricted main Fmax, clean nonsetup/nonmain/used crossing
+and input checks, successful fitting and valid resource limits. The existing
+16 disconnected DDR-high endpoints require their routed connectivity proof;
+there is no new timing exception. Configured clock stays 100 MHz, and the
+recorded negative main setup slack remains visible: this is not 100 MHz closure.
+
+Frozen inputs, copied fit inputs, artifacts and report files are hash checked.
+Actual fitted CPU hashes are retained even when canonical generation differs
+only in Generator/Git hash header comments. The only accepted QSF rewrite is
+removal of earlier overridden values for three os20 physical settings. Active
+source/profile equivalence and deployment remain the caller's separate work.
+Changed SDK, source, report or prepared-package bytes refuse application.
+
+Verification was performed against a workspace SDK fixture only, including
+the scoped update, full backup, unchanged unrelated runtime, rejected stale
+SDK/corrupt package, rejected hold-failing fit and caught-failure rollback.
+No external SDK or device write is performed by the validation recipe.

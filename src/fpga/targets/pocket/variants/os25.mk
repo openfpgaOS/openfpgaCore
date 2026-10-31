@@ -36,8 +36,10 @@ DEFS := INCLUDE_ANALOGIZER INCLUDE_HW_MIXER INCLUDE_TRANSLUC \
 
 # Separate span products from the shared perspective DSP operand mux.
 # Bit-exact and cycle-identical in Quake/Doom replays; paired seeds 15/20
-# improve setup slack without additional M10K use. Seed 20 remains the best
-# of this comparison at -0.513 ns (100 MHz still does not close timing).
+# improve setup slack without additional M10K use. The fresh 2026-10-30
+# seed 20 fit estimates 96.87 MHz: setup -0.323 ns, worst hold +0.078 ns;
+# 15,490 ALMs and 296 M10Ks. 100 MHz still does not close timing.
+# Fetch/FPU, clamp staging and audio/RAM trials did not improve this fit.
 
 # CPU uploads reuse the existing GPU command ring and avoid SDRAM DMA reads.
 # Gather masked framebuffer writes into SDRAM bursts; no triangle/depth

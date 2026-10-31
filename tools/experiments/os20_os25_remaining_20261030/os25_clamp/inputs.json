@@ -1,0 +1,24 @@
+{
+  "baseline_variant": {
+    "defs": "INCLUDE_ANALOGIZER INCLUDE_HW_MIXER INCLUDE_TRANSLUC INCLUDE_PALETTE INCLUDE_COLUMN_LIST INCLUDE_COMPACT_SPAN INCLUDE_PARAM_SPAN_Q29 INCLUDE_4PLAYER INCLUDE_BANK_ROW_TRACK INCLUDE_CPU_RING INCLUDE_GPU_WRITE_BURSTS EXCLUDE_GPU_COMMAND_DMA INCLUDE_SPAN_DEDICATED_MULT",
+    "seed": 20,
+    "target": "pocket",
+    "variant": "os25"
+  },
+  "source_sha256": {
+    "src/fpga/common/gpu_color_depth_cache.sv": "9adadb874d65365ab57de606992b69013fe239721a0b63bc8cbba18ca85b46f8",
+    "src/fpga/common/gpu_core.v": "2aec324292a0deebb8f3d728dfe7fea29b486e4024fc8f43ea29dafd4da3df5b",
+    "src/fpga/common/gpu_edge_walker.v": "69ef2238babab6716ddc9e7c004943982190d179547895081a9e69a94259e5d3",
+    "src/fpga/common/gpu_geometry_worker.v": "25ac255b738938d9a0e9d6f3a8f9b3a934ba3337d51eea68a0fb7c73dfef69e0",
+    "src/fpga/common/gpu_tex_cache.v": "3999efcfd3c233e4b866c8462dfa211c25ae9ac2e0f4e7ca4929b64efc6b3fef",
+    "src/fpga/targets/pocket/core_top.v": "572df8b92b09a1484579a4d79f5255a6d24762bb4569697328ee16fc44c84646",
+    "src/fpga/test/doom_capture_replay.h": "96c599ad1484e6ef58dcd75cad295b537f48a62afaae09994194a43481a7f9d6",
+    "src/fpga/test/gpu_geometry.h": "753781f6cb5ad4c3c41ad49161c68ebbe0b402e4a6b321037260aa1ac68b9735",
+    "src/fpga/test/liveness_watchdog.h": "35bd255daeafdaf5a29b24a120496ffaf25763abfe6abcd60698ae2cf6d0ce31",
+    "src/fpga/test/tb_gpu.v": "eb36e3d2ad361c8875c8090dc43052646227124755f6e7b08a083df88ef281a8",
+    "src/fpga/test/tb_gpu_acceptance_main.cpp": "ae2a7ec142ea5a79270c6c00edcb610ae1561138234f831e9e2074132e6cdc82",
+    "src/fpga/test/tb_gpu_perf_main.cpp": "e3cbead1738bd326cadb8c3938915628709cc29dddfe148625d4c3115ae043e1",
+    "tools/check_gpu_target_matrix.py": "10fe17ed9133cddd41ad38a6bb87285bf26d2312625be6d10596a5b920f9d283",
+    "tools/sweep_target_matrix.py": "1df2c2eaaf7a81fa888686e0d20ebf5a6e43f3d746b697ce3ce96bd04407768b"
+  }
+}

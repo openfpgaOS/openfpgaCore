@@ -1,0 +1,2365 @@
+{
+  "campaign_kind": "targeted_fits_not_full_sweep",
+  "clock_was_not_lowered": true,
+  "completed_strict_results": 13,
+  "configured_mhz": 100,
+  "date": "2026-10-30",
+  "planned_results": 13,
+  "qualification_limits": [
+    "No completed strict result closes main setup at configured 100 MHz.",
+    "Strict parser retains a legacy shared >90 MHz gate; final campaign selection requires >=94 MHz for BOTH os20 and os25 plus fresh-baseline comparison.",
+    "Only exactly16 disconnected SDRAM DDR-high endpoints are excluded after routed fanout proof; all raw checks remain in source reports.",
+    "No game-FPS improvement is established by CPU, mixer or GPU component simulations.",
+    "Actual-job source differences are limited to generated ap_core.qsf: variant/seed/macro assignments plus Quartus removal of superseded base assignments; no HDL/firmware/SDC drift.",
+    "No full seed sweep, Pocket hardware validation or SD deployment is represented."
+  ],
+  "recommendation": {
+    "os20": {
+      "candidate": "os20-radix4",
+      "seed": 35
+    },
+    "os25": {
+      "candidate": "os25-control",
+      "seed": 20
+    }
+  },
+  "results": [
+    {
+      "actual_job_source_differences": [
+        "src/fpga/targets/pocket/ap_core.qsf"
+      ],
+      "actual_main_clock_period_ns": 10.0,
+      "artifact_sha256": {
+        "rbf": "438edfdd0ee271a3be3fdc27d75dd9cd8e88d2d0df84b7bda1661f066b68b97f",
+        "sof": "18ae2c1a8e57fb9f62f2babe9d9033fdefa9a8506fce92640194b3bedce7a838"
+      },
+      "candidate": "os20-control",
+      "configured_mhz": 100,
+      "cpu_sha256": "21c8a1274e93fd7283cae4ca2f275a920b1743978fc136c38371997944aa6a73",
+      "cross_clock_setup_clean": true,
+      "decision": "reject",
+      "eligible_above_90_mhz_estimate": false,
+      "feature_macros": [
+        "INCLUDE_ANALOGIZER",
+        "INCLUDE_HW_MIXER",
+        "INCLUDE_TRANSLUC",
+        "INCLUDE_PALETTE",
+        "INCLUDE_4PLAYER",
+        "EXCLUDE_GPU_PERSPECTIVE",
+        "EXCLUDE_GPU_DEPTH",
+        "INCLUDE_GPU_CLAMP_PIPE"
+      ],
+      "fit_complete": true,
+      "fit_valid": true,
+      "frozen_inputs_unchanged": true,
+      "input_setup_clean": true,
+      "main_restricted_fmax_mhz": {
+        "fast_0": 198.77,
+        "fast_85": 175.44,
+        "slow_0": 92.65,
+        "slow_85": 93.45
+      },
+      "meets_variant_fmax_target": false,
+      "minimum_main_restricted_fmax_mhz": 92.65,
+      "nonmain_setup_clean": true,
+      "nonsetup_clean": false,
+      "proofs": {
+        "candidate": {
+          "bytes": 425,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-control/candidate.json",
+          "sha256": "ac462de5565c7398107b9fac725d32470c6647ab10e5cae5e95a3d19d1b4e472"
+        },
+        "clocks.tsv": {
+          "bytes": 14295,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-control/qualification/seed-35/clocks.tsv",
+          "sha256": "33dd0ff429c36cc626973de1c38bf46e89c3cc1819790e6d1810c5461e16266a"
+        },
+        "compiled_qsf": {
+          "bytes": 58739,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-control/jobs/pocket-os20-s35/src/fpga/targets/pocket/ap_core.qsf",
+          "sha256": "6f7d813b2e725f71003d358a17b454eb2ca7ba5d36318525c045c088d01abb15"
+        },
+        "conditions.tsv": {
+          "bytes": 48,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-control/qualification/seed-35/conditions.tsv",
+          "sha256": "0fb5395d511abce32dbf9e5046a9d8ad21be2a4ca41992a56836516c339f7338"
+        },
+        "cross_setup.tsv": {
+          "bytes": 76249,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-control/qualification/seed-35/cross_setup.tsv",
+          "sha256": "b78da4a634fdcbde71b990f2c0a762eef0524ce80c298c7d237e9224f508799a"
+        },
+        "ddio_checks.tsv": {
+          "bytes": 336,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-control/qualification/seed-35/ddio_checks.tsv",
+          "sha256": "53a59cee0ffcbb62b572a27ea6e200daf411a75e5b6d8044eec6e959dbdbf984"
+        },
+        "ddio_proof.tsv": {
+          "bytes": 8756,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-control/qualification/seed-35/ddio_proof.tsv",
+          "sha256": "afa27615284743b3cb6886bac304e70f5c3b04abe6d2de54231f8c7a019fac3c"
+        },
+        "fast_0_fmax.rpt": {
+          "bytes": 2527,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-control/qualification/seed-35/fast_0_fmax.rpt",
+          "sha256": "0cd0a16cda999e1b7e27448d4ad33d8a17a6a03046fc55a98c071985de211880"
+        },
+        "fast_85_fmax.rpt": {
+          "bytes": 2527,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-control/qualification/seed-35/fast_85_fmax.rpt",
+          "sha256": "0a4230b7dc69b771792f3f66791fe215b47f60d25681ce70c7c6e25e252598c8"
+        },
+        "fit_result": {
+          "bytes": 3080,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-control/results/pocket-os20-s35/result.json",
+          "sha256": "7f299e0706b61e9028e63595f3c1ca21610534dc29e6cd72a4d6e10b589a9f68"
+        },
+        "frozen_sources": {
+          "bytes": 14728,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-control/frozen-sources.json",
+          "sha256": "8d82551980df2e3f93bd175f61aed6e46efea5f536782435741ebb56ed79f73e"
+        },
+        "inventory": {
+          "bytes": 412,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-control/inventory.json",
+          "sha256": "f3a82e8106cbb208e0aace0ec8bdeea6dd632492f6ae97c3cd52a7e6a31d6e60"
+        },
+        "report_sweep_timing.tcl": {
+          "bytes": 10589,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-control/qualification/report_sweep_timing.tcl",
+          "sha256": "2c66004df7b54c2e62a0c47ae976cf7c61da684ec034a169cb077ca00cdca34e"
+        },
+        "results.py": {
+          "bytes": 12547,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-control/qualification/results.py",
+          "sha256": "192828cad6b134c0f6cacfd484611e1ec9db5ab27cf379974bd737296d4f110b"
+        },
+        "slow_0_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-control/qualification/seed-35/slow_0_fmax.rpt",
+          "sha256": "313c522b65972264963f915300820c5c6ce7701cd670f586563c0d8a7c39f651"
+        },
+        "slow_85_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-control/qualification/seed-35/slow_85_fmax.rpt",
+          "sha256": "991ff027b0c49275dfd839a691af060893559bb72605dc7a392a49a47b0205bb"
+        },
+        "strict_results": {
+          "bytes": 242277,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-control/qualification/results.json",
+          "sha256": "00003e3bbf0a7973eb49642056a945c06d9cf9a9803691d572f7eebf5b5114f8"
+        },
+        "summary.tsv": {
+          "bytes": 466,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-control/qualification/seed-35/summary.tsv",
+          "sha256": "8eb0e376e134e4a5922d8b5ba763cc71813cfa0e6f8e7614f354d28fe8f5a088"
+        },
+        "worst_hold_path_report": {
+          "bytes": 237577,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-control/qualification/seed-35/slow_85_hold.rpt",
+          "sha256": "36b179fa085bc341787c75b61e9d8913473a33f09b958813b0bf51a97196b6cc"
+        }
+      },
+      "reason": "Fresh baseline has a real used scanout hold violation.",
+      "resources": {
+        "ALMs": {
+          "available": 18480,
+          "used": 16885
+        },
+        "DSPs": {
+          "available": 66,
+          "used": 22
+        },
+        "LABs": {
+          "available": 1848,
+          "used": 1833
+        },
+        "M10Ks": {
+          "available": 308,
+          "used": 228
+        }
+      },
+      "seed": 35,
+      "strict_qualified_reports": true,
+      "timing_closed_at_configured_100_mhz": false,
+      "variant": "os20",
+      "worst_hold_path": {
+        "corner": "slow_85",
+        "from": "core_top:ic|x_count[9]",
+        "slack_ns": -0.254,
+        "to": "core_top:ic|video_CRT_scanout_indexed_BRAM:scanout|lcd_x_count_prev[9]"
+      },
+      "worst_slack_ns": {
+        "hold": -0.254,
+        "pulse_width": 0.5,
+        "recovery": 2.261,
+        "removal": 0.444,
+        "setup": -0.793
+      },
+      "worst_used_cross_clock_setup_ns": 1.27,
+      "worst_used_input_setup_ns": 4.639
+    },
+    {
+      "actual_job_source_differences": [
+        "src/fpga/targets/pocket/ap_core.qsf"
+      ],
+      "actual_main_clock_period_ns": 10.0,
+      "artifact_sha256": {
+        "rbf": "12ff080936c5237c6cd0875c1795661950ee8b162de7da8e5f55ffb597adeb00",
+        "sof": "22cd7c3882e2708cbf03caf54c7e646eeed4ac50c963d232eb90aa69834b441d"
+      },
+      "candidate": "os20-radix4",
+      "configured_mhz": 100,
+      "cpu_sha256": "8c34f9e887f073f00a3eaf1f00df02b118fe9ac0f00f01f270b28606a62bba2f",
+      "cross_clock_setup_clean": true,
+      "decision": "retain",
+      "eligible_above_90_mhz_estimate": true,
+      "feature_macros": [
+        "INCLUDE_ANALOGIZER",
+        "INCLUDE_HW_MIXER",
+        "INCLUDE_TRANSLUC",
+        "INCLUDE_PALETTE",
+        "INCLUDE_4PLAYER",
+        "EXCLUDE_GPU_PERSPECTIVE",
+        "EXCLUDE_GPU_DEPTH",
+        "INCLUDE_GPU_CLAMP_PIPE"
+      ],
+      "fit_complete": true,
+      "fit_valid": true,
+      "frozen_inputs_unchanged": true,
+      "input_setup_clean": true,
+      "main_restricted_fmax_mhz": {
+        "fast_0": 198.93,
+        "fast_85": 176.24,
+        "slow_0": 95.49,
+        "slow_85": 95.26
+      },
+      "meets_variant_fmax_target": true,
+      "minimum_main_restricted_fmax_mhz": 95.26,
+      "nonmain_setup_clean": true,
+      "nonsetup_clean": true,
+      "proofs": {
+        "candidate": {
+          "bytes": 415,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4/candidate.json",
+          "sha256": "fa5e96f84a1c362d19e593b135c2ab702805c4d6ddca897dfdf4d087f06d013c"
+        },
+        "clocks.tsv": {
+          "bytes": 14290,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4/qualification/seed-35/clocks.tsv",
+          "sha256": "25cea439ca56ed34764f2ace4003884163814127c91c913c85b078765dc2279e"
+        },
+        "compiled_qsf": {
+          "bytes": 58739,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4/jobs/pocket-os20-s35/src/fpga/targets/pocket/ap_core.qsf",
+          "sha256": "6f7d813b2e725f71003d358a17b454eb2ca7ba5d36318525c045c088d01abb15"
+        },
+        "conditions.tsv": {
+          "bytes": 48,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4/qualification/seed-35/conditions.tsv",
+          "sha256": "0fb5395d511abce32dbf9e5046a9d8ad21be2a4ca41992a56836516c339f7338"
+        },
+        "cross_setup.tsv": {
+          "bytes": 76249,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4/qualification/seed-35/cross_setup.tsv",
+          "sha256": "8787e88404f67fe443f6c9c68b91b6b01148cd16c10fb65a66fc9705c37b5284"
+        },
+        "ddio_checks.tsv": {
+          "bytes": 336,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4/qualification/seed-35/ddio_checks.tsv",
+          "sha256": "53bf20f1808bceec2a2745c1eeafaef9b7bcd5f6468765d8ea2ef9dd9e8dd7ba"
+        },
+        "ddio_proof.tsv": {
+          "bytes": 8756,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4/qualification/seed-35/ddio_proof.tsv",
+          "sha256": "e46bb3c991c2e91c539f138da2db9cd1e93382c9e6d8f9f2b2680f2f3f1a593c"
+        },
+        "fast_0_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4/qualification/seed-35/fast_0_fmax.rpt",
+          "sha256": "bb092de0b1d5164e96e2b857669ff3e8ed40059efd48ff6ee8b30a1bf6b2fe21"
+        },
+        "fast_85_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4/qualification/seed-35/fast_85_fmax.rpt",
+          "sha256": "5276c916660a8f7f596f46d6a368a8cf535656addbca319193597ee8d8c5251e"
+        },
+        "fit_result": {
+          "bytes": 3072,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4/results/pocket-os20-s35/result.json",
+          "sha256": "4b73dc213e0c78dcbe643e16c4f589dd0430ce7a648f72df92a4b383fae27a54"
+        },
+        "frozen_sources": {
+          "bytes": 14728,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4/frozen-sources.json",
+          "sha256": "72b11cdbf0c7672d1a17c77ae1e8d28ca04aea9658b6d8188a6d9231d70dfba9"
+        },
+        "inventory": {
+          "bytes": 412,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4/inventory.json",
+          "sha256": "f7dd67eb874c68a9c5af25cd799b7c68338d638899c263dab4bf12840eb62325"
+        },
+        "report_sweep_timing.tcl": {
+          "bytes": 10589,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4/qualification/report_sweep_timing.tcl",
+          "sha256": "2c66004df7b54c2e62a0c47ae976cf7c61da684ec034a169cb077ca00cdca34e"
+        },
+        "results.py": {
+          "bytes": 12547,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4/qualification/results.py",
+          "sha256": "192828cad6b134c0f6cacfd484611e1ec9db5ab27cf379974bd737296d4f110b"
+        },
+        "slow_0_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4/qualification/seed-35/slow_0_fmax.rpt",
+          "sha256": "ec93c95641bcc943993e85af6e5824204eb6ab80ed38665d5163cba9d2b700d7"
+        },
+        "slow_85_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4/qualification/seed-35/slow_85_fmax.rpt",
+          "sha256": "e8cd875c431164360347adc677557bded913833cb8f461d4a531e983ab24f1a8"
+        },
+        "strict_results": {
+          "bytes": 242268,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4/qualification/results.json",
+          "sha256": "2767109719bd8c9a8d57d17040afcdc984bf22731d4892c37b681aede08912ff"
+        },
+        "summary.tsv": {
+          "bytes": 462,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4/qualification/seed-35/summary.tsv",
+          "sha256": "a2f86a713a319e746e6e3a0909b460afec373ac301aa76b4a9f148f4afa65c5d"
+        },
+        "worst_hold_path_report": {
+          "bytes": 249211,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4/qualification/seed-35/fast_0_hold.rpt",
+          "sha256": "f165f085feaf4898d053f65317f080b679c1fa9ac724cacf9bb79c08e018ec5c"
+        }
+      },
+      "reason": "Faster divider; clean non-setup/used-crossing checks, better timing and lower area than fresh baseline.",
+      "resources": {
+        "ALMs": {
+          "available": 18480,
+          "used": 16468
+        },
+        "DSPs": {
+          "available": 66,
+          "used": 22
+        },
+        "LABs": {
+          "available": 1848,
+          "used": 1822
+        },
+        "M10Ks": {
+          "available": 308,
+          "used": 228
+        }
+      },
+      "seed": 35,
+      "strict_qualified_reports": true,
+      "timing_closed_at_configured_100_mhz": false,
+      "variant": "os20",
+      "worst_hold_path": {
+        "corner": "fast_0",
+        "from": "core_top:ic|datatable_data[10]",
+        "slack_ns": 0.042,
+        "to": "core_top:ic|core_bridge_cmd:icb|mf_datatable:idt|altsyncram:altsyncram_component|altsyncram_j3r2:auto_generated|ram_block1a2~porta_datain_reg3"
+      },
+      "worst_slack_ns": {
+        "hold": 0.042,
+        "pulse_width": 0.5,
+        "recovery": 2.287,
+        "removal": 0.33,
+        "setup": -0.498
+      },
+      "worst_used_cross_clock_setup_ns": 1.272,
+      "worst_used_input_setup_ns": 4.639
+    },
+    {
+      "actual_job_source_differences": [
+        "src/fpga/targets/pocket/ap_core.qsf"
+      ],
+      "actual_main_clock_period_ns": 10.0,
+      "artifact_sha256": {
+        "rbf": "076b628eaf131e5dfbb76300ac6bbd22b02a5945767bd1d6e7e3d93538250378",
+        "sof": "35e9fc8abea70d27ab29501ca262e1d811af0970512f20636fd22a9aec5bf47f"
+      },
+      "candidate": "os20-radix4-audio",
+      "configured_mhz": 100,
+      "cpu_sha256": "8c34f9e887f073f00a3eaf1f00df02b118fe9ac0f00f01f270b28606a62bba2f",
+      "cross_clock_setup_clean": true,
+      "decision": "reject",
+      "eligible_above_90_mhz_estimate": false,
+      "feature_macros": [
+        "INCLUDE_ANALOGIZER",
+        "INCLUDE_HW_MIXER",
+        "INCLUDE_TRANSLUC",
+        "INCLUDE_PALETTE",
+        "INCLUDE_4PLAYER",
+        "EXCLUDE_GPU_PERSPECTIVE",
+        "EXCLUDE_GPU_DEPTH",
+        "INCLUDE_GPU_CLAMP_PIPE",
+        "INCLUDE_NONSTREAM_BYPASS"
+      ],
+      "fit_complete": true,
+      "fit_valid": true,
+      "frozen_inputs_unchanged": true,
+      "input_setup_clean": true,
+      "main_restricted_fmax_mhz": {
+        "fast_0": 213.04,
+        "fast_85": 191.5,
+        "slow_0": 94.25,
+        "slow_85": 94.95
+      },
+      "meets_variant_fmax_target": true,
+      "minimum_main_restricted_fmax_mhz": 94.25,
+      "nonmain_setup_clean": true,
+      "nonsetup_clean": false,
+      "proofs": {
+        "candidate": {
+          "bytes": 451,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/candidate.json",
+          "sha256": "0c3886dce5b824f3e17df316460acedc2a28088a4ea2acd062928d51652e6802"
+        },
+        "clocks.tsv": {
+          "bytes": 14292,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/qualification/seed-34/clocks.tsv",
+          "sha256": "c784be3010f3506baf9a84fe82a75bdfc479936e26844447c982bc7f4602aa23"
+        },
+        "compiled_qsf": {
+          "bytes": 58806,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/jobs/pocket-os20-s34/src/fpga/targets/pocket/ap_core.qsf",
+          "sha256": "968cdc486b11f859e4be20ed4d4e9120e799e523adf84e5653290b6e28d85930"
+        },
+        "conditions.tsv": {
+          "bytes": 48,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/qualification/seed-34/conditions.tsv",
+          "sha256": "0fb5395d511abce32dbf9e5046a9d8ad21be2a4ca41992a56836516c339f7338"
+        },
+        "cross_setup.tsv": {
+          "bytes": 76249,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/qualification/seed-34/cross_setup.tsv",
+          "sha256": "561fb37c1270c3c3fd40b321375c9ddb371daaeae39539bfe461a28193736e8b"
+        },
+        "ddio_checks.tsv": {
+          "bytes": 336,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/qualification/seed-34/ddio_checks.tsv",
+          "sha256": "5c63d1bf4091d9453d0444725206836149142bab49f6ec6953d4c73ff84ca996"
+        },
+        "ddio_proof.tsv": {
+          "bytes": 8756,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/qualification/seed-34/ddio_proof.tsv",
+          "sha256": "01919b8db2728d6dd01632140c83855e8a92338ede7d8eeff6821171847a5c7a"
+        },
+        "fast_0_fmax.rpt": {
+          "bytes": 2527,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/qualification/seed-34/fast_0_fmax.rpt",
+          "sha256": "15a4666b9ad15646675c013514078755126fc5eafe00b5a759b613cb8b3ce816"
+        },
+        "fast_85_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/qualification/seed-34/fast_85_fmax.rpt",
+          "sha256": "8667b29c4e8987f9a014273bdd3861bc60000e2daa8a0533a8cb47d3b5803bab"
+        },
+        "fit_result": {
+          "bytes": 3080,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/results/pocket-os20-s34/result.json",
+          "sha256": "9e889d35e7693cf055b6899a7e00e029d6b3ec9ad388f870665acd3556a5389b"
+        },
+        "frozen_sources": {
+          "bytes": 14728,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/frozen-sources.json",
+          "sha256": "72b11cdbf0c7672d1a17c77ae1e8d28ca04aea9658b6d8188a6d9231d70dfba9"
+        },
+        "inventory": {
+          "bytes": 437,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/inventory.json",
+          "sha256": "86290b2123523c916341b0a39d7aaf7304968c3c7f30e8ff091f95f42c298f04"
+        },
+        "report_sweep_timing.tcl": {
+          "bytes": 10589,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/qualification/report_sweep_timing.tcl",
+          "sha256": "2c66004df7b54c2e62a0c47ae976cf7c61da684ec034a169cb077ca00cdca34e"
+        },
+        "results.py": {
+          "bytes": 12547,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/qualification/results.py",
+          "sha256": "192828cad6b134c0f6cacfd484611e1ec9db5ab27cf379974bd737296d4f110b"
+        },
+        "slow_0_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/qualification/seed-34/slow_0_fmax.rpt",
+          "sha256": "b4fb70780b2ce1b35aa19e854a531be5cb4569d8ee4c71395f4828a867ae77c8"
+        },
+        "slow_85_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/qualification/seed-34/slow_85_fmax.rpt",
+          "sha256": "6dea737614fa812854ba7a17f6245ff2154b3566568a08167aa1a5ad656b96e1"
+        },
+        "strict_results": {
+          "bytes": 484535,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/qualification/results.json",
+          "sha256": "3311879b87756412837ef74a7485215cf15f96df532eaebbbaf81319ad9a6230"
+        },
+        "summary.tsv": {
+          "bytes": 464,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/qualification/seed-34/summary.tsv",
+          "sha256": "cf60c4cbbed1d45bd18b655effb06c273cfdc56a5a87cd64792ba4cdfe86c888"
+        },
+        "worst_hold_path_report": {
+          "bytes": 256940,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/qualification/seed-34/fast_0_hold.rpt",
+          "sha256": "4a99ed0b452c746818cdad69afba540815af64fe25575a7015a69a671c51c6a9"
+        }
+      },
+      "reason": "Both sampled seeds have real used scanout hold violations.",
+      "resources": {
+        "ALMs": {
+          "available": 18480,
+          "used": 16405
+        },
+        "DSPs": {
+          "available": 66,
+          "used": 22
+        },
+        "LABs": {
+          "available": 1848,
+          "used": 1807
+        },
+        "M10Ks": {
+          "available": 308,
+          "used": 228
+        }
+      },
+      "seed": 34,
+      "strict_qualified_reports": true,
+      "timing_closed_at_configured_100_mhz": false,
+      "variant": "os20",
+      "worst_hold_path": {
+        "corner": "fast_0",
+        "from": "core_top:ic|x_count[1]",
+        "slack_ns": -0.104,
+        "to": "core_top:ic|video_CRT_scanout_indexed_BRAM:scanout|lcd_x_count_prev[1]"
+      },
+      "worst_slack_ns": {
+        "hold": -0.104,
+        "pulse_width": 0.5,
+        "recovery": 2.48,
+        "removal": 0.444,
+        "setup": -0.61
+      },
+      "worst_used_cross_clock_setup_ns": 1.153,
+      "worst_used_input_setup_ns": 4.572
+    },
+    {
+      "actual_job_source_differences": [
+        "src/fpga/targets/pocket/ap_core.qsf"
+      ],
+      "actual_main_clock_period_ns": 10.0,
+      "artifact_sha256": {
+        "rbf": "683e61e5f6cde0ac352d47333c273b2fba0d19e11073ee6f2da9986b10372509",
+        "sof": "26d2a909a2506b67b68a0344316ef8d02aca1224461adb093fafadd7f5ec0171"
+      },
+      "candidate": "os20-radix4-audio",
+      "configured_mhz": 100,
+      "cpu_sha256": "8c34f9e887f073f00a3eaf1f00df02b118fe9ac0f00f01f270b28606a62bba2f",
+      "cross_clock_setup_clean": true,
+      "decision": "reject",
+      "eligible_above_90_mhz_estimate": false,
+      "feature_macros": [
+        "INCLUDE_ANALOGIZER",
+        "INCLUDE_HW_MIXER",
+        "INCLUDE_TRANSLUC",
+        "INCLUDE_PALETTE",
+        "INCLUDE_4PLAYER",
+        "EXCLUDE_GPU_PERSPECTIVE",
+        "EXCLUDE_GPU_DEPTH",
+        "INCLUDE_GPU_CLAMP_PIPE",
+        "INCLUDE_NONSTREAM_BYPASS"
+      ],
+      "fit_complete": true,
+      "fit_valid": true,
+      "frozen_inputs_unchanged": true,
+      "input_setup_clean": true,
+      "main_restricted_fmax_mhz": {
+        "fast_0": 206.7,
+        "fast_85": 186.67,
+        "slow_0": 92.06,
+        "slow_85": 91.94
+      },
+      "meets_variant_fmax_target": false,
+      "minimum_main_restricted_fmax_mhz": 91.94,
+      "nonmain_setup_clean": true,
+      "nonsetup_clean": false,
+      "proofs": {
+        "candidate": {
+          "bytes": 451,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/candidate.json",
+          "sha256": "0c3886dce5b824f3e17df316460acedc2a28088a4ea2acd062928d51652e6802"
+        },
+        "clocks.tsv": {
+          "bytes": 14294,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/qualification/seed-35/clocks.tsv",
+          "sha256": "614a15eb3aab7dcc1e17149719157b8322104bfd28e79042e80c321913651372"
+        },
+        "compiled_qsf": {
+          "bytes": 58806,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/jobs/pocket-os20-s35/src/fpga/targets/pocket/ap_core.qsf",
+          "sha256": "c8a534e7147e15c1797659c470924e357ca1188ef0986069f91fac5cd7146818"
+        },
+        "conditions.tsv": {
+          "bytes": 48,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/qualification/seed-35/conditions.tsv",
+          "sha256": "0fb5395d511abce32dbf9e5046a9d8ad21be2a4ca41992a56836516c339f7338"
+        },
+        "cross_setup.tsv": {
+          "bytes": 76249,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/qualification/seed-35/cross_setup.tsv",
+          "sha256": "8baad8fae213e258812159a3ee5c713d137d0b91a8b210cde6f119c0fbe25d2b"
+        },
+        "ddio_checks.tsv": {
+          "bytes": 336,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/qualification/seed-35/ddio_checks.tsv",
+          "sha256": "e454f148cd510d98c1c6ae8cebd4ec56d87beb3fa44dffc155b822c866948951"
+        },
+        "ddio_proof.tsv": {
+          "bytes": 8756,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/qualification/seed-35/ddio_proof.tsv",
+          "sha256": "4fd55b89618ae4a156f52cefdaecbe8f451ad8fa5c6aeabbe51b024b1f19176b"
+        },
+        "fast_0_fmax.rpt": {
+          "bytes": 2539,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/qualification/seed-35/fast_0_fmax.rpt",
+          "sha256": "2703f2748cd5228d211620ad3a3db3405ae7ea6559e344c81790b4bb039a9d1b"
+        },
+        "fast_85_fmax.rpt": {
+          "bytes": 2527,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/qualification/seed-35/fast_85_fmax.rpt",
+          "sha256": "48c32337f37770465c1da7debe2246893dea9d4c95d8dd013bf09bec9b8e1434"
+        },
+        "fit_result": {
+          "bytes": 3083,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/results/pocket-os20-s35/result.json",
+          "sha256": "51ef297f2c19b75928d48949e457cb4dd852bb1949bf4c597bf5dc26c451036d"
+        },
+        "frozen_sources": {
+          "bytes": 14728,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/frozen-sources.json",
+          "sha256": "72b11cdbf0c7672d1a17c77ae1e8d28ca04aea9658b6d8188a6d9231d70dfba9"
+        },
+        "inventory": {
+          "bytes": 437,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/inventory.json",
+          "sha256": "86290b2123523c916341b0a39d7aaf7304968c3c7f30e8ff091f95f42c298f04"
+        },
+        "report_sweep_timing.tcl": {
+          "bytes": 10589,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/qualification/report_sweep_timing.tcl",
+          "sha256": "2c66004df7b54c2e62a0c47ae976cf7c61da684ec034a169cb077ca00cdca34e"
+        },
+        "results.py": {
+          "bytes": 12547,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/qualification/results.py",
+          "sha256": "192828cad6b134c0f6cacfd484611e1ec9db5ab27cf379974bd737296d4f110b"
+        },
+        "slow_0_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/qualification/seed-35/slow_0_fmax.rpt",
+          "sha256": "9039dd540bed5daba6fd2acb3e699c6f4d746ffff0017c9b427b4f444a8d19e1"
+        },
+        "slow_85_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/qualification/seed-35/slow_85_fmax.rpt",
+          "sha256": "323ab83abb590cb3782f40d83ffb3948dd37129dcaee621234205be6d3ed19e3"
+        },
+        "strict_results": {
+          "bytes": 484535,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/qualification/results.json",
+          "sha256": "3311879b87756412837ef74a7485215cf15f96df532eaebbbaf81319ad9a6230"
+        },
+        "summary.tsv": {
+          "bytes": 466,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/qualification/seed-35/summary.tsv",
+          "sha256": "15190bbb7fa305d7475b44b7f687c2f16651f7c5880e45df71e94fb1b7cf1897"
+        },
+        "worst_hold_path_report": {
+          "bytes": 297947,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/qualification/seed-35/slow_85_hold.rpt",
+          "sha256": "c0f0be21b951f01f2f28ed6d4ceb797d1bf44389904aa4baa463c8fd334474ab"
+        }
+      },
+      "reason": "Both sampled seeds have real used scanout hold violations.",
+      "resources": {
+        "ALMs": {
+          "available": 18480,
+          "used": 16484
+        },
+        "DSPs": {
+          "available": 66,
+          "used": 22
+        },
+        "LABs": {
+          "available": 1848,
+          "used": 1815
+        },
+        "M10Ks": {
+          "available": 308,
+          "used": 228
+        }
+      },
+      "seed": 35,
+      "strict_qualified_reports": true,
+      "timing_closed_at_configured_100_mhz": false,
+      "variant": "os20",
+      "worst_hold_path": {
+        "corner": "slow_85",
+        "from": "core_top:ic|x_count[7]",
+        "slack_ns": -0.338,
+        "to": "core_top:ic|video_CRT_scanout_indexed_BRAM:scanout|lcd_x_count_prev[7]"
+      },
+      "worst_slack_ns": {
+        "hold": -0.338,
+        "pulse_width": 0.5,
+        "recovery": 2.74,
+        "removal": 0.514,
+        "setup": -0.877
+      },
+      "worst_used_cross_clock_setup_ns": 1.267,
+      "worst_used_input_setup_ns": 4.639
+    },
+    {
+      "actual_job_source_differences": [
+        "src/fpga/targets/pocket/ap_core.qsf"
+      ],
+      "actual_main_clock_period_ns": 10.0,
+      "artifact_sha256": {
+        "rbf": "1558d7b5154f8b6770fcb348f2b50002e3caffe83ebc250b8007d4375cfd69ec",
+        "sof": "6f1fed9e3cc5ddcdf78bd0a5572d8e254f359e013a64683366b20aacb6045aec"
+      },
+      "candidate": "os20-radix4-ram",
+      "configured_mhz": 100,
+      "cpu_sha256": "8c34f9e887f073f00a3eaf1f00df02b118fe9ac0f00f01f270b28606a62bba2f",
+      "cross_clock_setup_clean": true,
+      "decision": "reject",
+      "eligible_above_90_mhz_estimate": true,
+      "feature_macros": [
+        "INCLUDE_ANALOGIZER",
+        "INCLUDE_HW_MIXER",
+        "INCLUDE_TRANSLUC",
+        "INCLUDE_PALETTE",
+        "INCLUDE_4PLAYER",
+        "EXCLUDE_GPU_PERSPECTIVE",
+        "EXCLUDE_GPU_DEPTH",
+        "INCLUDE_GPU_CLAMP_PIPE",
+        "INCLUDE_AUDIO_POS_M10K"
+      ],
+      "fit_complete": true,
+      "fit_valid": true,
+      "frozen_inputs_unchanged": true,
+      "input_setup_clean": true,
+      "main_restricted_fmax_mhz": {
+        "fast_0": 208.29,
+        "fast_85": 185.12,
+        "slow_0": 92.26,
+        "slow_85": 93.04
+      },
+      "meets_variant_fmax_target": false,
+      "minimum_main_restricted_fmax_mhz": 92.26,
+      "nonmain_setup_clean": true,
+      "nonsetup_clean": true,
+      "proofs": {
+        "candidate": {
+          "bytes": 413,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-ram/candidate.json",
+          "sha256": "e3404efa0ccd61750a8fd584c76c5bc53e72b51deac04826165a1cf246e9c57b"
+        },
+        "clocks.tsv": {
+          "bytes": 14290,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-ram/qualification/seed-35/clocks.tsv",
+          "sha256": "0327a8dd453a83b93fc09bab71dcbc333576ac42cf3d0c063f64930f0f64570f"
+        },
+        "compiled_qsf": {
+          "bytes": 58860,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-ram/jobs/pocket-os20-s35/src/fpga/targets/pocket/ap_core.qsf",
+          "sha256": "2b7274cedd5f123a13b80bf52731380ec587efbe861cd84dbe6a0cc30cf7c92c"
+        },
+        "conditions.tsv": {
+          "bytes": 48,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-ram/qualification/seed-35/conditions.tsv",
+          "sha256": "0fb5395d511abce32dbf9e5046a9d8ad21be2a4ca41992a56836516c339f7338"
+        },
+        "cross_setup.tsv": {
+          "bytes": 76249,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-ram/qualification/seed-35/cross_setup.tsv",
+          "sha256": "cf8c0391cf5c7aee2c7b13bc373782aa6bfcf4a4ec3abb44269fbc3a3c0892be"
+        },
+        "ddio_checks.tsv": {
+          "bytes": 336,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-ram/qualification/seed-35/ddio_checks.tsv",
+          "sha256": "50d51255d22a4ef298bdd95116a10158a5555b7707a55e076f7ab34594fe341e"
+        },
+        "ddio_proof.tsv": {
+          "bytes": 8756,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-ram/qualification/seed-35/ddio_proof.tsv",
+          "sha256": "1bee2018ff741149436bf1ddcdac25f99a75c78e24df7ddd3a4b16a4ff0b2e46"
+        },
+        "fast_0_fmax.rpt": {
+          "bytes": 2527,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-ram/qualification/seed-35/fast_0_fmax.rpt",
+          "sha256": "79575fd2fef5f445486b5d6b5b6957d43db334016659dafb405067f9e2636b2c"
+        },
+        "fast_85_fmax.rpt": {
+          "bytes": 2527,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-ram/qualification/seed-35/fast_85_fmax.rpt",
+          "sha256": "dd5014af1fff9d9a5c4f8f94cb2ebb4d88757ba4acc9ab14dedb3cc623fe6d2a"
+        },
+        "fit_result": {
+          "bytes": 3077,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-ram/results/pocket-os20-s35/result.json",
+          "sha256": "c80bdfa381fa14b3517e405e3ba3981e36274383ac735efc84c6da037e971196"
+        },
+        "frozen_sources": {
+          "bytes": 14728,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-ram/frozen-sources.json",
+          "sha256": "98f2f35612c9b43dee90a49dc31e4988830730bbab0c3d9031bb0fb3fb6f62d4"
+        },
+        "inventory": {
+          "bytes": 435,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-ram/inventory.json",
+          "sha256": "77fc75c423d9ec990182bc61efcb279e9684d1a2268ac000d435895ea7eedc09"
+        },
+        "report_sweep_timing.tcl": {
+          "bytes": 10589,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-ram/qualification/report_sweep_timing.tcl",
+          "sha256": "2c66004df7b54c2e62a0c47ae976cf7c61da684ec034a169cb077ca00cdca34e"
+        },
+        "results.py": {
+          "bytes": 12547,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-ram/qualification/results.py",
+          "sha256": "192828cad6b134c0f6cacfd484611e1ec9db5ab27cf379974bd737296d4f110b"
+        },
+        "slow_0_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-ram/qualification/seed-35/slow_0_fmax.rpt",
+          "sha256": "a34e7013d1c8aedd0ab14332a20bcfb9b56d7c86c34c46abf8a7f9f35a850426"
+        },
+        "slow_85_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-ram/qualification/seed-35/slow_85_fmax.rpt",
+          "sha256": "2833fea2d3cf7a1f16111aa0b5fc4e676f59b7ce50e02330cf023fa1e419bdda"
+        },
+        "strict_results": {
+          "bytes": 242269,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-ram/qualification/results.json",
+          "sha256": "5da4e0f49a3dbf7e0a3e9a4616ca1c8df87d7a578b13718ac84d2baf7d88e86e"
+        },
+        "summary.tsv": {
+          "bytes": 462,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-ram/qualification/seed-35/summary.tsv",
+          "sha256": "c44b3cd67abd177fe5c91f08e2ea9d3b2508edb6fe4b8d4441e8b93b9faf1b2a"
+        },
+        "worst_hold_path_report": {
+          "bytes": 258996,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-ram/qualification/seed-35/fast_0_hold.rpt",
+          "sha256": "bdf091f11e6ba9c172c3dec95a1bf3d3e4e52681b2897418b71e50122ca3e0ae"
+        }
+      },
+      "reason": "Worse timing and more ALMs/M10Ks than radix4 alone.",
+      "resources": {
+        "ALMs": {
+          "available": 18480,
+          "used": 16598
+        },
+        "DSPs": {
+          "available": 66,
+          "used": 22
+        },
+        "LABs": {
+          "available": 1848,
+          "used": 1828
+        },
+        "M10Ks": {
+          "available": 308,
+          "used": 230
+        }
+      },
+      "seed": 35,
+      "strict_qualified_reports": true,
+      "timing_closed_at_configured_100_mhz": false,
+      "variant": "os20",
+      "worst_hold_path": {
+        "corner": "fast_0",
+        "from": "core_top:ic|vidout_rgb[21]",
+        "slack_ns": 0.036,
+        "to": "core_top:ic|openFPGA_Pocket_Analogizer:analogizer|yc_out:g_yc.yc_out|yr[6]"
+      },
+      "worst_slack_ns": {
+        "hold": 0.036,
+        "pulse_width": 0.5,
+        "recovery": 2.649,
+        "removal": 0.442,
+        "setup": -0.839
+      },
+      "worst_used_cross_clock_setup_ns": 1.272,
+      "worst_used_input_setup_ns": 4.639
+    },
+    {
+      "actual_job_source_differences": [
+        "src/fpga/targets/pocket/ap_core.qsf"
+      ],
+      "actual_main_clock_period_ns": 10.0,
+      "artifact_sha256": {
+        "rbf": "c7c50c8d099188c24b34de43cc3c753a49864ed871b2ef6531ee914d4883fdff",
+        "sof": "a475875fe082c10cb778ba90fec564701404c913dd79a152c0e0c422f2cee767"
+      },
+      "candidate": "os25-audio",
+      "configured_mhz": 100,
+      "cpu_sha256": "d73f954af9d56146e0172c62677e0cc46a3ce7e5661098c237ce0203382fe0ad",
+      "cross_clock_setup_clean": true,
+      "decision": "reject",
+      "eligible_above_90_mhz_estimate": true,
+      "feature_macros": [
+        "INCLUDE_ANALOGIZER",
+        "INCLUDE_HW_MIXER",
+        "INCLUDE_TRANSLUC",
+        "INCLUDE_PALETTE",
+        "INCLUDE_COLUMN_LIST",
+        "INCLUDE_COMPACT_SPAN",
+        "INCLUDE_PARAM_SPAN_Q29",
+        "INCLUDE_4PLAYER",
+        "INCLUDE_BANK_ROW_TRACK",
+        "INCLUDE_CPU_RING",
+        "INCLUDE_GPU_WRITE_BURSTS",
+        "EXCLUDE_GPU_COMMAND_DMA",
+        "INCLUDE_SPAN_DEDICATED_MULT",
+        "INCLUDE_NONSTREAM_BYPASS"
+      ],
+      "fit_complete": true,
+      "fit_valid": true,
+      "frozen_inputs_unchanged": true,
+      "input_setup_clean": true,
+      "main_restricted_fmax_mhz": {
+        "fast_0": 208.9,
+        "fast_85": 188.89,
+        "slow_0": 94.19,
+        "slow_85": 94.37
+      },
+      "meets_variant_fmax_target": true,
+      "minimum_main_restricted_fmax_mhz": 94.19,
+      "nonmain_setup_clean": true,
+      "nonsetup_clean": true,
+      "proofs": {
+        "candidate": {
+          "bytes": 441,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio/candidate.json",
+          "sha256": "126c7f83bb5af17bf24238b1fa8ab82606b03d54768903ab1fa552729e98a044"
+        },
+        "clocks.tsv": {
+          "bytes": 14290,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio/qualification/seed-20/clocks.tsv",
+          "sha256": "8c7a99900d77347a9120f492f80190f52d109b5a5fd6e39703bade52b4ed5721"
+        },
+        "compiled_qsf": {
+          "bytes": 58925,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio/jobs/pocket-os25-s20/src/fpga/targets/pocket/ap_core.qsf",
+          "sha256": "2df99915532fc9cb8a61e01a73fbb6635e8ea1e7729645c30516492cba85a28e"
+        },
+        "conditions.tsv": {
+          "bytes": 48,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio/qualification/seed-20/conditions.tsv",
+          "sha256": "0fb5395d511abce32dbf9e5046a9d8ad21be2a4ca41992a56836516c339f7338"
+        },
+        "cross_setup.tsv": {
+          "bytes": 76245,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio/qualification/seed-20/cross_setup.tsv",
+          "sha256": "0b25d0ca5a3d5d8df088938ee817480779ce1b2f976cffbbcfcacf8892b515ec"
+        },
+        "ddio_checks.tsv": {
+          "bytes": 336,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio/qualification/seed-20/ddio_checks.tsv",
+          "sha256": "29d452b6346fd8c5726b9cd44a2f1fe14f35a25fde22bc2aace6838f5481a0fc"
+        },
+        "ddio_proof.tsv": {
+          "bytes": 8756,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio/qualification/seed-20/ddio_proof.tsv",
+          "sha256": "f2f9e8d8ed1fcb94ca3e97454f07fb454f56093828bc320ec72843d0cd61ee59"
+        },
+        "fast_0_fmax.rpt": {
+          "bytes": 2527,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio/qualification/seed-20/fast_0_fmax.rpt",
+          "sha256": "ad911fa77747b2771fd37a9844b84047431ef94c40361c8db2d913a36251893d"
+        },
+        "fast_85_fmax.rpt": {
+          "bytes": 2527,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio/qualification/seed-20/fast_85_fmax.rpt",
+          "sha256": "4ae654f3c4f5f405efe71ab05cd0d8211604c7b5a93789c4a02a2ed726cb6391"
+        },
+        "fit_result": {
+          "bytes": 3072,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio/results/pocket-os25-s20/result.json",
+          "sha256": "2a7f27d05dd4a16351b62964f6e233323c52c6ffd52649dc7928b1176eecbee4"
+        },
+        "frozen_sources": {
+          "bytes": 14728,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio/frozen-sources.json",
+          "sha256": "c237accff65e48d600c98ba0260f7c5934d44b59ede47f5891e73b4ae159fa68"
+        },
+        "inventory": {
+          "bytes": 553,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio/inventory.json",
+          "sha256": "c5782bcb768ac546803c428f49e4b74b7930146ed016a257345ae31e88e6d2b9"
+        },
+        "report_sweep_timing.tcl": {
+          "bytes": 10589,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio/qualification/report_sweep_timing.tcl",
+          "sha256": "2c66004df7b54c2e62a0c47ae976cf7c61da684ec034a169cb077ca00cdca34e"
+        },
+        "results.py": {
+          "bytes": 12547,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio/qualification/results.py",
+          "sha256": "192828cad6b134c0f6cacfd484611e1ec9db5ab27cf379974bd737296d4f110b"
+        },
+        "slow_0_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio/qualification/seed-20/slow_0_fmax.rpt",
+          "sha256": "27f4acda7c32ad121165ea873ae9822c14197921975270e05873fad5c4778184"
+        },
+        "slow_85_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio/qualification/seed-20/slow_85_fmax.rpt",
+          "sha256": "b139ff472d9596821a581a5cb855c076e7f212d078fcb619b4bc0bbab33d654d"
+        },
+        "strict_results": {
+          "bytes": 242257,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio/qualification/results.json",
+          "sha256": "a5b9ba0bd1988e3058c4205a36b3b9c22abe3803ec2dd2976d3d1ae228250790"
+        },
+        "summary.tsv": {
+          "bytes": 462,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio/qualification/seed-20/summary.tsv",
+          "sha256": "7bb2e8ec397bf8dd31b77d67445563603372ef7be13e3e8c13020e486141134a"
+        },
+        "worst_hold_path_report": {
+          "bytes": 265331,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio/qualification/seed-20/fast_0_hold.rpt",
+          "sha256": "b0fee9818b4ab5fd45f147bfb249f76f8951b3bdeff00e4d9e312c410149c34c"
+        }
+      },
+      "reason": "Tiny mixer service-cycle benefit does not justify the lower timing margin; no demonstrated game-FPS gain.",
+      "resources": {
+        "ALMs": {
+          "available": 18480,
+          "used": 15435
+        },
+        "DSPs": {
+          "available": 66,
+          "used": 28
+        },
+        "LABs": {
+          "available": 1848,
+          "used": 1820
+        },
+        "M10Ks": {
+          "available": 308,
+          "used": 296
+        }
+      },
+      "seed": 20,
+      "strict_qualified_reports": true,
+      "timing_closed_at_configured_100_mhz": false,
+      "variant": "os25",
+      "worst_hold_path": {
+        "corner": "fast_0",
+        "from": "core_top:ic|video_CRT_scanout_indexed_BRAM:scanout|analog_pixel_color[18]",
+        "slack_ns": 0.036,
+        "to": "core_top:ic|openFPGA_Pocket_Analogizer:analogizer|vga_out:g_ypbpr.ybpr_video|y_1r[11]"
+      },
+      "worst_slack_ns": {
+        "hold": 0.036,
+        "pulse_width": 0.5,
+        "recovery": 2.658,
+        "removal": 0.264,
+        "setup": -0.617
+      },
+      "worst_used_cross_clock_setup_ns": 0.646,
+      "worst_used_input_setup_ns": 5.186
+    },
+    {
+      "actual_job_source_differences": [
+        "src/fpga/targets/pocket/ap_core.qsf"
+      ],
+      "actual_main_clock_period_ns": 10.0,
+      "artifact_sha256": {
+        "rbf": "1ba288c436b34d82e0ceb73b070c62f5d28025d299baf72c2fe3d32288bc752e",
+        "sof": "3fa6d5638eb4a03d8793ee97585eb047457e05a6511253503ccf0a5bbfa1d2d1"
+      },
+      "candidate": "os25-audio-clamp",
+      "configured_mhz": 100,
+      "cpu_sha256": "d73f954af9d56146e0172c62677e0cc46a3ce7e5661098c237ce0203382fe0ad",
+      "cross_clock_setup_clean": true,
+      "decision": "reject",
+      "eligible_above_90_mhz_estimate": true,
+      "feature_macros": [
+        "INCLUDE_ANALOGIZER",
+        "INCLUDE_HW_MIXER",
+        "INCLUDE_TRANSLUC",
+        "INCLUDE_PALETTE",
+        "INCLUDE_COLUMN_LIST",
+        "INCLUDE_COMPACT_SPAN",
+        "INCLUDE_PARAM_SPAN_Q29",
+        "INCLUDE_4PLAYER",
+        "INCLUDE_BANK_ROW_TRACK",
+        "INCLUDE_CPU_RING",
+        "INCLUDE_GPU_WRITE_BURSTS",
+        "EXCLUDE_GPU_COMMAND_DMA",
+        "INCLUDE_SPAN_DEDICATED_MULT",
+        "INCLUDE_NONSTREAM_BYPASS",
+        "INCLUDE_GPU_CLAMP_PIPE"
+      ],
+      "fit_complete": true,
+      "fit_valid": true,
+      "frozen_inputs_unchanged": true,
+      "input_setup_clean": true,
+      "main_restricted_fmax_mhz": {
+        "fast_0": 208.72,
+        "fast_85": 184.91,
+        "slow_0": 90.81,
+        "slow_85": 90.59
+      },
+      "meets_variant_fmax_target": false,
+      "minimum_main_restricted_fmax_mhz": 90.59,
+      "nonmain_setup_clean": true,
+      "nonsetup_clean": true,
+      "proofs": {
+        "candidate": {
+          "bytes": 463,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-clamp/candidate.json",
+          "sha256": "bdf71b708fe4794db92e83a229e4955cbc6254f56af183f70f86915fc10b0e29"
+        },
+        "clocks.tsv": {
+          "bytes": 14290,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-clamp/qualification/seed-20/clocks.tsv",
+          "sha256": "5a7acb43c3ef097a17dbe972300cd41a5f2f2ed59bc981f06783b66b2718d09f"
+        },
+        "compiled_qsf": {
+          "bytes": 58990,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-clamp/jobs/pocket-os25-s20/src/fpga/targets/pocket/ap_core.qsf",
+          "sha256": "4118b0623535bda78a53bcd74ec9bde1eeedb2f7d5a82e87ea035ce63be81417"
+        },
+        "conditions.tsv": {
+          "bytes": 48,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-clamp/qualification/seed-20/conditions.tsv",
+          "sha256": "0fb5395d511abce32dbf9e5046a9d8ad21be2a4ca41992a56836516c339f7338"
+        },
+        "cross_setup.tsv": {
+          "bytes": 76245,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-clamp/qualification/seed-20/cross_setup.tsv",
+          "sha256": "0089aed82a7656f65d9f2c3dec1a89fc2b56d4dec8549fe2e6e871688e2b2f58"
+        },
+        "ddio_checks.tsv": {
+          "bytes": 336,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-clamp/qualification/seed-20/ddio_checks.tsv",
+          "sha256": "a722c0c7e315f491d1fab31d5bd185c8ef6d934041a5a9f2ed6e57dc28ce2396"
+        },
+        "ddio_proof.tsv": {
+          "bytes": 8756,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-clamp/qualification/seed-20/ddio_proof.tsv",
+          "sha256": "6cc3a82f0c8b28d3caab2c6de6eb15491fbdc2eb0b2e73777647f07e793aa8b1"
+        },
+        "fast_0_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-clamp/qualification/seed-20/fast_0_fmax.rpt",
+          "sha256": "3fdf8b90b8d65479dcbf0b87bf9a3155ff6c2ab395253522e51b4377956c4629"
+        },
+        "fast_85_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-clamp/qualification/seed-20/fast_85_fmax.rpt",
+          "sha256": "e25d0d8830522aaa337492ef8f7065d9b85457edb4cf08a24c17dd67b10eeddb"
+        },
+        "fit_result": {
+          "bytes": 3079,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-clamp/results/pocket-os25-s20/result.json",
+          "sha256": "f725b2b0ec733cb086c0e92b0cb34c0fad48ee693063e6c731eb2dbf1972fb8c"
+        },
+        "frozen_sources": {
+          "bytes": 14728,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-clamp/frozen-sources.json",
+          "sha256": "c237accff65e48d600c98ba0260f7c5934d44b59ede47f5891e73b4ae159fa68"
+        },
+        "inventory": {
+          "bytes": 576,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-clamp/inventory.json",
+          "sha256": "573d1e0194de4bf26ed869aa4e90a4ba512b4dfef5ada1640258ebc1282e9feb"
+        },
+        "report_sweep_timing.tcl": {
+          "bytes": 10589,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-clamp/qualification/report_sweep_timing.tcl",
+          "sha256": "2c66004df7b54c2e62a0c47ae976cf7c61da684ec034a169cb077ca00cdca34e"
+        },
+        "results.py": {
+          "bytes": 12547,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-clamp/qualification/results.py",
+          "sha256": "192828cad6b134c0f6cacfd484611e1ec9db5ab27cf379974bd737296d4f110b"
+        },
+        "slow_0_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-clamp/qualification/seed-20/slow_0_fmax.rpt",
+          "sha256": "73b92e426e302a8c79ed5e9eccddac9cd2caf3c258367bba24327947f8d761ad"
+        },
+        "slow_85_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-clamp/qualification/seed-20/slow_85_fmax.rpt",
+          "sha256": "b3db23997c46c01c5f57b217d745ca5be89864c0659d012c22b763bf2f3e4bd0"
+        },
+        "strict_results": {
+          "bytes": 242265,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-clamp/qualification/results.json",
+          "sha256": "89e03c57f532f7e9b05251c905c547723998388b23a700ab337e7afeb68474d1"
+        },
+        "summary.tsv": {
+          "bytes": 462,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-clamp/qualification/seed-20/summary.tsv",
+          "sha256": "d5805d5ec811962c3c649db62c9c609884f5acf0b53d7b3900c4d7e2d6fb05bf"
+        },
+        "worst_hold_path_report": {
+          "bytes": 305363,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-clamp/qualification/seed-20/fast_0_hold.rpt",
+          "sha256": "edcc97fed6680d5dac03a94670c74d4624cd1115797657a2d0c0c3b772f96a42"
+        }
+      },
+      "reason": "Below the os25 94 MHz estimate target and substantially below fresh control timing.",
+      "resources": {
+        "ALMs": {
+          "available": 18480,
+          "used": 15481
+        },
+        "DSPs": {
+          "available": 66,
+          "used": 28
+        },
+        "LABs": {
+          "available": 1848,
+          "used": 1809
+        },
+        "M10Ks": {
+          "available": 308,
+          "used": 296
+        }
+      },
+      "seed": 20,
+      "strict_qualified_reports": true,
+      "timing_closed_at_configured_100_mhz": false,
+      "variant": "os25",
+      "worst_hold_path": {
+        "corner": "fast_0",
+        "from": "core_top:ic|video_CRT_scanout_indexed_BRAM:scanout|analog_pixel_color[3]",
+        "slack_ns": 0.012,
+        "to": "core_top:ic|openFPGA_Pocket_Analogizer:analogizer|vga_out:g_ypbpr.ybpr_video|pr_1b[5]"
+      },
+      "worst_slack_ns": {
+        "hold": 0.012,
+        "pulse_width": 0.5,
+        "recovery": 2.182,
+        "removal": 0.457,
+        "setup": -1.039
+      },
+      "worst_used_cross_clock_setup_ns": 0.647,
+      "worst_used_input_setup_ns": 5.186
+    },
+    {
+      "actual_job_source_differences": [
+        "src/fpga/targets/pocket/ap_core.qsf"
+      ],
+      "actual_main_clock_period_ns": 10.0,
+      "artifact_sha256": {
+        "rbf": "182d9f99719b591c8e51861447852dd6f30279de26b2232a96279a6dc454db79",
+        "sof": "280758237369c913d3604942856306b2157f44634ec48f684e5962161eab81dc"
+      },
+      "candidate": "os25-audio-ram",
+      "configured_mhz": 100,
+      "cpu_sha256": "d73f954af9d56146e0172c62677e0cc46a3ce7e5661098c237ce0203382fe0ad",
+      "cross_clock_setup_clean": true,
+      "decision": "reject",
+      "eligible_above_90_mhz_estimate": true,
+      "feature_macros": [
+        "INCLUDE_ANALOGIZER",
+        "INCLUDE_HW_MIXER",
+        "INCLUDE_TRANSLUC",
+        "INCLUDE_PALETTE",
+        "INCLUDE_COLUMN_LIST",
+        "INCLUDE_COMPACT_SPAN",
+        "INCLUDE_PARAM_SPAN_Q29",
+        "INCLUDE_4PLAYER",
+        "INCLUDE_BANK_ROW_TRACK",
+        "INCLUDE_CPU_RING",
+        "INCLUDE_GPU_WRITE_BURSTS",
+        "EXCLUDE_GPU_COMMAND_DMA",
+        "INCLUDE_SPAN_DEDICATED_MULT",
+        "INCLUDE_AUDIO_POS_M10K",
+        "INCLUDE_NONSTREAM_BYPASS"
+      ],
+      "fit_complete": true,
+      "fit_valid": true,
+      "frozen_inputs_unchanged": true,
+      "input_setup_clean": true,
+      "main_restricted_fmax_mhz": {
+        "fast_0": 207.73,
+        "fast_85": 187.62,
+        "slow_0": 94.75,
+        "slow_85": 92.7
+      },
+      "meets_variant_fmax_target": false,
+      "minimum_main_restricted_fmax_mhz": 92.7,
+      "nonmain_setup_clean": true,
+      "nonsetup_clean": true,
+      "proofs": {
+        "candidate": {
+          "bytes": 439,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-ram/candidate.json",
+          "sha256": "580ecb32718ecbe0db5f182250803aab593eb284e95a6736d99f25a51da937df"
+        },
+        "clocks.tsv": {
+          "bytes": 14289,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-ram/qualification/seed-20/clocks.tsv",
+          "sha256": "c898020e51150374395a1884e7bff2aa53559248144d65a13c2d2c0ccca072f5"
+        },
+        "compiled_qsf": {
+          "bytes": 59047,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-ram/jobs/pocket-os25-s20/src/fpga/targets/pocket/ap_core.qsf",
+          "sha256": "febce1f7c0af2fb9d89235813d3fa55d3eb240fe9eb362425628ae9ea3c87a70"
+        },
+        "conditions.tsv": {
+          "bytes": 48,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-ram/qualification/seed-20/conditions.tsv",
+          "sha256": "0fb5395d511abce32dbf9e5046a9d8ad21be2a4ca41992a56836516c339f7338"
+        },
+        "cross_setup.tsv": {
+          "bytes": 76245,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-ram/qualification/seed-20/cross_setup.tsv",
+          "sha256": "608965980a1e7b55ee008a701470d7ea1a2964e03eb0761edf156a04f1619af8"
+        },
+        "ddio_checks.tsv": {
+          "bytes": 336,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-ram/qualification/seed-20/ddio_checks.tsv",
+          "sha256": "b7da6ca17c755651794b3f0f25669cc547edeade9befb343d389661c1172b536"
+        },
+        "ddio_proof.tsv": {
+          "bytes": 8756,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-ram/qualification/seed-20/ddio_proof.tsv",
+          "sha256": "63bb22bae7bfab39ac67c070f89558d66877185254f3f932f7d1b954cb84c1dd"
+        },
+        "fast_0_fmax.rpt": {
+          "bytes": 2527,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-ram/qualification/seed-20/fast_0_fmax.rpt",
+          "sha256": "0f976253ac9db5725b0855f4145f9b95e15c22804aaa90e38ed12c3a36b13ff6"
+        },
+        "fast_85_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-ram/qualification/seed-20/fast_85_fmax.rpt",
+          "sha256": "f51e4551e903063fc34e1267510f1adb809f221782a4f2e9fc193b63831089cc"
+        },
+        "fit_result": {
+          "bytes": 3076,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-ram/results/pocket-os25-s20/result.json",
+          "sha256": "b5171e02a7a3aa22ee35512bced1165aabc2ef9324da3b16d9e716b4a5d50e88"
+        },
+        "frozen_sources": {
+          "bytes": 14843,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-ram/frozen-sources.json",
+          "sha256": "55ebb7ddef61a3e83172b2f11bff34ac96796c72a87529fa5715d670fd7ab322"
+        },
+        "inventory": {
+          "bytes": 576,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-ram/inventory.json",
+          "sha256": "98f2294ce43edc7b65683cb5f1de1b3605e8df6d9bd1d8cd6cf1aeaa4a9cbe39"
+        },
+        "report_sweep_timing.tcl": {
+          "bytes": 10589,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-ram/qualification/report_sweep_timing.tcl",
+          "sha256": "2c66004df7b54c2e62a0c47ae976cf7c61da684ec034a169cb077ca00cdca34e"
+        },
+        "results.py": {
+          "bytes": 12547,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-ram/qualification/results.py",
+          "sha256": "192828cad6b134c0f6cacfd484611e1ec9db5ab27cf379974bd737296d4f110b"
+        },
+        "slow_0_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-ram/qualification/seed-20/slow_0_fmax.rpt",
+          "sha256": "fc2dc8e6e33b055077a8ddc23977b353783c4bf03c9093ebd30295a797dcf5cd"
+        },
+        "slow_85_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-ram/qualification/seed-20/slow_85_fmax.rpt",
+          "sha256": "c7da6a97c8b5ea2516d0aec9349d0eb778dd2de984e4c059fe6b360e0f7d03d6"
+        },
+        "strict_results": {
+          "bytes": 242256,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-ram/qualification/results.json",
+          "sha256": "3df7772cd70b31a0761b19c3e86e59fe6e8fb1e5b0fa93bd19e3aa4dfb277262"
+        },
+        "summary.tsv": {
+          "bytes": 462,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-ram/qualification/seed-20/summary.tsv",
+          "sha256": "c06ab0b0c9d030059003c1f0a2e543025653b7b2c7d7582361ff3bcffd1c24a4"
+        },
+        "worst_hold_path_report": {
+          "bytes": 258324,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-ram/qualification/seed-20/fast_0_hold.rpt",
+          "sha256": "228047953a3e715f86c550e92080234207263bf71d0567d694937ad77ff72867"
+        }
+      },
+      "reason": "Below the os25 94 MHz estimate target and substantially below fresh control timing.",
+      "resources": {
+        "ALMs": {
+          "available": 18480,
+          "used": 15468
+        },
+        "DSPs": {
+          "available": 66,
+          "used": 28
+        },
+        "LABs": {
+          "available": 1848,
+          "used": 1830
+        },
+        "M10Ks": {
+          "available": 308,
+          "used": 298
+        }
+      },
+      "seed": 20,
+      "strict_qualified_reports": true,
+      "timing_closed_at_configured_100_mhz": false,
+      "variant": "os25",
+      "worst_hold_path": {
+        "corner": "fast_0",
+        "from": "core_top:ic|fb_pixel_safe[13]",
+        "slack_ns": 0.069,
+        "to": "core_top:ic|vidout_rgb[13]"
+      },
+      "worst_slack_ns": {
+        "hold": 0.069,
+        "pulse_width": 0.5,
+        "recovery": 1.937,
+        "removal": 0.271,
+        "setup": -0.787
+      },
+      "worst_used_cross_clock_setup_ns": 0.647,
+      "worst_used_input_setup_ns": 5.186
+    },
+    {
+      "actual_job_source_differences": [
+        "src/fpga/targets/pocket/ap_core.qsf"
+      ],
+      "actual_main_clock_period_ns": 10.0,
+      "artifact_sha256": {
+        "rbf": "463d1cb1bc887fbc48568ad9e227a6f76b7b69d318cadd227a6d2ccb87c17201",
+        "sof": "012845d2432943f66c852f1143ce7e7f409621af06f83beb5c0d60ada139882f"
+      },
+      "candidate": "os25-clamp",
+      "configured_mhz": 100,
+      "cpu_sha256": "d73f954af9d56146e0172c62677e0cc46a3ce7e5661098c237ce0203382fe0ad",
+      "cross_clock_setup_clean": true,
+      "decision": "reject",
+      "eligible_above_90_mhz_estimate": false,
+      "feature_macros": [
+        "INCLUDE_ANALOGIZER",
+        "INCLUDE_HW_MIXER",
+        "INCLUDE_TRANSLUC",
+        "INCLUDE_PALETTE",
+        "INCLUDE_COLUMN_LIST",
+        "INCLUDE_COMPACT_SPAN",
+        "INCLUDE_PARAM_SPAN_Q29",
+        "INCLUDE_4PLAYER",
+        "INCLUDE_BANK_ROW_TRACK",
+        "INCLUDE_CPU_RING",
+        "INCLUDE_GPU_WRITE_BURSTS",
+        "EXCLUDE_GPU_COMMAND_DMA",
+        "INCLUDE_SPAN_DEDICATED_MULT",
+        "INCLUDE_GPU_CLAMP_PIPE"
+      ],
+      "fit_complete": true,
+      "fit_valid": true,
+      "frozen_inputs_unchanged": true,
+      "input_setup_clean": true,
+      "main_restricted_fmax_mhz": {
+        "fast_0": 205.09,
+        "fast_85": 183.49,
+        "slow_0": 96.02,
+        "slow_85": 95.17
+      },
+      "meets_variant_fmax_target": true,
+      "minimum_main_restricted_fmax_mhz": 95.17,
+      "nonmain_setup_clean": true,
+      "nonsetup_clean": false,
+      "proofs": {
+        "candidate": {
+          "bytes": 464,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-clamp/candidate.json",
+          "sha256": "f1bdb162dc787ddbb23f550fd145e43f6e0caff5f8bcbcf5360824e6e0130906"
+        },
+        "clocks.tsv": {
+          "bytes": 14292,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-clamp/qualification/seed-20/clocks.tsv",
+          "sha256": "39a44ce129dde047c17b300380c11723451c58f0b384900f49eadda9d834a9fa"
+        },
+        "compiled_qsf": {
+          "bytes": 58923,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-clamp/jobs/pocket-os25-s20/src/fpga/targets/pocket/ap_core.qsf",
+          "sha256": "e7214635ed2de92cdc82521633968f6a05de0e6c154ed9f1015469f2a9591881"
+        },
+        "conditions.tsv": {
+          "bytes": 48,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-clamp/qualification/seed-20/conditions.tsv",
+          "sha256": "0fb5395d511abce32dbf9e5046a9d8ad21be2a4ca41992a56836516c339f7338"
+        },
+        "cross_setup.tsv": {
+          "bytes": 76245,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-clamp/qualification/seed-20/cross_setup.tsv",
+          "sha256": "80811e297e125d8c325866bb75c5a00172b1eea29f04331666d0caf3a9d3c97f"
+        },
+        "ddio_checks.tsv": {
+          "bytes": 336,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-clamp/qualification/seed-20/ddio_checks.tsv",
+          "sha256": "4703c09fe9c785c06edd5515be7ca30159a9c11b24741ec038f65e2c82533083"
+        },
+        "ddio_proof.tsv": {
+          "bytes": 8756,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-clamp/qualification/seed-20/ddio_proof.tsv",
+          "sha256": "3edb2ddc50a46d2e09a4d22138e7ebb8d63e4a7620de429dbad29e2ed5efc2e8"
+        },
+        "fast_0_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-clamp/qualification/seed-20/fast_0_fmax.rpt",
+          "sha256": "39678e2ef506b7e002ad26f61b4fb870a65542cdc21532d8effd42029fec916d"
+        },
+        "fast_85_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-clamp/qualification/seed-20/fast_85_fmax.rpt",
+          "sha256": "54c0b91498a425f4b1999acc75a7af06a814fa2e19d6f5b5279ad316c4105079"
+        },
+        "fit_result": {
+          "bytes": 3075,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-clamp/results/pocket-os25-s20/result.json",
+          "sha256": "488c6b7ec7ee85d077da6c3f6778a983e89319af9810b8dd18f1b562c40c61f2"
+        },
+        "frozen_sources": {
+          "bytes": 14728,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-clamp/frozen-sources.json",
+          "sha256": "c237accff65e48d600c98ba0260f7c5934d44b59ede47f5891e73b4ae159fa68"
+        },
+        "inventory": {
+          "bytes": 551,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-clamp/inventory.json",
+          "sha256": "3febc3871339bd85040c5b2f25f4211f8658450f36191d542f7dcce70aab08e6"
+        },
+        "report_sweep_timing.tcl": {
+          "bytes": 10589,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-clamp/qualification/report_sweep_timing.tcl",
+          "sha256": "2c66004df7b54c2e62a0c47ae976cf7c61da684ec034a169cb077ca00cdca34e"
+        },
+        "results.py": {
+          "bytes": 12547,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-clamp/qualification/results.py",
+          "sha256": "192828cad6b134c0f6cacfd484611e1ec9db5ab27cf379974bd737296d4f110b"
+        },
+        "slow_0_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-clamp/qualification/seed-20/slow_0_fmax.rpt",
+          "sha256": "ef76373f46c8197d5a4a71eb82889543c4378e6d41d4dfd76557ff15a523d213"
+        },
+        "slow_85_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-clamp/qualification/seed-20/slow_85_fmax.rpt",
+          "sha256": "cbe475ce9f7146dde25037bc334d615a990ac351f44dc4303e3393c23e0b04a0"
+        },
+        "strict_results": {
+          "bytes": 242270,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-clamp/qualification/results.json",
+          "sha256": "02fc1c757cd0e917695521549340c68117115619f21adff62fc959879cb5acaa"
+        },
+        "summary.tsv": {
+          "bytes": 464,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-clamp/qualification/seed-20/summary.tsv",
+          "sha256": "d2b5d5ce358880c88d9b7ec6eb87af21618f320ffe589bb1e996640e278d8fac"
+        },
+        "worst_hold_path_report": {
+          "bytes": 271706,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-clamp/qualification/seed-20/fast_0_hold.rpt",
+          "sha256": "3d7ce9b4e8134d571ccad04ae28bd2a9c5274bf8433521378df579c546bfff5c"
+        }
+      },
+      "reason": "Real used scanout hold violation; cycle-identical clamp retiming is not a valid replacement for the clean control.",
+      "resources": {
+        "ALMs": {
+          "available": 18480,
+          "used": 15460
+        },
+        "DSPs": {
+          "available": 66,
+          "used": 28
+        },
+        "LABs": {
+          "available": 1848,
+          "used": 1808
+        },
+        "M10Ks": {
+          "available": 308,
+          "used": 296
+        }
+      },
+      "seed": 20,
+      "strict_qualified_reports": true,
+      "timing_closed_at_configured_100_mhz": false,
+      "variant": "os25",
+      "worst_hold_path": {
+        "corner": "fast_0",
+        "from": "core_top:ic|x_count[9]~DUPLICATE",
+        "slack_ns": -0.105,
+        "to": "core_top:ic|video_CRT_scanout_indexed_BRAM:scanout|lcd_x_count_prev[9]"
+      },
+      "worst_slack_ns": {
+        "hold": -0.105,
+        "pulse_width": 0.5,
+        "recovery": 2.543,
+        "removal": 0.614,
+        "setup": -0.508
+      },
+      "worst_used_cross_clock_setup_ns": 0.643,
+      "worst_used_input_setup_ns": 5.186
+    },
+    {
+      "actual_job_source_differences": [
+        "src/fpga/targets/pocket/ap_core.qsf"
+      ],
+      "actual_main_clock_period_ns": 10.0,
+      "artifact_sha256": {
+        "rbf": "fea4df0354cf5a8bcb6433e1ade5553bce9851c42718c88a5285224eedba50f2",
+        "sof": "7a885a63a4b5c4ed700bc39d4af0f24555c4b69ab35b009b46db1d7bbb2a407f"
+      },
+      "candidate": "os25-control",
+      "configured_mhz": 100,
+      "cpu_sha256": "d73f954af9d56146e0172c62677e0cc46a3ce7e5661098c237ce0203382fe0ad",
+      "cross_clock_setup_clean": true,
+      "decision": "retain",
+      "eligible_above_90_mhz_estimate": true,
+      "feature_macros": [
+        "INCLUDE_ANALOGIZER",
+        "INCLUDE_HW_MIXER",
+        "INCLUDE_TRANSLUC",
+        "INCLUDE_PALETTE",
+        "INCLUDE_COLUMN_LIST",
+        "INCLUDE_COMPACT_SPAN",
+        "INCLUDE_PARAM_SPAN_Q29",
+        "INCLUDE_4PLAYER",
+        "INCLUDE_BANK_ROW_TRACK",
+        "INCLUDE_CPU_RING",
+        "INCLUDE_GPU_WRITE_BURSTS",
+        "EXCLUDE_GPU_COMMAND_DMA",
+        "INCLUDE_SPAN_DEDICATED_MULT"
+      ],
+      "fit_complete": true,
+      "fit_valid": true,
+      "frozen_inputs_unchanged": true,
+      "input_setup_clean": true,
+      "main_restricted_fmax_mhz": {
+        "fast_0": 215.42,
+        "fast_85": 192.27,
+        "slow_0": 96.87,
+        "slow_85": 97.2
+      },
+      "meets_variant_fmax_target": true,
+      "minimum_main_restricted_fmax_mhz": 96.87,
+      "nonmain_setup_clean": true,
+      "nonsetup_clean": true,
+      "proofs": {
+        "candidate": {
+          "bytes": 413,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-control/candidate.json",
+          "sha256": "4e5eb3da65782a911724eba80d919176e91ae49141926f46bc80b99446a02543"
+        },
+        "clocks.tsv": {
+          "bytes": 14290,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-control/qualification/seed-20/clocks.tsv",
+          "sha256": "7a99273b7bf6f494e4d7e7828642abedbfef68ad221cbec70684ecf40389161b"
+        },
+        "compiled_qsf": {
+          "bytes": 58858,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-control/jobs/pocket-os25-s20/src/fpga/targets/pocket/ap_core.qsf",
+          "sha256": "816e7a8a206bd39e565299c104549705beb3d202fb719a9bd7e4adcdcb53c0c5"
+        },
+        "conditions.tsv": {
+          "bytes": 48,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-control/qualification/seed-20/conditions.tsv",
+          "sha256": "0fb5395d511abce32dbf9e5046a9d8ad21be2a4ca41992a56836516c339f7338"
+        },
+        "cross_setup.tsv": {
+          "bytes": 76245,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-control/qualification/seed-20/cross_setup.tsv",
+          "sha256": "2dd44100b5166d7b234fe4abf540a882a07745601b750003d19d82cf577fa8f8"
+        },
+        "ddio_checks.tsv": {
+          "bytes": 336,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-control/qualification/seed-20/ddio_checks.tsv",
+          "sha256": "c9f738bf4be0a244bc41dbcf04b8cb2f4dd5800ef8922fb7af6e005dc4607e80"
+        },
+        "ddio_proof.tsv": {
+          "bytes": 8756,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-control/qualification/seed-20/ddio_proof.tsv",
+          "sha256": "7a0f3956ea3cba0d1fba619603490a9913c30a62b717a945e93d290713785624"
+        },
+        "fast_0_fmax.rpt": {
+          "bytes": 2035,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-control/qualification/seed-20/fast_0_fmax.rpt",
+          "sha256": "67e64fbd039f059aacfce10ce0998e271f253a4c44208a069b022c15d46eb821"
+        },
+        "fast_85_fmax.rpt": {
+          "bytes": 2035,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-control/qualification/seed-20/fast_85_fmax.rpt",
+          "sha256": "de040224ed1116e53b49f20e8dedd2274328f6708e7ac416b6ec7764f9803a69"
+        },
+        "fit_result": {
+          "bytes": 3075,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-control/results/pocket-os25-s20/result.json",
+          "sha256": "7df7ba07213559b3015085520a610ed063faf7b5ffb2f8046f3f79e86e08b5e5"
+        },
+        "frozen_sources": {
+          "bytes": 14728,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-control/frozen-sources.json",
+          "sha256": "c237accff65e48d600c98ba0260f7c5934d44b59ede47f5891e73b4ae159fa68"
+        },
+        "inventory": {
+          "bytes": 528,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-control/inventory.json",
+          "sha256": "d9382f76dec9042bd51af92aa2a175ef822d32b05a6e61dd954eb0146b0936af"
+        },
+        "report_sweep_timing.tcl": {
+          "bytes": 10589,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-control/qualification/report_sweep_timing.tcl",
+          "sha256": "2c66004df7b54c2e62a0c47ae976cf7c61da684ec034a169cb077ca00cdca34e"
+        },
+        "results.py": {
+          "bytes": 12547,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-control/qualification/results.py",
+          "sha256": "192828cad6b134c0f6cacfd484611e1ec9db5ab27cf379974bd737296d4f110b"
+        },
+        "slow_0_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-control/qualification/seed-20/slow_0_fmax.rpt",
+          "sha256": "f03e16493ecedab6af5c8fbf60f48f7aa41a3b69dc0dfbfb6ff05bc7b5edd3f7"
+        },
+        "slow_85_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-control/qualification/seed-20/slow_85_fmax.rpt",
+          "sha256": "c844c59ff9dea8fb46b43121d2e0c9b206a1355bf760f12dd6bb00e7e7b17dfd"
+        },
+        "strict_results": {
+          "bytes": 242262,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-control/qualification/results.json",
+          "sha256": "61355d72a85b40f9b3a607b818f9643f5c08076369ba37971e5f73155b9a3a71"
+        },
+        "summary.tsv": {
+          "bytes": 462,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-control/qualification/seed-20/summary.tsv",
+          "sha256": "ee81ce35d7c239fdda09b8b14037166676b6195668554d778c37b7e222db95db"
+        },
+        "worst_hold_path_report": {
+          "bytes": 315610,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-control/qualification/seed-20/fast_0_hold.rpt",
+          "sha256": "ccd7320d76cd778d9cd09812e8f73b61059cadb2d34ab3aeb5839683ebfe2404"
+        }
+      },
+      "reason": "Best current os25 timing; all tested alternatives lose margin or fail used hold checks.",
+      "resources": {
+        "ALMs": {
+          "available": 18480,
+          "used": 15490
+        },
+        "DSPs": {
+          "available": 66,
+          "used": 28
+        },
+        "LABs": {
+          "available": 1848,
+          "used": 1802
+        },
+        "M10Ks": {
+          "available": 308,
+          "used": 296
+        }
+      },
+      "seed": 20,
+      "strict_qualified_reports": true,
+      "timing_closed_at_configured_100_mhz": false,
+      "variant": "os25",
+      "worst_hold_path": {
+        "corner": "fast_0",
+        "from": "core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|FetchL1Plugin_logic_bus_resizer_ret_rsp_translated_widthAdapter_buffer[13]",
+        "slack_ns": 0.078,
+        "to": "core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|altsyncram:FetchL1Plugin_logic_banks_0_mem_rtl_0|altsyncram_g9q1:auto_generated|ram_block1a13~PORT_A_DATA_IN_5"
+      },
+      "worst_slack_ns": {
+        "hold": 0.078,
+        "pulse_width": 0.5,
+        "recovery": 2.608,
+        "removal": 0.478,
+        "setup": -0.323
+      },
+      "worst_used_cross_clock_setup_ns": 0.647,
+      "worst_used_input_setup_ns": 5.186
+    },
+    {
+      "actual_job_source_differences": [
+        "src/fpga/targets/pocket/ap_core.qsf"
+      ],
+      "actual_main_clock_period_ns": 10.0,
+      "artifact_sha256": {
+        "rbf": "bf74db02b998d04c3f607eefb50e5356a498d8af0af39bc20dac597c101ed03f",
+        "sof": "c1b4a3295a7c03e7f8ad2208fdb683ea3330fdf8ad31aed7ce900f19511af11e"
+      },
+      "candidate": "os25-fetch",
+      "configured_mhz": 100,
+      "cpu_sha256": "1968e88e47a471c2b28e741802d55c6eeae459b3568e3852e0d0543b2677d3d1",
+      "cross_clock_setup_clean": true,
+      "decision": "reject",
+      "eligible_above_90_mhz_estimate": true,
+      "feature_macros": [
+        "INCLUDE_ANALOGIZER",
+        "INCLUDE_HW_MIXER",
+        "INCLUDE_TRANSLUC",
+        "INCLUDE_PALETTE",
+        "INCLUDE_COLUMN_LIST",
+        "INCLUDE_COMPACT_SPAN",
+        "INCLUDE_PARAM_SPAN_Q29",
+        "INCLUDE_4PLAYER",
+        "INCLUDE_BANK_ROW_TRACK",
+        "INCLUDE_CPU_RING",
+        "INCLUDE_GPU_WRITE_BURSTS",
+        "EXCLUDE_GPU_COMMAND_DMA",
+        "INCLUDE_SPAN_DEDICATED_MULT"
+      ],
+      "fit_complete": true,
+      "fit_valid": true,
+      "frozen_inputs_unchanged": true,
+      "input_setup_clean": true,
+      "main_restricted_fmax_mhz": {
+        "fast_0": 217.16,
+        "fast_85": 190.08,
+        "slow_0": 96.4,
+        "slow_85": 96.92
+      },
+      "meets_variant_fmax_target": true,
+      "minimum_main_restricted_fmax_mhz": 96.4,
+      "nonmain_setup_clean": true,
+      "nonsetup_clean": true,
+      "proofs": {
+        "candidate": {
+          "bytes": 414,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch/candidate.json",
+          "sha256": "85c24d0b267f33b361f81aa63a2efc04e02f1382fd0560d281bddf0dd51a032e"
+        },
+        "clocks.tsv": {
+          "bytes": 14288,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch/qualification/seed-20/clocks.tsv",
+          "sha256": "b3dd32724ccf4e7fdf0ca92be413b79dab50506391ab1d328fa95c4a5b32c4b5"
+        },
+        "compiled_qsf": {
+          "bytes": 58858,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch/jobs/pocket-os25-s20/src/fpga/targets/pocket/ap_core.qsf",
+          "sha256": "816e7a8a206bd39e565299c104549705beb3d202fb719a9bd7e4adcdcb53c0c5"
+        },
+        "conditions.tsv": {
+          "bytes": 48,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch/qualification/seed-20/conditions.tsv",
+          "sha256": "0fb5395d511abce32dbf9e5046a9d8ad21be2a4ca41992a56836516c339f7338"
+        },
+        "cross_setup.tsv": {
+          "bytes": 76245,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch/qualification/seed-20/cross_setup.tsv",
+          "sha256": "ac3ef01a41e27014c3868e02ec70065fa01496b6139791fc08047ac27027cf20"
+        },
+        "ddio_checks.tsv": {
+          "bytes": 336,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch/qualification/seed-20/ddio_checks.tsv",
+          "sha256": "4776219f3f8159e596c90691d1045ec9cd141297c5ab9d51b824aee24be16cd7"
+        },
+        "ddio_proof.tsv": {
+          "bytes": 8756,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch/qualification/seed-20/ddio_proof.tsv",
+          "sha256": "d9d25123cd29a306550ac6f669822b2c1307d70e2964e4cb87282db76d911c06"
+        },
+        "fast_0_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch/qualification/seed-20/fast_0_fmax.rpt",
+          "sha256": "b7c28a358a8751793bd3d4e4b45522ff8924df5c04540ff4df549d02734503f6"
+        },
+        "fast_85_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch/qualification/seed-20/fast_85_fmax.rpt",
+          "sha256": "6cd30a36c027993daadcf68e36d14478c5828931f80d8a8220a8853915ad021d"
+        },
+        "fit_result": {
+          "bytes": 3073,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch/results/pocket-os25-s20/result.json",
+          "sha256": "7c39b9f54da9251599d91d000f13b17c210df99d4e379796a7fa0f0a34a1cf6c"
+        },
+        "frozen_sources": {
+          "bytes": 14728,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch/frozen-sources.json",
+          "sha256": "ceef61c040b915fd27bbd417333297cac4e29dcaef4f17ff7237504c8ca00061"
+        },
+        "inventory": {
+          "bytes": 528,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch/inventory.json",
+          "sha256": "c6f459adaa1286603d9e7d7ae5e45da6e6e6d4b386d5d041b9658fd984271733"
+        },
+        "report_sweep_timing.tcl": {
+          "bytes": 10589,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch/qualification/report_sweep_timing.tcl",
+          "sha256": "2c66004df7b54c2e62a0c47ae976cf7c61da684ec034a169cb077ca00cdca34e"
+        },
+        "results.py": {
+          "bytes": 12547,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch/qualification/results.py",
+          "sha256": "192828cad6b134c0f6cacfd484611e1ec9db5ab27cf379974bd737296d4f110b"
+        },
+        "slow_0_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch/qualification/seed-20/slow_0_fmax.rpt",
+          "sha256": "386501081772e3b9388d7ebf7f94cacae3d339e01772f1f2fe820b44ed96c6ab"
+        },
+        "slow_85_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch/qualification/seed-20/slow_85_fmax.rpt",
+          "sha256": "361f4162aa8912b974215f824390487151eab5b11e0528ab488571dec70300d1"
+        },
+        "strict_results": {
+          "bytes": 242257,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch/qualification/results.json",
+          "sha256": "6fe16c0055509cc3d3b33277bc1254774d6fa71f1c3a1fab47e9fdc3ca5ed77f"
+        },
+        "summary.tsv": {
+          "bytes": 462,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch/qualification/seed-20/summary.tsv",
+          "sha256": "3147b0ff386d3f54c837f994d844e2ab1eea90fc5ba51cf4b29d7cfb125dd975"
+        },
+        "worst_hold_path_report": {
+          "bytes": 283158,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch/qualification/seed-20/fast_0_hold.rpt",
+          "sha256": "262a2d96ce13829a4bcef8c2c6ed7319a635e2ccad8616b1bb8535e736c755d0"
+        }
+      },
+      "reason": "Cycle-identical but worse timing and higher area than the fresh os25 control.",
+      "resources": {
+        "ALMs": {
+          "available": 18480,
+          "used": 15577
+        },
+        "DSPs": {
+          "available": 66,
+          "used": 28
+        },
+        "LABs": {
+          "available": 1848,
+          "used": 1815
+        },
+        "M10Ks": {
+          "available": 308,
+          "used": 296
+        }
+      },
+      "seed": 20,
+      "strict_qualified_reports": true,
+      "timing_closed_at_configured_100_mhz": false,
+      "variant": "os25",
+      "worst_hold_path": {
+        "corner": "fast_0",
+        "from": "core_top:ic|datatable_data[8]",
+        "slack_ns": 0.006,
+        "to": "core_top:ic|core_bridge_cmd:icb|mf_datatable:idt|altsyncram:altsyncram_component|altsyncram_j3r2:auto_generated|ram_block1a2~porta_datain_reg2"
+      },
+      "worst_slack_ns": {
+        "hold": 0.006,
+        "pulse_width": 0.5,
+        "recovery": 1.979,
+        "removal": 0.265,
+        "setup": -0.373
+      },
+      "worst_used_cross_clock_setup_ns": 0.647,
+      "worst_used_input_setup_ns": 5.186
+    },
+    {
+      "actual_job_source_differences": [
+        "src/fpga/targets/pocket/ap_core.qsf"
+      ],
+      "actual_main_clock_period_ns": 10.0,
+      "artifact_sha256": {
+        "rbf": "4b7b71dfe91cc99fa787c4f82d528360283ab3ff31bb17cab52e374a124f79cc",
+        "sof": "e8410113538dfbc2fcf692e2c8579f4aa9eba2a3124fe09f496c9120914053fb"
+      },
+      "candidate": "os25-fetch-ram",
+      "configured_mhz": 100,
+      "cpu_sha256": "1968e88e47a471c2b28e741802d55c6eeae459b3568e3852e0d0543b2677d3d1",
+      "cross_clock_setup_clean": true,
+      "decision": "reject",
+      "eligible_above_90_mhz_estimate": true,
+      "feature_macros": [
+        "INCLUDE_ANALOGIZER",
+        "INCLUDE_HW_MIXER",
+        "INCLUDE_TRANSLUC",
+        "INCLUDE_PALETTE",
+        "INCLUDE_COLUMN_LIST",
+        "INCLUDE_COMPACT_SPAN",
+        "INCLUDE_PARAM_SPAN_Q29",
+        "INCLUDE_4PLAYER",
+        "INCLUDE_BANK_ROW_TRACK",
+        "INCLUDE_CPU_RING",
+        "INCLUDE_GPU_WRITE_BURSTS",
+        "EXCLUDE_GPU_COMMAND_DMA",
+        "INCLUDE_SPAN_DEDICATED_MULT",
+        "INCLUDE_AUDIO_POS_M10K"
+      ],
+      "fit_complete": true,
+      "fit_valid": true,
+      "frozen_inputs_unchanged": true,
+      "input_setup_clean": true,
+      "main_restricted_fmax_mhz": {
+        "fast_0": 211.19,
+        "fast_85": 187.55,
+        "slow_0": 97.27,
+        "slow_85": 93.44
+      },
+      "meets_variant_fmax_target": false,
+      "minimum_main_restricted_fmax_mhz": 93.44,
+      "nonmain_setup_clean": true,
+      "nonsetup_clean": true,
+      "proofs": {
+        "candidate": {
+          "bytes": 412,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch-ram/candidate.json",
+          "sha256": "7578cd2d4ed3d80fcd2e386124f3b42739705b387500c5a4dd90ba2f98cf14fd"
+        },
+        "clocks.tsv": {
+          "bytes": 14290,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch-ram/qualification/seed-20/clocks.tsv",
+          "sha256": "bd8cf34951e6667bbd8f3d6b31fc825451f08eecf904656ae74d2a7f04144147"
+        },
+        "compiled_qsf": {
+          "bytes": 58980,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch-ram/jobs/pocket-os25-s20/src/fpga/targets/pocket/ap_core.qsf",
+          "sha256": "9c7854822748ebf9b65c706d8d6ae65cc503388d7f73b8465a50f0bdd909e568"
+        },
+        "conditions.tsv": {
+          "bytes": 48,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch-ram/qualification/seed-20/conditions.tsv",
+          "sha256": "0fb5395d511abce32dbf9e5046a9d8ad21be2a4ca41992a56836516c339f7338"
+        },
+        "cross_setup.tsv": {
+          "bytes": 76245,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch-ram/qualification/seed-20/cross_setup.tsv",
+          "sha256": "3b501c22962d5380ac10c51199b83e64d735cb5ab3ab244a6b3a58dcdb7e542e"
+        },
+        "ddio_checks.tsv": {
+          "bytes": 336,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch-ram/qualification/seed-20/ddio_checks.tsv",
+          "sha256": "fc68e6bf96a16751ab4a4e77f6e7e2c0b1b2b8f1ff0f94494ac41df6e185a152"
+        },
+        "ddio_proof.tsv": {
+          "bytes": 8756,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch-ram/qualification/seed-20/ddio_proof.tsv",
+          "sha256": "4f09ce5c98d5f59f98ed4513a0077c81f46e5bc8f6a1f2fa1627e4f55d73d4ac"
+        },
+        "fast_0_fmax.rpt": {
+          "bytes": 2539,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch-ram/qualification/seed-20/fast_0_fmax.rpt",
+          "sha256": "1b80ed12668ee2127e445cab1839219c2415e8e8299520ef6bbf75698d834f8b"
+        },
+        "fast_85_fmax.rpt": {
+          "bytes": 2527,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch-ram/qualification/seed-20/fast_85_fmax.rpt",
+          "sha256": "9351b2877ed9a1d70eb226ef42cdb8b59480e16e68e8e85c238c7bd80fa14f63"
+        },
+        "fit_result": {
+          "bytes": 3076,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch-ram/results/pocket-os25-s20/result.json",
+          "sha256": "c9e7f90a149c0387ebb9a2c4509b78ca34f1ec336bf983ba10b525f70861b8cc"
+        },
+        "frozen_sources": {
+          "bytes": 14843,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch-ram/frozen-sources.json",
+          "sha256": "9a9aff3b54b272308557bba4083a88dc491acabb1e2e28a5c91d1f737c95a69e"
+        },
+        "inventory": {
+          "bytes": 551,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch-ram/inventory.json",
+          "sha256": "0f53c1aba705fd462c850e95c6e306a4bf11a6d6913ce1a23860e0831dd50e01"
+        },
+        "report_sweep_timing.tcl": {
+          "bytes": 10589,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch-ram/qualification/report_sweep_timing.tcl",
+          "sha256": "2c66004df7b54c2e62a0c47ae976cf7c61da684ec034a169cb077ca00cdca34e"
+        },
+        "results.py": {
+          "bytes": 12547,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch-ram/qualification/results.py",
+          "sha256": "192828cad6b134c0f6cacfd484611e1ec9db5ab27cf379974bd737296d4f110b"
+        },
+        "slow_0_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch-ram/qualification/seed-20/slow_0_fmax.rpt",
+          "sha256": "a639bb18530d1b0242097e8a9eb0011250bd8616a1912d7318a411c702775c0b"
+        },
+        "slow_85_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch-ram/qualification/seed-20/slow_85_fmax.rpt",
+          "sha256": "cb2ab0a806664b43d4b35591f3ad2e7a80b7b81f0bc33e996f57bfcee17acda0"
+        },
+        "strict_results": {
+          "bytes": 242265,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch-ram/qualification/results.json",
+          "sha256": "e28f46db6cb60f26bc38b951ad77d93b6ef2fd8f1d342487855f0a93226a7f35"
+        },
+        "summary.tsv": {
+          "bytes": 462,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch-ram/qualification/seed-20/summary.tsv",
+          "sha256": "33c1d2d46d6d83c044934a8ea65b10a8307ccc4952b863b144e46ee3f0a2b301"
+        },
+        "worst_hold_path_report": {
+          "bytes": 292745,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch-ram/qualification/seed-20/fast_0_hold.rpt",
+          "sha256": "05ca8015174e03e1442fe5ced6faa605a988f8d6ab228b0a6aabe388512283f4"
+        }
+      },
+      "reason": "Below the os25 94 MHz estimate target and substantially below fresh control timing.",
+      "resources": {
+        "ALMs": {
+          "available": 18480,
+          "used": 15372
+        },
+        "DSPs": {
+          "available": 66,
+          "used": 28
+        },
+        "LABs": {
+          "available": 1848,
+          "used": 1813
+        },
+        "M10Ks": {
+          "available": 308,
+          "used": 298
+        }
+      },
+      "seed": 20,
+      "strict_qualified_reports": true,
+      "timing_closed_at_configured_100_mhz": false,
+      "variant": "os25",
+      "worst_hold_path": {
+        "corner": "fast_0",
+        "from": "core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|execute_ctrl4_up_LsuL1_MIXED_ADDRESS_lane0[1]",
+        "slack_ns": 0.006,
+        "to": "core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|altsyncram:LsuPlugin_logic_storeBuffer_ops_mem_rtl_0|altsyncram_g0q1:auto_generated|ram_block1a0~porta_datain_reg1"
+      },
+      "worst_slack_ns": {
+        "hold": 0.006,
+        "pulse_width": 0.5,
+        "recovery": 2.164,
+        "removal": 0.264,
+        "setup": -0.702
+      },
+      "worst_used_cross_clock_setup_ns": 0.647,
+      "worst_used_input_setup_ns": 5.186
+    },
+    {
+      "actual_job_source_differences": [
+        "src/fpga/targets/pocket/ap_core.qsf"
+      ],
+      "actual_main_clock_period_ns": 10.0,
+      "artifact_sha256": {
+        "rbf": "bd501bc3e3ef36f11473d887d422e263460171827f93cc64c584f72e5fcd72a2",
+        "sof": "768269cb9a4c97b567a0a5c63de2516be9a0defc90d9d0f04a694f96b42d14bd"
+      },
+      "candidate": "os25-fpu",
+      "configured_mhz": 100,
+      "cpu_sha256": "654e8939521cdd6dc159ae7c5d4a8696c5a1113b20d2cab3c4b2d48a58fe4f40",
+      "cross_clock_setup_clean": true,
+      "decision": "reject",
+      "eligible_above_90_mhz_estimate": true,
+      "feature_macros": [
+        "INCLUDE_ANALOGIZER",
+        "INCLUDE_HW_MIXER",
+        "INCLUDE_TRANSLUC",
+        "INCLUDE_PALETTE",
+        "INCLUDE_COLUMN_LIST",
+        "INCLUDE_COMPACT_SPAN",
+        "INCLUDE_PARAM_SPAN_Q29",
+        "INCLUDE_4PLAYER",
+        "INCLUDE_BANK_ROW_TRACK",
+        "INCLUDE_CPU_RING",
+        "INCLUDE_GPU_WRITE_BURSTS",
+        "EXCLUDE_GPU_COMMAND_DMA",
+        "INCLUDE_SPAN_DEDICATED_MULT"
+      ],
+      "fit_complete": true,
+      "fit_valid": true,
+      "frozen_inputs_unchanged": true,
+      "input_setup_clean": true,
+      "main_restricted_fmax_mhz": {
+        "fast_0": 221.98,
+        "fast_85": 198.33,
+        "slow_0": 96.62,
+        "slow_85": 95.55
+      },
+      "meets_variant_fmax_target": true,
+      "minimum_main_restricted_fmax_mhz": 95.55,
+      "nonmain_setup_clean": true,
+      "nonsetup_clean": true,
+      "proofs": {
+        "candidate": {
+          "bytes": 414,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fpu/candidate.json",
+          "sha256": "a760315806a23769a5780fec418f2bed930f830e570e179961037f5c995f4bdf"
+        },
+        "clocks.tsv": {
+          "bytes": 14288,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fpu/qualification/seed-20/clocks.tsv",
+          "sha256": "6966bbebf609ef488f9a0f3f09ce2310110699b49d62fa19cab4c0b1831ff5db"
+        },
+        "compiled_qsf": {
+          "bytes": 58858,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fpu/jobs/pocket-os25-s20/src/fpga/targets/pocket/ap_core.qsf",
+          "sha256": "816e7a8a206bd39e565299c104549705beb3d202fb719a9bd7e4adcdcb53c0c5"
+        },
+        "conditions.tsv": {
+          "bytes": 48,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fpu/qualification/seed-20/conditions.tsv",
+          "sha256": "0fb5395d511abce32dbf9e5046a9d8ad21be2a4ca41992a56836516c339f7338"
+        },
+        "cross_setup.tsv": {
+          "bytes": 76245,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fpu/qualification/seed-20/cross_setup.tsv",
+          "sha256": "deb8537339fe458cf06dfa998ce5836696f6988782d33cec63020f9263d6bb3c"
+        },
+        "ddio_checks.tsv": {
+          "bytes": 336,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fpu/qualification/seed-20/ddio_checks.tsv",
+          "sha256": "bb25db065a9e41c75ef5cc31136d89cb1d80307f685291c256d1802697b09165"
+        },
+        "ddio_proof.tsv": {
+          "bytes": 8756,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fpu/qualification/seed-20/ddio_proof.tsv",
+          "sha256": "b8a0b2bdca5f3b026dc71cad5841ba535ce982bee9dde4a5bcdbe7cfa030482a"
+        },
+        "fast_0_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fpu/qualification/seed-20/fast_0_fmax.rpt",
+          "sha256": "f35cdcc7e2b0eb26296e30bea40bc9c85837ada0413cf568c178d4252d4bc0fe"
+        },
+        "fast_85_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fpu/qualification/seed-20/fast_85_fmax.rpt",
+          "sha256": "5af22a2334a9fa803b709addf42303fe34c955c70f77f5e8f445c5b8210294f5"
+        },
+        "fit_result": {
+          "bytes": 3067,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fpu/results/pocket-os25-s20/result.json",
+          "sha256": "c5d916dbd848be12711126f172603e6c5bba51dd0589b292bc5c9b310628df60"
+        },
+        "frozen_sources": {
+          "bytes": 14728,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fpu/frozen-sources.json",
+          "sha256": "45b20e6080ec391b4c76eda92ad201528b6ed911bf50008bb54c334b436f2e74"
+        },
+        "inventory": {
+          "bytes": 528,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fpu/inventory.json",
+          "sha256": "39346cf9362550e9decf8f96f7a2134c5737670257443735c25f316d58604771"
+        },
+        "report_sweep_timing.tcl": {
+          "bytes": 10589,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fpu/qualification/report_sweep_timing.tcl",
+          "sha256": "2c66004df7b54c2e62a0c47ae976cf7c61da684ec034a169cb077ca00cdca34e"
+        },
+        "results.py": {
+          "bytes": 12547,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fpu/qualification/results.py",
+          "sha256": "192828cad6b134c0f6cacfd484611e1ec9db5ab27cf379974bd737296d4f110b"
+        },
+        "slow_0_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fpu/qualification/seed-20/slow_0_fmax.rpt",
+          "sha256": "2c84ef7357cb247f084f1ca26e4cc82976f715245b171bebb042fbedc0d77af8"
+        },
+        "slow_85_fmax.rpt": {
+          "bytes": 2023,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fpu/qualification/seed-20/slow_85_fmax.rpt",
+          "sha256": "b4b065cecc43383cc7dc84c3d1e78a1005dbf2ecb9c5568cc0a60e054abb390e"
+        },
+        "strict_results": {
+          "bytes": 242253,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fpu/qualification/results.json",
+          "sha256": "1bd60c7348f8c15649c2b23a9565651ec0d9f9ce3ba6dbc3691d80d8af6b3663"
+        },
+        "summary.tsv": {
+          "bytes": 462,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fpu/qualification/seed-20/summary.tsv",
+          "sha256": "1310c31d96ba741c7c3d70b71bf2c261fb7537e238e6cbab13c7516111c5d800"
+        },
+        "worst_hold_path_report": {
+          "bytes": 255166,
+          "path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fpu/qualification/seed-20/fast_0_hold.rpt",
+          "sha256": "db6b1addc0e70652464719827db29977cfd8e40f946f854da769cf58fbb5752a"
+        }
+      },
+      "reason": "Cycle-identical but worse timing and higher area than the fresh os25 control.",
+      "resources": {
+        "ALMs": {
+          "available": 18480,
+          "used": 15572
+        },
+        "DSPs": {
+          "available": 66,
+          "used": 28
+        },
+        "LABs": {
+          "available": 1848,
+          "used": 1819
+        },
+        "M10Ks": {
+          "available": 308,
+          "used": 296
+        }
+      },
+      "seed": 20,
+      "strict_qualified_reports": true,
+      "timing_closed_at_configured_100_mhz": false,
+      "variant": "os25",
+      "worst_hold_path": {
+        "corner": "fast_0",
+        "from": "core_top:ic|video_CRT_scanout_indexed_BRAM:scanout|analog_pixel_color[4]",
+        "slack_ns": 0.086,
+        "to": "core_top:ic|openFPGA_Pocket_Analogizer:analogizer|vga_out:g_ypbpr.ybpr_video|pr_1b[6]"
+      },
+      "worst_slack_ns": {
+        "hold": 0.086,
+        "pulse_width": 0.5,
+        "recovery": 2.152,
+        "removal": 0.261,
+        "setup": -0.466
+      },
+      "worst_used_cross_clock_setup_ns": 0.647,
+      "worst_used_input_setup_ns": 5.186
+    }
+  ],
+  "sampled_seeds": {
+    "os20": [
+      34,
+      35
+    ],
+    "os25": [
+      20
+    ]
+  },
+  "schema": 1,
+  "scope": "Pocket os20/os25 remaining optimization trials",
+  "selection_policy": "Require clean hold/recovery/removal/pulse-width/nonmain/used-crossing setup; >=94 MHz for both os20 and os25 is the final same-clock-estimate gate, not 100 MHz closure. Prefer current-control timing/area when cycle throughput is unchanged."
+}

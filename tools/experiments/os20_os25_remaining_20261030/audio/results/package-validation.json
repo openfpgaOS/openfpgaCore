@@ -1,0 +1,477 @@
+{
+  "audio_ram_promoted": false,
+  "bounded_behavioral_comparison_passed": true,
+  "contention": {
+    "all_cases_zero_underruns": false,
+    "comparison_passed": true,
+    "fresh_cases": 18,
+    "limits": [
+      "All 18 simulations are rebuilt/run here; no reused historical outputs.",
+      "CPU-only uses 320x240x60 scanout and 100000 16-word read/write jobs.",
+      "Mixed stress uses 320x200x60 scanout, 100000 CPU 16-word and GPU 8-word jobs.",
+      "48 kHz consumer begins after 256-sample prefill; Pocket pin/CDC timing is outside this model.",
+      "32-voice saturated overload is a known baseline failure, not accepted zero-underrun service.",
+      "Completion deltas are reported, not asserted identical: arbitration phases can shift.",
+      "Mixer source change only. Real M10K inference, timing and gameplay require separate qualification."
+    ],
+    "pairs": [
+      {
+        "baseline_underruns": 0,
+        "candidate_underruns": 0,
+        "completion": {
+          "cpu_cycles": {
+            "baseline": 0,
+            "candidate": 0,
+            "delta": 0,
+            "percent_change": 0
+          },
+          "cycles": {
+            "baseline": 15597237,
+            "candidate": 15592439,
+            "delta": -4798,
+            "percent_change": -0.030761858654837392
+          },
+          "gpu_cycles": {
+            "baseline": 0,
+            "candidate": 0,
+            "delta": 0,
+            "percent_change": 0
+          }
+        },
+        "mode": "quiet",
+        "normal_service_pass": true,
+        "pcm_exact": true,
+        "protocol_clean": true,
+        "underruns_not_increased": true,
+        "voices": 9
+      },
+      {
+        "baseline_underruns": 0,
+        "candidate_underruns": 0,
+        "completion": {
+          "cpu_cycles": {
+            "baseline": 13189456,
+            "candidate": 13189341,
+            "delta": -115,
+            "percent_change": -0.0008719085912262038
+          },
+          "cycles": {
+            "baseline": 15668974,
+            "candidate": 15668932,
+            "delta": -42,
+            "percent_change": -0.00026804562953515655
+          },
+          "gpu_cycles": {
+            "baseline": 0,
+            "candidate": 0,
+            "delta": 0,
+            "percent_change": 0
+          }
+        },
+        "mode": "cpu",
+        "normal_service_pass": true,
+        "pcm_exact": true,
+        "protocol_clean": true,
+        "underruns_not_increased": true,
+        "voices": 9
+      },
+      {
+        "baseline_underruns": 0,
+        "candidate_underruns": 0,
+        "completion": {
+          "cpu_cycles": {
+            "baseline": 20923757,
+            "candidate": 20923759,
+            "delta": 2,
+            "percent_change": 9.558512842602788e-06
+          },
+          "cycles": {
+            "baseline": 20924758,
+            "candidate": 20924760,
+            "delta": 2,
+            "percent_change": 9.558055581813658e-06
+          },
+          "gpu_cycles": {
+            "baseline": 17399188,
+            "candidate": 17399213,
+            "delta": 25,
+            "percent_change": 0.00014368486621329685
+          }
+        },
+        "mode": "stress",
+        "normal_service_pass": true,
+        "pcm_exact": true,
+        "protocol_clean": true,
+        "underruns_not_increased": true,
+        "voices": 9
+      },
+      {
+        "baseline_underruns": 0,
+        "candidate_underruns": 0,
+        "completion": {
+          "cpu_cycles": {
+            "baseline": 0,
+            "candidate": 0,
+            "delta": 0,
+            "percent_change": 0
+          },
+          "cycles": {
+            "baseline": 15736377,
+            "candidate": 15728086,
+            "delta": -8291,
+            "percent_change": -0.052686841450227076
+          },
+          "gpu_cycles": {
+            "baseline": 0,
+            "candidate": 0,
+            "delta": 0,
+            "percent_change": 0
+          }
+        },
+        "mode": "quiet",
+        "normal_service_pass": true,
+        "pcm_exact": true,
+        "protocol_clean": true,
+        "underruns_not_increased": true,
+        "voices": 20
+      },
+      {
+        "baseline_underruns": 0,
+        "candidate_underruns": 0,
+        "completion": {
+          "cpu_cycles": {
+            "baseline": 15296183,
+            "candidate": 15296986,
+            "delta": 803,
+            "percent_change": 0.005249675687065198
+          },
+          "cycles": {
+            "baseline": 15882428,
+            "candidate": 15884087,
+            "delta": 1659,
+            "percent_change": 0.01044550619086704
+          },
+          "gpu_cycles": {
+            "baseline": 0,
+            "candidate": 0,
+            "delta": 0,
+            "percent_change": 0
+          }
+        },
+        "mode": "cpu",
+        "normal_service_pass": true,
+        "pcm_exact": true,
+        "protocol_clean": true,
+        "underruns_not_increased": true,
+        "voices": 20
+      },
+      {
+        "baseline_underruns": 0,
+        "candidate_underruns": 0,
+        "completion": {
+          "cpu_cycles": {
+            "baseline": 24181568,
+            "candidate": 24181408,
+            "delta": -160,
+            "percent_change": -0.0006616609807933051
+          },
+          "cycles": {
+            "baseline": 24182569,
+            "candidate": 24182409,
+            "delta": -160,
+            "percent_change": -0.0006616335923615063
+          },
+          "gpu_cycles": {
+            "baseline": 15307145,
+            "candidate": 15307145,
+            "delta": 0,
+            "percent_change": 0.0
+          }
+        },
+        "mode": "stress",
+        "normal_service_pass": true,
+        "pcm_exact": true,
+        "protocol_clean": true,
+        "underruns_not_increased": true,
+        "voices": 20
+      },
+      {
+        "baseline_underruns": 0,
+        "candidate_underruns": 0,
+        "completion": {
+          "cpu_cycles": {
+            "baseline": 0,
+            "candidate": 0,
+            "delta": 0,
+            "percent_change": 0
+          },
+          "cycles": {
+            "baseline": 15890375,
+            "candidate": 15873798,
+            "delta": -16577,
+            "percent_change": -0.10432101193332442
+          },
+          "gpu_cycles": {
+            "baseline": 0,
+            "candidate": 0,
+            "delta": 0,
+            "percent_change": 0
+          }
+        },
+        "mode": "quiet",
+        "normal_service_pass": true,
+        "pcm_exact": true,
+        "protocol_clean": true,
+        "underruns_not_increased": true,
+        "voices": 32
+      },
+      {
+        "baseline_underruns": 1217,
+        "candidate_underruns": 1217,
+        "completion": {
+          "cpu_cycles": {
+            "baseline": 16212637,
+            "candidate": 16212637,
+            "delta": 0,
+            "percent_change": 0.0
+          },
+          "cycles": {
+            "baseline": 19485767,
+            "candidate": 19355169,
+            "delta": -130598,
+            "percent_change": -0.6702225270372986
+          },
+          "gpu_cycles": {
+            "baseline": 0,
+            "candidate": 0,
+            "delta": 0,
+            "percent_change": 0
+          }
+        },
+        "mode": "cpu",
+        "normal_service_pass": true,
+        "pcm_exact": true,
+        "protocol_clean": true,
+        "underruns_not_increased": true,
+        "voices": 32
+      },
+      {
+        "baseline_underruns": 1510,
+        "candidate_underruns": 1510,
+        "completion": {
+          "cpu_cycles": {
+            "baseline": 26507949,
+            "candidate": 26507949,
+            "delta": 0,
+            "percent_change": 0.0
+          },
+          "cycles": {
+            "baseline": 26508950,
+            "candidate": 26508950,
+            "delta": 0,
+            "percent_change": 0.0
+          },
+          "gpu_cycles": {
+            "baseline": 14396666,
+            "candidate": 14396666,
+            "delta": 0,
+            "percent_change": 0.0
+          }
+        },
+        "mode": "stress",
+        "normal_service_pass": true,
+        "pcm_exact": true,
+        "protocol_clean": true,
+        "underruns_not_increased": true,
+        "voices": 32
+      }
+    ],
+    "raw_receipt_sha256": "f84212b53cd138b9607c9dc8f001be40e1c8ab806c01ceb99f34342a6308c74e"
+  },
+  "final_physical_decision_file": "physical-decision.json",
+  "limits": [
+    "All suites were exercised from the portable package. The full initial invocation stopped on a missing Analogizer dependency; references.json now pins its tracked modules and the packaged peripheral suite passed after that packaging fix.",
+    "Combined RAM/bypass component output and processing cycles match bypass exactly; added comparison assertions were also checked directly against fresh receipts.",
+    "Fresh contention rebuilds both baseline and candidate; no previous PCM or binaries reused.",
+    "No active source configuration, bitstream or SD payload was modified by these recipes."
+  ],
+  "mixer": {
+    "capacity": {
+      "bypass": {
+        "improved": 329,
+        "rows": 343,
+        "stream_only_rows_identical": 14,
+        "unchanged": 14,
+        "worse": 0
+      },
+      "combined": {
+        "improved": 329,
+        "rows": 343,
+        "stream_only_rows_identical": 14,
+        "unchanged": 14,
+        "worse": 0
+      },
+      "ram": {
+        "improved": 0,
+        "rows": 343,
+        "stream_only_rows_identical": 14,
+        "unchanged": 343,
+        "worse": 0
+      }
+    },
+    "limits": [
+      "Synthetic component tests, not physical memory primitive equivalence or game FPS."
+    ],
+    "passed": true,
+    "variants": {
+      "baseline": {
+        "inherited_checks": 177,
+        "inherited_sha256": "4154985493eccd5497f74efa3eae393b459e62eab563dcbe5c658c0c7e342a79",
+        "irq_cases": 64,
+        "mixer_sha256": "b530d3c7bba3c1e0e809008131bdaade03af8f2ecf9b5375822d6bb273d779f3",
+        "position_reads": 2048,
+        "reference": {
+          "errors": "0",
+          "hash": "46e30baca498b56b",
+          "processing_cycles": "23557171",
+          "samples": "18432",
+          "saturation_samples": "169",
+          "scenarios": "96",
+          "stream_holds": "12808"
+        }
+      },
+      "bypass": {
+        "inherited_checks": 177,
+        "inherited_sha256": "ae11df268946c46162492e00049ceb5b60e489460633dbd756f6ebe3d31dd604",
+        "irq_cases": 64,
+        "mixer_sha256": "1efb18670211d4ef6db5bc405b30c4f41a563fbd5704720ce5dc3228c731d35b",
+        "position_reads": 2048,
+        "reference": {
+          "errors": "0",
+          "hash": "46e30baca498b56b",
+          "processing_cycles": "22762562",
+          "samples": "18432",
+          "saturation_samples": "169",
+          "scenarios": "96",
+          "stream_holds": "12808"
+        }
+      },
+      "combined": {
+        "inherited_checks": 177,
+        "inherited_sha256": "ae11df268946c46162492e00049ceb5b60e489460633dbd756f6ebe3d31dd604",
+        "irq_cases": 64,
+        "mixer_sha256": "aaca85bd42e5de7ce6c5b62974ddb5c19e79dddd7666afb7cc4b9d0c7eb0effa",
+        "position_reads": 2048,
+        "reference": {
+          "errors": "0",
+          "hash": "46e30baca498b56b",
+          "processing_cycles": "22762562",
+          "samples": "18432",
+          "saturation_samples": "169",
+          "scenarios": "96",
+          "stream_holds": "12808"
+        }
+      },
+      "ram": {
+        "inherited_checks": 177,
+        "inherited_sha256": "4154985493eccd5497f74efa3eae393b459e62eab563dcbe5c658c0c7e342a79",
+        "irq_cases": 64,
+        "mixer_sha256": "f04685a3dda06e31027ab7e102f3caea98bff4fc7e5e16beaebacb55efa4782f",
+        "position_reads": 2048,
+        "reference": {
+          "errors": "0",
+          "hash": "46e30baca498b56b",
+          "processing_cycles": "23557171",
+          "samples": "18432",
+          "saturation_samples": "169",
+          "scenarios": "96",
+          "stream_holds": "12808"
+        }
+      }
+    }
+  },
+  "peripheral": {
+    "checks": 159,
+    "failures": 0,
+    "passed": true
+  },
+  "scope": "Fresh verification of packaged recipes. This is behavioral/source/mapping evidence, not a physical timing or deployment verdict.",
+  "selection_check": {
+    "limits": [
+      "Source-selection check; actual elaboration/map/timing must be checked separately."
+    ],
+    "os30_shadow_unchanged": true,
+    "passed": true,
+    "variants": {
+      "os20": {
+        "sha256": "b530d3c7bba3c1e0e809008131bdaade03af8f2ecf9b5375822d6bb273d779f3",
+        "source": "src/fpga/common/audio_mixer.v"
+      },
+      "os25": {
+        "sha256": "b530d3c7bba3c1e0e809008131bdaade03af8f2ecf9b5375822d6bb273d779f3",
+        "source": "src/fpga/common/audio_mixer.v"
+      },
+      "os30": {
+        "sha256": "f9cbfe37da81ae6d5564df076e75c6d28f46feabb992bb695392d06aa55e0ba4",
+        "source": "src/fpga/common/os30/audio_mixer.v"
+      }
+    }
+  },
+  "source_check": {
+    "bypass_define_identical": true,
+    "configurations": [
+      {
+        "enable": false,
+        "identical": true,
+        "lite": false,
+        "preprocessed_sha256": "c31f43824f91b333b0c1815bedbf42492473d314fe7e33c5c9d1b8af03a4c40b"
+      },
+      {
+        "enable": true,
+        "identical": true,
+        "lite": false,
+        "preprocessed_sha256": "c35263ea8fb053de8a00fffa64c83d260a4a22c742a92c29ff797c6d24ce07ce"
+      },
+      {
+        "enable": false,
+        "identical": true,
+        "lite": true,
+        "preprocessed_sha256": "c7491704dd76f16576ea73c6af02c7f726b6d82c15d6e5e5a6ea2e9f87cfbd0d"
+      },
+      {
+        "enable": true,
+        "identical": true,
+        "lite": true,
+        "preprocessed_sha256": "c7491704dd76f16576ea73c6af02c7f726b6d82c15d6e5e5a6ea2e9f87cfbd0d"
+      }
+    ],
+    "fixture_count": 26,
+    "limits": [
+      "Preprocessor/source identity, not M10K primitive equivalence.",
+      "Run check_mapping.py on the actual candidate map report."
+    ],
+    "passed": true,
+    "pocket_split_dq_only": true,
+    "prepared_mixer": null
+  },
+  "wbuf": [
+    {
+      "bank_row_track": 0,
+      "checked_consumptions": 335,
+      "exit_code": 0,
+      "failed": 0,
+      "passed": 491,
+      "passed_check": true,
+      "poisoned_collisions": 32
+    },
+    {
+      "bank_row_track": 1,
+      "checked_consumptions": 335,
+      "exit_code": 0,
+      "failed": 0,
+      "passed": 491,
+      "passed_check": true,
+      "poisoned_collisions": 32
+    }
+  ]
+}

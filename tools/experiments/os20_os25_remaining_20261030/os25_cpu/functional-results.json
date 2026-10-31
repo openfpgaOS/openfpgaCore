@@ -1,0 +1,91 @@
+{
+  "scope": "OS25 timing-only fetch/aligner factoring. Bounded functional/cycle equivalence; no FPGA or hardware performance qualification.",
+  "baseline_sha256": "d73f954af9d56146e0172c62677e0cc46a3ce7e5661098c237ce0203382fe0ad",
+  "candidate_sha256": "1968e88e47a471c2b28e741802d55c6eeae459b3568e3852e0d0543b2677d3d1",
+  "config_changes": {
+    "FETCH_READ_HOLD": 1,
+    "ALIGNER_PC_HOLD": 1,
+    "FETCH_READY_FACTOR": 1
+  },
+  "whole_cpu": {
+    "passed": true,
+    "logs_byte_identical": true,
+    "cycles_each": 1669299,
+    "timer_interrupts_each": 378,
+    "scanout_bursts_each": 2138,
+    "memory_errors": 0,
+    "write_delivery_errors": 0,
+    "ISA_stress": [
+      "integer",
+      "single-precision FPU",
+      "atomics",
+      "traps",
+      "cache"
+    ]
+  },
+  "read_holds": {
+    "passed": true,
+    "runs": 2,
+    "cycles_each": 1000000,
+    "bank0_stalls_each": 624819,
+    "read_write_collisions_each": 62602
+  },
+  "fetch_ready": {
+    "passed": true,
+    "exhaustive_input_vectors": 16384,
+    "widths": [
+      2,
+      4
+    ],
+    "idempotence_and_malformed_dependencies_checked": true,
+    "raw_console_result_observed": true
+  },
+  "preserved": {
+    "ICACHE_KiB": 32,
+    "DCACHE_KiB": 128,
+    "ISA": true,
+    "prefetch_policy": true,
+    "division_radix": 4,
+    "clock_configuration": 100,
+    "GPU_Dock_audio_sources": true
+  },
+  "physical_qualification": "pending parent paired fits; previous Oct1 result is supporting provenance only",
+  "deployed": false,
+  "production_edited_by_this_agent": false,
+  "sha256": {
+    "baseline/VexiiRiscv_os25.v": "d73f954af9d56146e0172c62677e0cc46a3ce7e5661098c237ce0203382fe0ad",
+    "candidate/VexiiRiscv_os25.v": "1968e88e47a471c2b28e741802d55c6eeae459b3568e3852e0d0543b2677d3d1",
+    "baseline/os25.cfg": "e6f234a77fce6f647cbd4129e01611ea51a895e001cef1bfd7dd409a38b04775",
+    "candidate/os25.cfg": "802c8dede662851c9465461548a118545bac3292532e2e81b99bd015cbde6a05",
+    "candidate.patch": "379cae11e73a1b9c1188b854e11adbc7143b1b30a32623d399627d3b045aed6c",
+    "generation-command.json": "4a8d3354caf12791c8769cfa801efe89eeb68663f9da3acae69f1d3ee6075504",
+    "generation-inputs.json": "9c58db32418a4747f502a19194655fb91d654ebf4578d6efa320542b4bbf4d64",
+    "prior-equivalence.json": "c8adbcdc50d4b2e08293c01f8bc5d0f868e9b5567913d311968ae3e715cee224",
+    "irq-baseline/test.log": "03f7bd837138add81ac5d452e5f7586b3e5ae129e9814620238ea26d2e1254a2",
+    "irq-candidate/test.log": "03f7bd837138add81ac5d452e5f7586b3e5ae129e9814620238ea26d2e1254a2",
+    "irq-baseline/firmware/stress.elf": "efdea3dd403d4c145ca2c7f1e62621c2c38249713e23d09be1b38d199239e54f",
+    "irq-candidate/firmware/stress.elf": "82c0be19fa9fbab1a05b75f174af06d366625b8dff122114645a61d556d5a850",
+    "irq-baseline/firmware/stress.bin": "379f7d302462ec7c1c07cea973f6f65b2add4ffd20857a6ffdb7f45e560cb7ab",
+    "irq-candidate/firmware/stress.bin": "379f7d302462ec7c1c07cea973f6f65b2add4ffd20857a6ffdb7f45e560cb7ab",
+    "fetch-reads/test.log": "635b16829fd9d7f0c5c293ccd9204c0199324ddbcf57d7ecae48f62df717acf6",
+    "aligner-reads/test.log": "635b16829fd9d7f0c5c293ccd9204c0199324ddbcf57d7ecae48f62df717acf6",
+    "generate-baseline.log": "84c8048f995d0468569ae2e37f8b0b08854a973375f536b6d2d1ca0a8393fad6",
+    "generate-candidate.log": "ec88d21e3a0720fa7dbaf3fb1ca13a2111c2951209a4c739ab0ab38adb1243ad",
+    "irq-fpu-match/test.log": "03f7bd837138add81ac5d452e5f7586b3e5ae129e9814620238ea26d2e1254a2",
+    "irq-fpu-match/firmware/stress.bin": "379f7d302462ec7c1c07cea973f6f65b2add4ffd20857a6ffdb7f45e560cb7ab",
+    "fpu-match/match-check/test.log": "cf3263ab50006482a4e8367a37600d2a3f88e535d6d21f0685471b5e5c5f0fec",
+    "fpu-match/os25.cfg": "43bfebd938a1605e32d257fcb53933fcb8bca966d8deab9a7351d82832708312",
+    "fpu-match/VexiiRiscv_os25.v": "654e8939521cdd6dc159ae7c5d4a8696c5a1113b20d2cab3c4b2d48a58fe4f40"
+  },
+  "full_config_generation_candidate_matches_transform_chain": true,
+  "fpu_match": {
+    "candidate_sha256": "654e8939521cdd6dc159ae7c5d4a8696c5a1113b20d2cab3c4b2d48a58fe4f40",
+    "passed": true,
+    "matches": 27,
+    "cone_cycles": 100000,
+    "whole_cpu_logs_byte_identical": true,
+    "whole_cpu_cycles": 1669299,
+    "timer_interrupts": 378,
+    "added_pipeline_stages": 0
+  }
+}

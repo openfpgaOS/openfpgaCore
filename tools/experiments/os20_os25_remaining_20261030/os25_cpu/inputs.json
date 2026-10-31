@@ -1,0 +1,18 @@
+{
+  "helpers": {
+    "generate_vexii.sh": "4545c4a62ff74ac41bc0eac5132d3607de7c1da673fe5a66e596d095e952ded2",
+    "retime_fetch_reads.pl": "66f65630483330700ef4cb0e098d6706ea642403b7660625ef287dbc7be0403a",
+    "retime_aligner_pc.pl": "d3d20482ae37c116961917c16f232404841bd9e074810646653510a4589068bb",
+    "factor_fetch_ready.pl": "6464b3fa78fa55590e4e75d4ab981e1c79224935ffb78da02dd7003f3e72308c",
+    "retime_fpu_matches.pl": "b618a7258767df2113fd1a69b842ad63b96c09833bd397b2ec7c62c0b4ef2868"
+  },
+  "upstream_commits": {
+    "VexiiRiscv": "81842b296999de1087b814227bd5296bac0bf361",
+    "VexiiRiscv/ext/SpinalHDL": "6f8510cdbb8ad7b8bcc0f6d58395669c4c4d7e2d"
+  },
+  "logic_sha256": {
+    "baseline": "c0fa91d5d316df9e88cf06eafb4b890dc40883136c1abe35a88a142dbbe775d0",
+    "candidate": "e1e605954bcea891e7216c3dea5e9dcf4cb6a958e4967b9d5c7f2379e3bd16b6",
+    "fpu-match": "d8f7bdc0e6c86f9797259bdf623d23423a6c861141c18e64fc2e6b628d5217dc"
+  }
+}

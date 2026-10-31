@@ -1,0 +1,58 @@
+{
+  "accepted_for_promotion": false,
+  "reason": "32voice sustained mixedGPU+CPU load regresses existing audio underruns; CPU-only gain still does not meet zero-underrun32voice gate.",
+  "cpu_rendered_synthetic_workload": [
+    {
+      "voices": 9,
+      "cpu_fixed_work_cycles_row0": 13189456,
+      "cpu_fixed_work_cycles_row1": 12306729,
+      "cpu_completion_reduction_percent": 6.692671782672466,
+      "underruns_row0": 0,
+      "underruns_row1": 0,
+      "zero_underrun_both": true
+    },
+    {
+      "voices": 20,
+      "cpu_fixed_work_cycles_row0": 15296183,
+      "cpu_fixed_work_cycles_row1": 14294839,
+      "cpu_completion_reduction_percent": 6.546365194506365,
+      "underruns_row0": 0,
+      "underruns_row1": 0,
+      "zero_underrun_both": true
+    },
+    {
+      "voices": 32,
+      "cpu_fixed_work_cycles_row0": 16212637,
+      "cpu_fixed_work_cycles_row1": 15431557,
+      "cpu_completion_reduction_percent": 4.817723359870452,
+      "underruns_row0": 1217,
+      "underruns_row1": 858,
+      "zero_underrun_both": false
+    }
+  ],
+  "pcm_equal_to_quiet_reference_all_runs": true,
+  "protocol_errors_all_runs": 0,
+  "all_gpu_cpu_overload_outcomes": [
+    {
+      "bank": 0,
+      "underruns": 1510,
+      "consumed": 12440,
+      "cpu_cycles": 26507949,
+      "gpu_cycles": 14396666
+    },
+    {
+      "bank": 1,
+      "underruns": 1672,
+      "consumed": 11695,
+      "cpu_cycles": 24989042,
+      "gpu_cycles": 15255207
+    }
+  ],
+  "notes": [
+    "Extended diagnostics count full mixer memory request latency including arbitration; original audio_p99 started at AR acceptance and omitted contention wait.",
+    "Both baselines already fail under32voice saturation. This is neither a new data corruption bug nor a simulation watchdog.",
+    "Workload is fixed100000 CPU cacheline read/write jobs,320x24060Hz scanout,48kHz consumer and existing mixed voice formats/rates. It is a memory service stress test, not a Diablo/ScummVM frame replay or FPS measurement.",
+    "Simultaneous saturated GPU+CPU mode is unchanged from the original test.",
+    "Do not infer audio deadline failure from output_gap alone: the mixer intentionally waits whileFIFO is full. Actual underrun counters and process exit status are the acceptance criteria."
+  ]
+}

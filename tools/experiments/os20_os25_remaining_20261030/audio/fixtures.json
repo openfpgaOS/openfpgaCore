@@ -1,0 +1,122 @@
+{
+  "audio_mixer.v": {
+    "sha256": "b530d3c7bba3c1e0e809008131bdaade03af8f2ecf9b5375822d6bb273d779f3",
+    "bytes": 60979,
+    "origin": "docs/measurements/os20-os25-remaining-20261030/nonstream-bypass/baseline.v"
+  },
+  "tb_audio_mixer.v": {
+    "sha256": "398588bde179251248c0e56a26d69e459849f3dfe09e912f91317b0e3dbbf59e",
+    "bytes": 8075,
+    "origin": "tools/experiments/quake2_tiny_audio_20261013/tests/mixer/tb_audio_mixer.v"
+  },
+  "tb_audio_mixer_main.cpp": {
+    "sha256": "cf85a5d754545d214ec2fd2d4f252c8508668b69951ce5923cdba21e51118391",
+    "bytes": 41689,
+    "origin": "tools/experiments/quake2_tiny_audio_20261013/tests/mixer/tb_audio_mixer_main.cpp"
+  },
+  "independent_reference.hpp": {
+    "sha256": "1f2f4a466d0ec898b40c55232ee965eb4b69ff09e3ec9897d82146288e8a61df",
+    "bytes": 14813,
+    "origin": "tools/experiments/quake2_tiny_audio_20261013/tests/mixer/independent_reference.hpp"
+  },
+  "sync_fifo.v": {
+    "sha256": "66545eaee0463d5e25e862cb5fbccb357b2d34948f93a9f8a706c04c536aa28c",
+    "bytes": 2196,
+    "origin": "src/fpga/common/sync_fifo.v"
+  },
+  "mister_audio_output.v": {
+    "sha256": "d6788091160dae0689f9e7f649df7f90db5b4530d8111c8a3276dacadf6d378d",
+    "bytes": 2190,
+    "origin": "src/fpga/targets/mister/mister_audio_output.v"
+  },
+  "axi_sdram_arbiter.v": {
+    "sha256": "9d1bfed762e317ad937f67c34219ca3ac44fa5e8781c989e7a92aceefad1d706",
+    "bytes": 29116,
+    "origin": "src/fpga/common/axi_sdram_arbiter.v"
+  },
+  "axi_sdram_slave.v": {
+    "sha256": "8a0e120d569812f176f83908bb18d9cf1459403999faf7be0d2853c591cfaa4e",
+    "bytes": 33202,
+    "origin": "src/fpga/common/axi_sdram_slave.v"
+  },
+  "io_sdram.v": {
+    "sha256": "9fc8b56180ca8db88d17683cdd7da2e18c54ec8a080c98bcbcde25f52228282a",
+    "bytes": 46315,
+    "origin": "src/fpga/targets/pocket/io_sdram.v"
+  },
+  "common.v": {
+    "sha256": "26aa1637c4eaaef2fb6acaa38475826fdf9420c86d06a262eaa104422a32c4a8",
+    "bytes": 3903,
+    "origin": "src/fpga/targets/pocket/apf/common.v"
+  },
+  "synch_3.v": {
+    "sha256": "212da69c34bb5329b0fd9b9b67415be853c0c1c43744c1ee8c95bf39db9c431c",
+    "bytes": 1083,
+    "origin": "src/fpga/targets/mister/synch_3.v"
+  },
+  "sdram_model.v": {
+    "sha256": "4fee45121b63b51c63c32dd4eb69c830188d139e15224ed420b95b2fcb97af5a",
+    "bytes": 11625,
+    "origin": "src/fpga/test/sdram_model.v"
+  },
+  "sdram_model_full.v": {
+    "sha256": "a777d648d2fe8dd85af047cbc1350c65811b75838af4ffc5e3eaec3e4242302b",
+    "bytes": 21555,
+    "origin": "src/fpga/test/sdram_model_full.v"
+  },
+  "tb_sdram.v": {
+    "sha256": "2a3b2b2d397680f1214f0279022569d6f3c864724e5ecace2a4938fc2c1830af",
+    "bytes": 8594,
+    "origin": "src/fpga/test/tb_sdram.v"
+  },
+  "tb_sdram_main.cpp": {
+    "sha256": "55a156e5ea0c8bbd8dc6899798d4ed4bbad9f6475ffdf4d4e15ae4c27c1cc16f",
+    "bytes": 28609,
+    "origin": "src/fpga/test/tb_sdram_main.cpp"
+  },
+  "tb_sdram_cont.v": {
+    "sha256": "4ab1d72cbb7de699f82f248a3da9bd1f6a5f562850f289b4c610b032d77830ab",
+    "bytes": 14779,
+    "origin": "src/fpga/test/tb_sdram_cont.v"
+  },
+  "tb_pocket_audio.v": {
+    "sha256": "874a375097077bf4c0f796a23a816776ea67a782bdf61f98558dae8173b63613",
+    "bytes": 15054,
+    "origin": "docs/measurements/os20-os25-remaining-20261030/ram/rowtrack-service/tb_pocket_audio.v"
+  },
+  "io_sdram_pocket_test.v": {
+    "sha256": "b328c80fb48695ea83a36393f434c5ec3e05dcee290782b5eb53b8d324623951",
+    "bytes": 46382,
+    "origin": "docs/measurements/os20-os25-remaining-20261030/ram/rowtrack-service/io_sdram_pocket_test.v"
+  },
+  "tb_axi_periph.v": {
+    "sha256": "d481d27c246b3b5c0cafdba62e3c4c1cb97e51d9ccbd589b187dd4199919c9c1",
+    "bytes": 12840,
+    "origin": "src/fpga/test/tb_axi_periph.v"
+  },
+  "tb_axi_periph_main.cpp": {
+    "sha256": "1181293184750d2db17f3b55d56a9ceeefd1185da2fd9d9735efb0cb91fe2944",
+    "bytes": 64809,
+    "origin": "src/fpga/test/tb_axi_periph_main.cpp"
+  },
+  "axi_periph_slave.v": {
+    "sha256": "03269e468c2e1a025897c846e513435cadd6d60267efbacf5dfe52946477b087",
+    "bytes": 114938,
+    "origin": "src/fpga/common/axi_periph_slave.v"
+  },
+  "altsyncram_stub.v": {
+    "sha256": "3ac5420a4ae4fc0e10bdbb73d02c3ef523eb4159c8c9bd4d1002970bfc332db2",
+    "bytes": 7072,
+    "origin": "src/fpga/test/altsyncram_stub.v"
+  },
+  "snac_shifter.v": {
+    "sha256": "4a3953a9729af3c001101e85d67cdd73e4334bc76ef0ad984c55b8c66f42eebf",
+    "bytes": 6998,
+    "origin": "src/fpga/targets/pocket/snac_shifter.v"
+  },
+  "pocket_memory_contention.cpp": {
+    "sha256": "eacb6d21f702960b76a9393af6abc4cd16612369578af58a7f6dfc659ec83230",
+    "bytes": 7739,
+    "origin": "docs/measurements/os20-os25-remaining-20261030/ram/rowtrack-service/pocket_memory_contention.cpp"
+  }
+}

@@ -1,0 +1,717 @@
+{
+  "additional_hold_rejection": {
+    "candidate": "os20-radix4-audio-s34",
+    "reason": "Second tested seed still has negative hold slack; not a safe replacement.",
+    "worst_hold_ns": -0.104
+  },
+  "behavioral_qualification": "Passed bounded source, mixer/stream/reference/MMIO/collision tests and the fresh 18-case contention nonregression comparison. Existing 32-voice saturation underruns remain unchanged.",
+  "date": "2026-10-30",
+  "decision": "Reject all tested RAM-placement and nonstream-bypass candidates for os20/os25; retain generic memory placement and mixer behavior unchanged.",
+  "deployed": false,
+  "limits": [
+    "These are paired targeted fits, not an exhaustive placement-seed search.",
+    "Do not generalize rejection of bypass+clamp to the independent clamp-only candidate; root owns that qualification.",
+    "Preserve recipes and bounded evidence for future work; no pending audio/RAM promotion is implied."
+  ],
+  "mapped_primitives": "Actual tested M10K candidates passed registered-address, width/depth and OLD_DATA checks; correct inference did not provide acceptable whole-core timing.",
+  "metric_definition": {
+    "all_100mhz_checks_pass": "Raw four-corner sign-off result. Baselines also have negative setup slack at configured 100 MHz. A parsed valid result is not a passing timing result.",
+    "comparison_estimate_mhz": "1000 / (10 - worst_setup_slack_ns), using the configured 100 MHz 10 ns period. This is a same-method comparison estimate, not the clock-specific Quartus Fmax table or proof of safe operation at that frequency."
+  },
+  "other_rejections": {
+    "bank_row_tracking": "Keep rejected: 32-voice mixed overload underruns rise from 1510 to 1672.",
+    "compact_mixer_and_cache": "Keep rejected: no default old-SDK cache benefit, no CPU-store coherence, and no general os20/os25 capacity proof."
+  },
+  "paired_comparisons": [
+    {
+      "alm_delta": 130,
+      "baseline": "os20-radix4-s35",
+      "candidate": "os20-radix4-ram-s35",
+      "comparison_estimate_delta_mhz": -2.996805756594938,
+      "m10k_delta": 2,
+      "promoted": false,
+      "reason": "M10K placement worsens setup timing and increases total fitted ALMs.",
+      "same_cpu_hash": true,
+      "setup_slack_delta_ns": -0.341
+    },
+    {
+      "alm_delta": 16,
+      "baseline": "os20-radix4-s35",
+      "candidate": "os20-radix4-audio-s35",
+      "comparison_estimate_delta_mhz": -3.3191242703422006,
+      "m10k_delta": 0,
+      "promoted": false,
+      "reason": "Nonstream bypass worsens setup timing and introduces negative hold slack.",
+      "same_cpu_hash": true,
+      "setup_slack_delta_ns": -0.379
+    },
+    {
+      "alm_delta": -205,
+      "baseline": "os25-fetch-s20",
+      "candidate": "os25-fetch-ram-s20",
+      "comparison_estimate_delta_mhz": -2.963647681347453,
+      "m10k_delta": 2,
+      "promoted": false,
+      "reason": "M10K placement saves fitted ALMs but regresses setup timing.",
+      "same_cpu_hash": true,
+      "setup_slack_delta_ns": -0.329
+    },
+    {
+      "alm_delta": 33,
+      "baseline": "os25-audio-s20",
+      "candidate": "os25-audio-ram-s20",
+      "comparison_estimate_delta_mhz": -1.484384549586082,
+      "m10k_delta": 2,
+      "promoted": false,
+      "reason": "Adding M10K placement to bypass further regresses setup timing.",
+      "same_cpu_hash": true,
+      "setup_slack_delta_ns": -0.17
+    },
+    {
+      "alm_delta": -55,
+      "baseline": "os25-control-s20",
+      "candidate": "os25-audio-s20",
+      "comparison_estimate_delta_mhz": -2.6824991048527806,
+      "m10k_delta": 0,
+      "promoted": false,
+      "reason": "Nonstream bypass regresses setup timing despite a small fitted ALM saving.",
+      "same_cpu_hash": true,
+      "setup_slack_delta_ns": -0.294
+    },
+    {
+      "alm_delta": -9,
+      "baseline": "os25-control-s20",
+      "candidate": "os25-audio-clamp-s20",
+      "comparison_estimate_delta_mhz": -6.283149040937403,
+      "m10k_delta": 0,
+      "promoted": false,
+      "reason": "Bypass plus clamp pipeline regresses setup timing; this does not decide clamp-only qualification.",
+      "same_cpu_hash": true,
+      "setup_slack_delta_ns": -0.716
+    }
+  ],
+  "physical_results": {
+    "os20-radix4-audio-s34": {
+      "all_100mhz_checks_pass": false,
+      "alms": 16405,
+      "bitstream_hashes": {
+        "rbf": "076b628eaf131e5dfbb76300ac6bbd22b02a5945767bd1d6e7e3d93538250378",
+        "sof": "35e9fc8abea70d27ab29501ca262e1d811af0970512f20636fd22a9aec5bf47f"
+      },
+      "candidate_path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/candidate.json",
+      "candidate_sha256": "0c3886dce5b824f3e17df316460acedc2a28088a4ea2acd062928d51652e6802",
+      "comparison_estimate_mhz": 94.2507068803016,
+      "configuration": {
+        "audio_bram": false,
+        "clamp_pipe": false,
+        "configured_mhz": 100,
+        "cpu_sha256": "8c34f9e887f073f00a3eaf1f00df02b118fe9ac0f00f01f270b28606a62bba2f",
+        "nonstream_bypass": true,
+        "row_track": false,
+        "variant": "os20",
+        "wbuf_bram": false
+      },
+      "four_corners_present": true,
+      "m10ks": 228,
+      "result_path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/results/pocket-os20-s34/result.json",
+      "result_sha256": "9e889d35e7693cf055b6899a7e00e029d6b3ec9ad388f870665acd3556a5389b",
+      "timing_by_corner_ns": {
+        "fast_0": {
+          "hold": -0.104,
+          "pulse_width": 0.5,
+          "recovery": 6.782,
+          "removal": 0.444,
+          "setup": 2.136
+        },
+        "fast_85": {
+          "hold": -0.089,
+          "pulse_width": 0.5,
+          "recovery": 6.605,
+          "removal": 0.498,
+          "setup": 2.095
+        },
+        "slow_0": {
+          "hold": 0.234,
+          "pulse_width": 0.5,
+          "recovery": 2.48,
+          "removal": 1.133,
+          "setup": -0.61
+        },
+        "slow_85": {
+          "hold": 0.247,
+          "pulse_width": 0.5,
+          "recovery": 2.487,
+          "removal": 1.21,
+          "setup": -0.532
+        }
+      },
+      "worst_slack_ns": {
+        "hold": -0.104,
+        "pulse_width": 0.5,
+        "recovery": 2.48,
+        "removal": 0.444,
+        "setup": -0.61
+      }
+    },
+    "os20-radix4-audio-s35": {
+      "all_100mhz_checks_pass": false,
+      "alms": 16484,
+      "bitstream_hashes": {
+        "rbf": "683e61e5f6cde0ac352d47333c273b2fba0d19e11073ee6f2da9986b10372509",
+        "sof": "26d2a909a2506b67b68a0344316ef8d02aca1224461adb093fafadd7f5ec0171"
+      },
+      "candidate_path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/candidate.json",
+      "candidate_sha256": "0c3886dce5b824f3e17df316460acedc2a28088a4ea2acd062928d51652e6802",
+      "comparison_estimate_mhz": 91.93711501333088,
+      "configuration": {
+        "audio_bram": false,
+        "clamp_pipe": false,
+        "configured_mhz": 100,
+        "cpu_sha256": "8c34f9e887f073f00a3eaf1f00df02b118fe9ac0f00f01f270b28606a62bba2f",
+        "nonstream_bypass": true,
+        "row_track": false,
+        "variant": "os20",
+        "wbuf_bram": false
+      },
+      "four_corners_present": true,
+      "m10ks": 228,
+      "result_path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-audio/results/pocket-os20-s35/result.json",
+      "result_sha256": "51ef297f2c19b75928d48949e457cb4dd852bb1949bf4c597bf5dc26c451036d",
+      "timing_by_corner_ns": {
+        "fast_0": {
+          "hold": -0.235,
+          "pulse_width": 0.5,
+          "recovery": 6.865,
+          "removal": 0.514,
+          "setup": 2.048
+        },
+        "fast_85": {
+          "hold": -0.222,
+          "pulse_width": 0.5,
+          "recovery": 6.701,
+          "removal": 0.563,
+          "setup": 1.989
+        },
+        "slow_0": {
+          "hold": -0.285,
+          "pulse_width": 0.5,
+          "recovery": 2.747,
+          "removal": 1.287,
+          "setup": -0.863
+        },
+        "slow_85": {
+          "hold": -0.338,
+          "pulse_width": 0.5,
+          "recovery": 2.74,
+          "removal": 1.381,
+          "setup": -0.877
+        }
+      },
+      "worst_slack_ns": {
+        "hold": -0.338,
+        "pulse_width": 0.5,
+        "recovery": 2.74,
+        "removal": 0.514,
+        "setup": -0.877
+      }
+    },
+    "os20-radix4-ram-s35": {
+      "all_100mhz_checks_pass": false,
+      "alms": 16598,
+      "bitstream_hashes": {
+        "rbf": "1558d7b5154f8b6770fcb348f2b50002e3caffe83ebc250b8007d4375cfd69ec",
+        "sof": "6f1fed9e3cc5ddcdf78bd0a5572d8e254f359e013a64683366b20aacb6045aec"
+      },
+      "candidate_path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-ram/candidate.json",
+      "candidate_sha256": "e3404efa0ccd61750a8fd584c76c5bc53e72b51deac04826165a1cf246e9c57b",
+      "comparison_estimate_mhz": 92.25943352707814,
+      "configuration": {
+        "audio_bram": true,
+        "clamp_pipe": false,
+        "configured_mhz": 100,
+        "cpu_sha256": "8c34f9e887f073f00a3eaf1f00df02b118fe9ac0f00f01f270b28606a62bba2f",
+        "nonstream_bypass": false,
+        "row_track": false,
+        "variant": "os20",
+        "wbuf_bram": true
+      },
+      "four_corners_present": true,
+      "m10ks": 230,
+      "result_path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-ram/results/pocket-os20-s35/result.json",
+      "result_sha256": "c80bdfa381fa14b3517e405e3ba3981e36274383ac735efc84c6da037e971196",
+      "timing_by_corner_ns": {
+        "fast_0": {
+          "hold": 0.036,
+          "pulse_width": 0.5,
+          "recovery": 6.782,
+          "removal": 0.442,
+          "setup": 2.048
+        },
+        "fast_85": {
+          "hold": 0.072,
+          "pulse_width": 0.5,
+          "recovery": 6.603,
+          "removal": 0.485,
+          "setup": 1.989
+        },
+        "slow_0": {
+          "hold": 0.239,
+          "pulse_width": 0.5,
+          "recovery": 2.68,
+          "removal": 1.152,
+          "setup": -0.839
+        },
+        "slow_85": {
+          "hold": 0.246,
+          "pulse_width": 0.5,
+          "recovery": 2.649,
+          "removal": 1.218,
+          "setup": -0.748
+        }
+      },
+      "worst_slack_ns": {
+        "hold": 0.036,
+        "pulse_width": 0.5,
+        "recovery": 2.649,
+        "removal": 0.442,
+        "setup": -0.839
+      }
+    },
+    "os20-radix4-s35": {
+      "all_100mhz_checks_pass": false,
+      "alms": 16468,
+      "bitstream_hashes": {
+        "rbf": "12ff080936c5237c6cd0875c1795661950ee8b162de7da8e5f55ffb597adeb00",
+        "sof": "22cd7c3882e2708cbf03caf54c7e646eeed4ac50c963d232eb90aa69834b441d"
+      },
+      "candidate_path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4/candidate.json",
+      "candidate_sha256": "fa5e96f84a1c362d19e593b135c2ab702805c4d6ddca897dfdf4d087f06d013c",
+      "comparison_estimate_mhz": 95.25623928367308,
+      "configuration": {
+        "audio_bram": false,
+        "clamp_pipe": false,
+        "configured_mhz": 100,
+        "cpu_sha256": "8c34f9e887f073f00a3eaf1f00df02b118fe9ac0f00f01f270b28606a62bba2f",
+        "nonstream_bypass": false,
+        "row_track": false,
+        "variant": "os20",
+        "wbuf_bram": false
+      },
+      "four_corners_present": true,
+      "m10ks": 228,
+      "result_path": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4/results/pocket-os20-s35/result.json",
+      "result_sha256": "4b73dc213e0c78dcbe643e16c4f589dd0430ce7a648f72df92a4b383fae27a54",
+      "timing_by_corner_ns": {
+        "fast_0": {
+          "hold": 0.042,
+          "pulse_width": 0.5,
+          "recovery": 6.64,
+          "removal": 0.33,
+          "setup": 2.048
+        },
+        "fast_85": {
+          "hold": 0.08,
+          "pulse_width": 0.5,
+          "recovery": 6.449,
+          "removal": 0.367,
+          "setup": 1.989
+        },
+        "slow_0": {
+          "hold": 0.234,
+          "pulse_width": 0.5,
+          "recovery": 2.394,
+          "removal": 0.935,
+          "setup": -0.472
+        },
+        "slow_85": {
+          "hold": 0.238,
+          "pulse_width": 0.5,
+          "recovery": 2.287,
+          "removal": 1.001,
+          "setup": -0.498
+        }
+      },
+      "worst_slack_ns": {
+        "hold": 0.042,
+        "pulse_width": 0.5,
+        "recovery": 2.287,
+        "removal": 0.33,
+        "setup": -0.498
+      }
+    },
+    "os25-audio-clamp-s20": {
+      "all_100mhz_checks_pass": false,
+      "alms": 15481,
+      "bitstream_hashes": {
+        "rbf": "1ba288c436b34d82e0ceb73b070c62f5d28025d299baf72c2fe3d32288bc752e",
+        "sof": "3fa6d5638eb4a03d8793ee97585eb047457e05a6511253503ccf0a5bbfa1d2d1"
+      },
+      "candidate_path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-clamp/candidate.json",
+      "candidate_sha256": "bdf71b708fe4794db92e83a229e4955cbc6254f56af183f70f86915fc10b0e29",
+      "comparison_estimate_mhz": 90.58791557206268,
+      "configuration": {
+        "audio_bram": false,
+        "clamp_pipe": true,
+        "configured_mhz": 100,
+        "cpu_sha256": "d73f954af9d56146e0172c62677e0cc46a3ce7e5661098c237ce0203382fe0ad",
+        "nonstream_bypass": true,
+        "row_track": false,
+        "variant": "os25",
+        "wbuf_bram": false
+      },
+      "four_corners_present": true,
+      "m10ks": 296,
+      "result_path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-clamp/results/pocket-os25-s20/result.json",
+      "result_sha256": "f725b2b0ec733cb086c0e92b0cb34c0fad48ee693063e6c731eb2dbf1972fb8c",
+      "timing_by_corner_ns": {
+        "fast_0": {
+          "hold": 0.012,
+          "pulse_width": 0.5,
+          "recovery": 6.656,
+          "removal": 0.457,
+          "setup": 1.904
+        },
+        "fast_85": {
+          "hold": 0.02,
+          "pulse_width": 0.5,
+          "recovery": 6.476,
+          "removal": 0.504,
+          "setup": 1.859
+        },
+        "slow_0": {
+          "hold": 0.277,
+          "pulse_width": 0.5,
+          "recovery": 2.182,
+          "removal": 1.189,
+          "setup": -1.012
+        },
+        "slow_85": {
+          "hold": 0.287,
+          "pulse_width": 0.5,
+          "recovery": 2.184,
+          "removal": 1.257,
+          "setup": -1.039
+        }
+      },
+      "worst_slack_ns": {
+        "hold": 0.012,
+        "pulse_width": 0.5,
+        "recovery": 2.182,
+        "removal": 0.457,
+        "setup": -1.039
+      }
+    },
+    "os25-audio-ram-s20": {
+      "all_100mhz_checks_pass": false,
+      "alms": 15468,
+      "bitstream_hashes": {
+        "rbf": "182d9f99719b591c8e51861447852dd6f30279de26b2232a96279a6dc454db79",
+        "sof": "280758237369c913d3604942856306b2157f44634ec48f684e5962161eab81dc"
+      },
+      "candidate_path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-ram/candidate.json",
+      "candidate_sha256": "580ecb32718ecbe0db5f182250803aab593eb284e95a6736d99f25a51da937df",
+      "comparison_estimate_mhz": 92.70418095856122,
+      "configuration": {
+        "audio_bram": true,
+        "clamp_pipe": false,
+        "configured_mhz": 100,
+        "cpu_sha256": "d73f954af9d56146e0172c62677e0cc46a3ce7e5661098c237ce0203382fe0ad",
+        "nonstream_bypass": true,
+        "row_track": false,
+        "variant": "os25",
+        "wbuf_bram": true
+      },
+      "four_corners_present": true,
+      "m10ks": 298,
+      "result_path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-ram/results/pocket-os25-s20/result.json",
+      "result_sha256": "b5171e02a7a3aa22ee35512bced1165aabc2ef9324da3b16d9e716b4a5d50e88",
+      "timing_by_corner_ns": {
+        "fast_0": {
+          "hold": 0.069,
+          "pulse_width": 0.5,
+          "recovery": 6.492,
+          "removal": 0.271,
+          "setup": 1.904
+        },
+        "fast_85": {
+          "hold": 0.098,
+          "pulse_width": 0.5,
+          "recovery": 6.26,
+          "removal": 0.304,
+          "setup": 1.859
+        },
+        "slow_0": {
+          "hold": 0.282,
+          "pulse_width": 0.5,
+          "recovery": 1.981,
+          "removal": 0.779,
+          "setup": -0.554
+        },
+        "slow_85": {
+          "hold": 0.289,
+          "pulse_width": 0.5,
+          "recovery": 1.937,
+          "removal": 0.842,
+          "setup": -0.787
+        }
+      },
+      "worst_slack_ns": {
+        "hold": 0.069,
+        "pulse_width": 0.5,
+        "recovery": 1.937,
+        "removal": 0.271,
+        "setup": -0.787
+      }
+    },
+    "os25-audio-s20": {
+      "all_100mhz_checks_pass": false,
+      "alms": 15435,
+      "bitstream_hashes": {
+        "rbf": "c7c50c8d099188c24b34de43cc3c753a49864ed871b2ef6531ee914d4883fdff",
+        "sof": "a475875fe082c10cb778ba90fec564701404c913dd79a152c0e0c422f2cee767"
+      },
+      "candidate_path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio/candidate.json",
+      "candidate_sha256": "126c7f83bb5af17bf24238b1fa8ab82606b03d54768903ab1fa552729e98a044",
+      "comparison_estimate_mhz": 94.1885655081473,
+      "configuration": {
+        "audio_bram": false,
+        "clamp_pipe": false,
+        "configured_mhz": 100,
+        "cpu_sha256": "d73f954af9d56146e0172c62677e0cc46a3ce7e5661098c237ce0203382fe0ad",
+        "nonstream_bypass": true,
+        "row_track": false,
+        "variant": "os25",
+        "wbuf_bram": false
+      },
+      "four_corners_present": true,
+      "m10ks": 296,
+      "result_path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio/results/pocket-os25-s20/result.json",
+      "result_sha256": "2a7f27d05dd4a16351b62964f6e233323c52c6ffd52649dc7928b1176eecbee4",
+      "timing_by_corner_ns": {
+        "fast_0": {
+          "hold": 0.036,
+          "pulse_width": 0.5,
+          "recovery": 6.888,
+          "removal": 0.264,
+          "setup": 1.904
+        },
+        "fast_85": {
+          "hold": 0.04,
+          "pulse_width": 0.5,
+          "recovery": 6.757,
+          "removal": 0.29,
+          "setup": 1.858
+        },
+        "slow_0": {
+          "hold": 0.285,
+          "pulse_width": 0.5,
+          "recovery": 2.658,
+          "removal": 0.757,
+          "setup": -0.617
+        },
+        "slow_85": {
+          "hold": 0.292,
+          "pulse_width": 0.5,
+          "recovery": 2.662,
+          "removal": 0.809,
+          "setup": -0.597
+        }
+      },
+      "worst_slack_ns": {
+        "hold": 0.036,
+        "pulse_width": 0.5,
+        "recovery": 2.658,
+        "removal": 0.264,
+        "setup": -0.617
+      }
+    },
+    "os25-control-s20": {
+      "all_100mhz_checks_pass": false,
+      "alms": 15490,
+      "bitstream_hashes": {
+        "rbf": "fea4df0354cf5a8bcb6433e1ade5553bce9851c42718c88a5285224eedba50f2",
+        "sof": "7a885a63a4b5c4ed700bc39d4af0f24555c4b69ab35b009b46db1d7bbb2a407f"
+      },
+      "candidate_path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-control/candidate.json",
+      "candidate_sha256": "4e5eb3da65782a911724eba80d919176e91ae49141926f46bc80b99446a02543",
+      "comparison_estimate_mhz": 96.87106461300009,
+      "configuration": {
+        "audio_bram": false,
+        "clamp_pipe": false,
+        "configured_mhz": 100,
+        "cpu_sha256": "d73f954af9d56146e0172c62677e0cc46a3ce7e5661098c237ce0203382fe0ad",
+        "nonstream_bypass": false,
+        "row_track": false,
+        "variant": "os25",
+        "wbuf_bram": false
+      },
+      "four_corners_present": true,
+      "m10ks": 296,
+      "result_path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-control/results/pocket-os25-s20/result.json",
+      "result_sha256": "7df7ba07213559b3015085520a610ed063faf7b5ffb2f8046f3f79e86e08b5e5",
+      "timing_by_corner_ns": {
+        "fast_0": {
+          "hold": 0.078,
+          "pulse_width": 0.5,
+          "recovery": 6.846,
+          "removal": 0.478,
+          "setup": 1.904
+        },
+        "fast_85": {
+          "hold": 0.126,
+          "pulse_width": 0.5,
+          "recovery": 6.738,
+          "removal": 0.526,
+          "setup": 1.859
+        },
+        "slow_0": {
+          "hold": 0.26,
+          "pulse_width": 0.5,
+          "recovery": 2.608,
+          "removal": 1.214,
+          "setup": -0.323
+        },
+        "slow_85": {
+          "hold": 0.272,
+          "pulse_width": 0.5,
+          "recovery": 2.622,
+          "removal": 1.285,
+          "setup": -0.288
+        }
+      },
+      "worst_slack_ns": {
+        "hold": 0.078,
+        "pulse_width": 0.5,
+        "recovery": 2.608,
+        "removal": 0.478,
+        "setup": -0.323
+      }
+    },
+    "os25-fetch-ram-s20": {
+      "all_100mhz_checks_pass": false,
+      "alms": 15372,
+      "bitstream_hashes": {
+        "rbf": "4b7b71dfe91cc99fa787c4f82d528360283ab3ff31bb17cab52e374a124f79cc",
+        "sof": "e8410113538dfbc2fcf692e2c8579f4aa9eba2a3124fe09f496c9120914053fb"
+      },
+      "candidate_path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch-ram/candidate.json",
+      "candidate_sha256": "7578cd2d4ed3d80fcd2e386124f3b42739705b387500c5a4dd90ba2f98cf14fd",
+      "comparison_estimate_mhz": 93.44047841524949,
+      "configuration": {
+        "audio_bram": true,
+        "clamp_pipe": false,
+        "configured_mhz": 100,
+        "cpu_sha256": "1968e88e47a471c2b28e741802d55c6eeae459b3568e3852e0d0543b2677d3d1",
+        "nonstream_bypass": false,
+        "row_track": false,
+        "variant": "os25",
+        "wbuf_bram": true
+      },
+      "four_corners_present": true,
+      "m10ks": 298,
+      "result_path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch-ram/results/pocket-os25-s20/result.json",
+      "result_sha256": "c9e7f90a149c0387ebb9a2c4509b78ca34f1ec336bf983ba10b525f70861b8cc",
+      "timing_by_corner_ns": {
+        "fast_0": {
+          "hold": 0.006,
+          "pulse_width": 0.5,
+          "recovery": 6.65,
+          "removal": 0.264,
+          "setup": 1.904
+        },
+        "fast_85": {
+          "hold": 0.073,
+          "pulse_width": 0.5,
+          "recovery": 6.455,
+          "removal": 0.295,
+          "setup": 1.859
+        },
+        "slow_0": {
+          "hold": 0.273,
+          "pulse_width": 0.5,
+          "recovery": 2.213,
+          "removal": 0.758,
+          "setup": -0.281
+        },
+        "slow_85": {
+          "hold": 0.28,
+          "pulse_width": 0.5,
+          "recovery": 2.164,
+          "removal": 0.816,
+          "setup": -0.702
+        }
+      },
+      "worst_slack_ns": {
+        "hold": 0.006,
+        "pulse_width": 0.5,
+        "recovery": 2.164,
+        "removal": 0.264,
+        "setup": -0.702
+      }
+    },
+    "os25-fetch-s20": {
+      "all_100mhz_checks_pass": false,
+      "alms": 15577,
+      "bitstream_hashes": {
+        "rbf": "bf74db02b998d04c3f607eefb50e5356a498d8af0af39bc20dac597c101ed03f",
+        "sof": "c1b4a3295a7c03e7f8ad2208fdb683ea3330fdf8ad31aed7ce900f19511af11e"
+      },
+      "candidate_path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch/candidate.json",
+      "candidate_sha256": "85c24d0b267f33b361f81aa63a2efc04e02f1382fd0560d281bddf0dd51a032e",
+      "comparison_estimate_mhz": 96.40412609659694,
+      "configuration": {
+        "audio_bram": false,
+        "clamp_pipe": false,
+        "configured_mhz": 100,
+        "cpu_sha256": "1968e88e47a471c2b28e741802d55c6eeae459b3568e3852e0d0543b2677d3d1",
+        "nonstream_bypass": false,
+        "row_track": false,
+        "variant": "os25",
+        "wbuf_bram": false
+      },
+      "four_corners_present": true,
+      "m10ks": 296,
+      "result_path": "docs/measurements/os20-os25-remaining-20261030/physical/os25-fetch/results/pocket-os25-s20/result.json",
+      "result_sha256": "7c39b9f54da9251599d91d000f13b17c210df99d4e379796a7fa0f0a34a1cf6c",
+      "timing_by_corner_ns": {
+        "fast_0": {
+          "hold": 0.006,
+          "pulse_width": 0.5,
+          "recovery": 6.534,
+          "removal": 0.265,
+          "setup": 1.904
+        },
+        "fast_85": {
+          "hold": 0.073,
+          "pulse_width": 0.5,
+          "recovery": 6.318,
+          "removal": 0.293,
+          "setup": 1.859
+        },
+        "slow_0": {
+          "hold": 0.281,
+          "pulse_width": 0.5,
+          "recovery": 2.127,
+          "removal": 0.77,
+          "setup": -0.373
+        },
+        "slow_85": {
+          "hold": 0.288,
+          "pulse_width": 0.5,
+          "recovery": 1.979,
+          "removal": 0.82,
+          "setup": -0.318
+        }
+      },
+      "worst_slack_ns": {
+        "hold": 0.006,
+        "pulse_width": 0.5,
+        "recovery": 1.979,
+        "removal": 0.265,
+        "setup": -0.373
+      }
+    }
+  },
+  "production_audio_or_ram_changed": false,
+  "promoted": false
+}

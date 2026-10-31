@@ -1,0 +1,283 @@
+{
+  "functional_pass": true,
+  "physical_qualification_pending": false,
+  "change": "Only enable existing INCLUDE_NONSTREAM_BYPASS for Pocket os20/os25 in proposed configuration; production is unchanged",
+  "source": {
+    "baseline_sha256": "b530d3c7bba3c1e0e809008131bdaade03af8f2ecf9b5375822d6bb273d779f3",
+    "candidate_sha256": "1efb18670211d4ef6db5bc405b30c4f41a563fbd5704720ce5dc3228c731d35b",
+    "change": "Enable existing INCLUDE_NONSTREAM_BYPASS macro in isolated compilation only",
+    "active_rtl_changed": false
+  },
+  "compiler_define_matches_test_file": true,
+  "reference_baseline": {
+    "samples": "18432",
+    "scenarios": "96",
+    "errors": "0",
+    "saturation_samples": "169",
+    "stream_holds": "12808",
+    "hash": "46e30baca498b56b",
+    "processing_cycles": "23557171"
+  },
+  "reference_candidate": {
+    "samples": "18432",
+    "scenarios": "96",
+    "errors": "0",
+    "saturation_samples": "169",
+    "stream_holds": "12808",
+    "hash": "46e30baca498b56b",
+    "processing_cycles": "22762562"
+  },
+  "reference_processing_cycle_reduction_percent": 3.3731087659040204,
+  "inherited_checks_each": 177,
+  "irq_race_checks_each": 64,
+  "registered_position_reads_each": 2048,
+  "capacity_rows": 343,
+  "capacity_improved": 329,
+  "capacity_unchanged": 14,
+  "capacity_worse": 0,
+  "stream_only_rows_byte_identical": 14,
+  "service_cycle_reduction": "Exactly2 cycles per nonstream voice per mixed output in fixed-latency capacity matrix; up to64 at32ordinary voices. Stream path unchanged.",
+  "contention_cases": 18,
+  "contention_pairs": [
+    {
+      "voices": 9,
+      "mode": "quiet",
+      "underruns_baseline": 0,
+      "underruns_candidate": 0,
+      "pcm_exact": true,
+      "cycles": {
+        "baseline": 15597237,
+        "candidate": 15592439,
+        "delta": -4798,
+        "percent_change": -0.030761858654837493
+      },
+      "cpu_cycles": {
+        "baseline": 0,
+        "candidate": 0,
+        "delta": 0,
+        "percent_change": 0
+      },
+      "gpu_cycles": {
+        "baseline": 0,
+        "candidate": 0,
+        "delta": 0,
+        "percent_change": 0
+      }
+    },
+    {
+      "voices": 9,
+      "mode": "cpu",
+      "underruns_baseline": 0,
+      "underruns_candidate": 0,
+      "pcm_exact": true,
+      "cycles": {
+        "baseline": 15668974,
+        "candidate": 15668932,
+        "delta": -42,
+        "percent_change": -0.0002680456295367506
+      },
+      "cpu_cycles": {
+        "baseline": 13189456,
+        "candidate": 13189341,
+        "delta": -115,
+        "percent_change": -0.0008719085912267666
+      },
+      "gpu_cycles": {
+        "baseline": 0,
+        "candidate": 0,
+        "delta": 0,
+        "percent_change": 0
+      }
+    },
+    {
+      "voices": 9,
+      "mode": "stress",
+      "underruns_baseline": 0,
+      "underruns_candidate": 0,
+      "pcm_exact": true,
+      "cycles": {
+        "baseline": 20924758,
+        "candidate": 20924760,
+        "delta": 2,
+        "percent_change": 9.558055591440962e-06
+      },
+      "cpu_cycles": {
+        "baseline": 20923757,
+        "candidate": 20923759,
+        "delta": 2,
+        "percent_change": 9.558512847895884e-06
+      },
+      "gpu_cycles": {
+        "baseline": 17399188,
+        "candidate": 17399213,
+        "delta": 25,
+        "percent_change": 0.00014368486620508492
+      }
+    },
+    {
+      "voices": 20,
+      "mode": "quiet",
+      "underruns_baseline": 0,
+      "underruns_candidate": 0,
+      "pcm_exact": true,
+      "cycles": {
+        "baseline": 15736377,
+        "candidate": 15728086,
+        "delta": -8291,
+        "percent_change": -0.0526868414502224
+      },
+      "cpu_cycles": {
+        "baseline": 0,
+        "candidate": 0,
+        "delta": 0,
+        "percent_change": 0
+      },
+      "gpu_cycles": {
+        "baseline": 0,
+        "candidate": 0,
+        "delta": 0,
+        "percent_change": 0
+      }
+    },
+    {
+      "voices": 20,
+      "mode": "cpu",
+      "underruns_baseline": 0,
+      "underruns_candidate": 0,
+      "pcm_exact": true,
+      "cycles": {
+        "baseline": 15882428,
+        "candidate": 15884087,
+        "delta": 1659,
+        "percent_change": 0.010445506190870368
+      },
+      "cpu_cycles": {
+        "baseline": 15296183,
+        "candidate": 15296986,
+        "delta": 803,
+        "percent_change": 0.005249675687069022
+      },
+      "gpu_cycles": {
+        "baseline": 0,
+        "candidate": 0,
+        "delta": 0,
+        "percent_change": 0
+      }
+    },
+    {
+      "voices": 20,
+      "mode": "stress",
+      "underruns_baseline": 0,
+      "underruns_candidate": 0,
+      "pcm_exact": true,
+      "cycles": {
+        "baseline": 24182569,
+        "candidate": 24182409,
+        "delta": -160,
+        "percent_change": -0.0006616335923581573
+      },
+      "cpu_cycles": {
+        "baseline": 24181568,
+        "candidate": 24181408,
+        "delta": -160,
+        "percent_change": -0.0006616609807941209
+      },
+      "gpu_cycles": {
+        "baseline": 15307145,
+        "candidate": 15307145,
+        "delta": 0,
+        "percent_change": 0.0
+      }
+    },
+    {
+      "voices": 32,
+      "mode": "quiet",
+      "underruns_baseline": 0,
+      "underruns_candidate": 0,
+      "pcm_exact": true,
+      "cycles": {
+        "baseline": 15890375,
+        "candidate": 15873798,
+        "delta": -16577,
+        "percent_change": -0.10432101193332821
+      },
+      "cpu_cycles": {
+        "baseline": 0,
+        "candidate": 0,
+        "delta": 0,
+        "percent_change": 0
+      },
+      "gpu_cycles": {
+        "baseline": 0,
+        "candidate": 0,
+        "delta": 0,
+        "percent_change": 0
+      }
+    },
+    {
+      "voices": 32,
+      "mode": "cpu",
+      "underruns_baseline": 1217,
+      "underruns_candidate": 1217,
+      "pcm_exact": true,
+      "cycles": {
+        "baseline": 19485767,
+        "candidate": 19355169,
+        "delta": -130598,
+        "percent_change": -0.6702225270373008
+      },
+      "cpu_cycles": {
+        "baseline": 16212637,
+        "candidate": 16212637,
+        "delta": 0,
+        "percent_change": 0.0
+      },
+      "gpu_cycles": {
+        "baseline": 0,
+        "candidate": 0,
+        "delta": 0,
+        "percent_change": 0
+      }
+    },
+    {
+      "voices": 32,
+      "mode": "stress",
+      "underruns_baseline": 1510,
+      "underruns_candidate": 1510,
+      "pcm_exact": true,
+      "cycles": {
+        "baseline": 26508950,
+        "candidate": 26508950,
+        "delta": 0,
+        "percent_change": 0.0
+      },
+      "cpu_cycles": {
+        "baseline": 26507949,
+        "candidate": 26507949,
+        "delta": 0,
+        "percent_change": 0.0
+      },
+      "gpu_cycles": {
+        "baseline": 14396666,
+        "candidate": 14396666,
+        "delta": 0,
+        "percent_change": 0.0
+      }
+    }
+  ],
+  "limits": [
+    "This removes mixer overhead, not CPU instructions; no gameFPS improvement is established.",
+    "Normal9/20voice memory loads have no underruns; both baseline and candidate32voice sustained saturation still underrun. Counts are unchanged, not fixed.",
+    "Worst synthetic CPU completion shift+803 cycles /15,296,183 (+0.00525%) is scheduling phase, not a meaningful frame benchmark; report retained verbatim.",
+    "48kHz pacing, clocks, peripheral MMIO logic and readback pipeline are unchanged. No new cache policy or software ABI.",
+    "Completed whole-core fits rejected promotion; see physical-decision.json."
+  ],
+  "artifacts_sha256": {
+    "capacity-comparison.json": "59caa975c44c7038537ddef368cd3dec511a02939f22c496db7c66fb14947c05",
+    "contention/results.json": "8e6d077e919d6076beec26bb88ebbe70998e1b7185baa42bd3076463d63dc2a5",
+    "reference-baseline/receipt.json": "ee6ffecb50d2d1d5b6cc4683198a20038c694cde2eda75f731e6490a690744c7",
+    "reference-candidate/receipt.json": "4b29572f630ab1566fcda62346b38698b8385f8e1de0a43429216c52351e03bf"
+  },
+  "final_physical_decision": "Rejected; see physical-decision.json. Generic audio and RAM placement remain unchanged.",
+  "promoted": false
+}

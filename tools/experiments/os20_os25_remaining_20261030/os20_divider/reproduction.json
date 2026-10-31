@@ -1,0 +1,39 @@
+{
+  "scope": "OS20 radix4 functional/synthetic-performance validation; no Quartus or application FPS measurement.",
+  "cpu_sha256": {
+    "2": "21c8a1274e93fd7283cae4ca2f275a920b1743978fc136c38371997944aa6a73",
+    "4": "8c34f9e887f073f00a3eaf1f00df02b118fe9ac0f00f01f270b28606a62bba2f"
+  },
+  "cpu_body_sha256": {
+    "2": "d58f23c264b533fb2e6f7e2c8e8b84c3b30d5d3d624d9e6811242c3e49827e82",
+    "4": "35b663636545144575dc3b69cad64b1e1de11faea44a4c5b0e26bdedcce24d9e"
+  },
+  "component_pass": true,
+  "interrupt_stress": {
+    "2": {
+      "cycles": 1630748,
+      "timer_interrupts": 372,
+      "passed": true,
+      "log_sha256": "3dceee34516f2095ab3c35b4a2cbf280035b2f5ef8ca72286baddfab1d8fc4b7"
+    },
+    "4": {
+      "cycles": 1540793,
+      "timer_interrupts": 349,
+      "passed": true,
+      "log_sha256": "09aba1948032ae3641f8868e17e1406018d170ee3d52a640481997d77cbf563c"
+    }
+  },
+  "latency_result_sha256": "0f0d87d05a669c36d8e67717a83874bd53b7376220bb8b55da495fb19f7253c6",
+  "configured_clock_changed": false,
+  "production_files_changed": false,
+  "deployed": false,
+  "initial_cpu_and_loaded_program_reproduced_exactly": true,
+  "all_latency_rows_and_total_cycles_reproduced_exactly": true,
+  "loaded_program_sha256": "532da6dcbc573565f78f95f98da0b57843ffa929985acd4c056a2cc88c53ad04",
+  "elf_note": "Only the random temporary assembler-object symbol name differs between runs; loaded division.bin is byte-identical.",
+  "recipe_sha256": {
+    "run.py": "3379d55d82bbf3e3b2ff9bed1cc1867f36c2fc6fc3c926ad43237f6729ac812a",
+    "measure.py": "8c526f30d6929a99befc29f95fa38bce24c13165be3c20d73e1121a66c3e8abd",
+    "main.c": "b68be33a1382bed1f93bac82b079086a3cf68597d1ed843b6f84ad92700d4b14"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "analogizer_psx.sv": {
+    "path": "src/fpga/targets/pocket/third_party/analogizer/analogizer_psx.sv",
+    "sha256": "6563d7db73e3e98bd10d2676fe778a3caa3b70294c8994961fb2e72d72eba729",
+    "reason": "Existing tracked Analogizer dependency for complete peripheral test; not copied into package."
+  },
+  "dualshock_controller.v": {
+    "path": "src/fpga/targets/pocket/third_party/analogizer/dualshock_controller.v",
+    "sha256": "593ee87e7b5e0de1dee8ebf8f19c147697e816e3cb1c2e580483f843b5d27b5b",
+    "reason": "Existing tracked Analogizer dependency for complete peripheral test; not copied into package."
+  }
+}

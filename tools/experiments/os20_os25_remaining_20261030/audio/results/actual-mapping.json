@@ -1,0 +1,77 @@
+{
+  "audio_ram_promoted": false,
+  "final_physical_decision_file": "physical-decision.json",
+  "maps": {
+    "os20-radix4-ram-s35": {
+      "map_report": "docs/measurements/os20-os25-remaining-20261030/physical/os20-radix4-ram/jobs/pocket-os20-s35/src/fpga/targets/pocket/output_files/ap_core.map.rpt",
+      "map_report_sha256": "12c41f0ae0ea230332e1818e5ee55ad1b954bcc2515b292e030b2c39a1c66b73",
+      "memories": {
+        "audio_pos": {
+          "ADDRESS_ACLR_B": "NONE",
+          "ADDRESS_REG_B": "CLOCK0",
+          "INIT_FILE": "UNUSED",
+          "NUMWORDS_A": "32",
+          "NUMWORDS_B": "32",
+          "OPERATION_MODE": "DUAL_PORT",
+          "OUTDATA_ACLR_B": "NONE",
+          "OUTDATA_REG_B": "UNREGISTERED",
+          "RAM_BLOCK_TYPE": "M10K",
+          "READ_DURING_WRITE_MODE_MIXED_PORTS": "OLD_DATA",
+          "WIDTH_A": "22",
+          "WIDTH_B": "22"
+        },
+        "sdram_wbuf": {
+          "ADDRESS_ACLR_B": "NONE",
+          "ADDRESS_REG_B": "CLOCK0",
+          "INIT_FILE": "UNUSED",
+          "NUMWORDS_A": "16",
+          "NUMWORDS_B": "16",
+          "OPERATION_MODE": "DUAL_PORT",
+          "OUTDATA_ACLR_B": "NONE",
+          "OUTDATA_REG_B": "UNREGISTERED",
+          "RAM_BLOCK_TYPE": "M10K",
+          "READ_DURING_WRITE_MODE_MIXED_PORTS": "OLD_DATA",
+          "WIDTH_A": "36",
+          "WIDTH_B": "36"
+        }
+      },
+      "passed": true
+    },
+    "os25-audio-ram-s20": {
+      "map_report": "docs/measurements/os20-os25-remaining-20261030/physical/os25-audio-ram/jobs/pocket-os25-s20/src/fpga/targets/pocket/output_files/ap_core.map.rpt",
+      "map_report_sha256": "298867fa56eb9d689f1a960f95ca145d2c9a3e0510fe765615fe1e710f6d056c",
+      "memories": {
+        "audio_pos": {
+          "ADDRESS_ACLR_B": "NONE",
+          "ADDRESS_REG_B": "CLOCK0",
+          "INIT_FILE": "UNUSED",
+          "NUMWORDS_A": "32",
+          "NUMWORDS_B": "32",
+          "OPERATION_MODE": "DUAL_PORT",
+          "OUTDATA_ACLR_B": "NONE",
+          "OUTDATA_REG_B": "UNREGISTERED",
+          "RAM_BLOCK_TYPE": "M10K",
+          "READ_DURING_WRITE_MODE_MIXED_PORTS": "OLD_DATA",
+          "WIDTH_A": "22",
+          "WIDTH_B": "22"
+        },
+        "sdram_wbuf": {
+          "ADDRESS_ACLR_B": "NONE",
+          "ADDRESS_REG_B": "CLOCK0",
+          "INIT_FILE": "UNUSED",
+          "NUMWORDS_A": "16",
+          "NUMWORDS_B": "16",
+          "OPERATION_MODE": "DUAL_PORT",
+          "OUTDATA_ACLR_B": "NONE",
+          "OUTDATA_REG_B": "UNREGISTERED",
+          "RAM_BLOCK_TYPE": "M10K",
+          "READ_DURING_WRITE_MODE_MIXED_PORTS": "OLD_DATA",
+          "WIDTH_A": "36",
+          "WIDTH_B": "36"
+        }
+      },
+      "passed": true
+    }
+  },
+  "scope": "Actual candidate map parameter checks only; area, routing and corner timing remain separate qualification."
+}

@@ -1,0 +1,67 @@
+{
+  "decision": "Do not port the full compact mixer/cache by default in this optimization pass. Prefer isolated existing nonstream bypass next.",
+  "component_synthesis": {
+    "baseline": {
+      "source_sha256": "f9cbfe37da81ae6d5564df076e75c6d28f46feabb992bb695392d06aa55e0ba4",
+      "estimated_alms": 1059,
+      "registers": 1127,
+      "dsp_blocks": 10,
+      "m10ks": 4,
+      "qsf_sha256": "27ec373449bf4e39cd7d7fb1ebfcc274462885b31719cad5030decdb43a3951c"
+    },
+    "compact": {
+      "source_sha256": "c6d2517af662f356b44617230c27aa880c449928282e738c374a2db86663f73a",
+      "estimated_alms": 991,
+      "registers": 726,
+      "dsp_blocks": 10,
+      "m10ks": 4,
+      "qsf_sha256": "27ec373449bf4e39cd7d7fb1ebfcc274462885b31719cad5030decdb43a3951c"
+    }
+  },
+  "component_estimated_alm_reduction": 68,
+  "component_register_reduction": 401,
+  "fitted_hierarchy_observations": {
+    "os20_generic": {
+      "alms_needed": 795.9,
+      "m10ks": 4,
+      "dsp": 10
+    },
+    "os25_generic": {
+      "alms_needed": 780.5,
+      "m10ks": 4,
+      "dsp": 10
+    },
+    "q2_compact": {
+      "alms_needed": 646.4,
+      "m10ks": 5,
+      "dsp": 10
+    },
+    "q2_cache": {
+      "alms_needed": 127.2,
+      "m10ks": 2,
+      "dsp": 0
+    }
+  },
+  "fit_comparison_limit": "Different full builds, optimization modes and placement. Not a controlled estimate of os20/os25 savings.",
+  "default_sdk_benefit": "None from cache: firmware writes MIX_CTRL=1; cache reset/default OFF and no SDK capability/enable calls.",
+  "cache_contract": {
+    "capability": "SCF1 at0x48000834",
+    "enable": "MIX_CTRL[1] at0x48000820",
+    "invalidation": "Each voice-register write invalidates that voice; disable clears validity",
+    "stream_policy": "Always bypass",
+    "coherence": "No CPU-store snooping. Every nonstream sample must remain immutable while playing if global cache enabled.",
+    "bypass_latency": "Adapter still has IDLE/BYPASS_AR/BYPASS_R stages; cache-off preserves payloads, not literal wire timing."
+  },
+  "workloads": {
+    "Diablo": "Decoded mono hardware SFX with owned PCM and stop-before-free; promising explicit per-app opt-in after complete lifecycle audit, not automatic current behavior.",
+    "ScummVM": "Software SFX/speech/music mix goes through one mutable stereo stream, which must bypass. MIDI sample-bank voices could benefit with proven immutable-bank lifetimes; cache does not remove software mixing CPU work.",
+    "MIDI": "Volume/rate/loop field writes invalidate voice lines frequently. Full32/rates/groups/ramping/W1C/stream semantics retained by bounded prior tests, not a generic-core capacity/timing proof."
+  },
+  "prior_proof_limits": [
+    "177 inherited checks,18432 model samples/96scenarios and capacity343rows cover compact candidate function, not formal equivalence.",
+    "Compact FSM reschedules table reads and position arithmetic; same-cycle claims in compact-v4-reuse refer to V4, not current generic mixer.",
+    "Cache-enabled52case sustained synthetic qualification is Quake2-specific; adverse32voice stereo/high-rate cases still underrun.",
+    "No os20/os25 physical fit or app-side coherent enable policy established."
+  ],
+  "next_small_candidate": "Current generic INCLUDE_NONSTREAM_BYPASS skips two backlog states only for nonstream voices; no samplecache/coherence dependency. Parent authorized isolated proof now."
+}

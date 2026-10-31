@@ -1,0 +1,6 @@
+{
+  "qualified_cpu_sha256": "311d16ddcf212320aa729d206fdb5da6674a51652da0458f67cf19f031aca295",
+  "generated_cpu_sha256": "21c8a1274e93fd7283cae4ca2f275a920b1743978fc136c38371997944aa6a73",
+  "functional_text_equal": true,
+  "difference": "Generator Git comment unavailable in isolated source copy; Git hash comment omitted. Every other byte identical."
+}

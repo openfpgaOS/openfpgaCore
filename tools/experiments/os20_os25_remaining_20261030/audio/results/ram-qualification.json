@@ -1,0 +1,101 @@
+{
+  "scope": "Attribute-only candidates, no production RTL/config edits or deployment",
+  "source_pins": {
+    "src/fpga/common/audio_mixer.v": {
+      "baseline_sha256": "b530d3c7bba3c1e0e809008131bdaade03af8f2ecf9b5375822d6bb273d779f3",
+      "candidate_sha256": "f04685a3dda06e31027ab7e102f3caea98bff4fc7e5e16beaebacb55efa4782f"
+    },
+    "src/fpga/targets/pocket/ap_core.qsf": {
+      "baseline_sha256": "5428fa9c0aa8d3ee43c9adaa66df1367b074a70409d46a8a37f609fb3e54ae04",
+      "candidate_sha256": "9b830281a807917f4add2c0726c4025fd494a79853b87c75c1e2684b6e012d58"
+    }
+  },
+  "baseline_evidence": {
+    "os20": {
+      "path": "docs/measurements/os20-timing-closure-20261001/artifacts/ap_core.fit.rpt",
+      "sha256": "e125c4eee6cff8817e5deb6f8390d0ac764a762501ba5ddec547187b9bdb9460",
+      "alms": 16795,
+      "m10ks": 228,
+      "m10ks_available": 308,
+      "m10ks_free": 80,
+      "ram_rows": [
+        "; core_top:ic|audio_mixer:audio_mixer_inst|altdpram:pos_latch_rtl_0|dpram_6no1:auto_generated|ALTDPRAM_INSTANCE                                                                                  ; MLAB       ; Simple Dual Port ; Single Clock ; 32           ; 22           ; 32           ; 22           ; yes                    ; no                      ; no                     ; yes                     ; 704    ; 32                          ; 22                          ; 32                          ; 22                          ; 704                 ; 0           ; 2     ; None               ; LAB_X42_Y36_N0, LAB_X42_Y37_N0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 ;                      ;                 ;                 ;          ;                        ;                                             ;",
+        "; core_top:ic|axi_sdram_slave:sdram_axi_slave|altdpram:wbuf_rtl_0|dpram_v9o1:auto_generated|ALTDPRAM_INSTANCE                                                                                    ; MLAB       ; Simple Dual Port ; Single Clock ; 16           ; 36           ; 16           ; 36           ; yes                    ; no                      ; no                     ; yes                     ; 576    ; 16                          ; 36                          ; 16                          ; 36                          ; 576                 ; 0           ; 2     ; None               ; LAB_X37_Y24_N0, LAB_X37_Y23_N0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 ;                      ;                 ;                 ;          ;                        ;                                             ;"
+      ],
+      "fresh_matching_source_fit_required": true
+    },
+    "os25": {
+      "path": "docs/measurements/os25-boot-debug-20261001/rollback/ap_core.fit.rpt",
+      "sha256": "456a3acbe21c8f43f8d9fdb2df4ce5e66308b4ad4450d91cc1ee8f0eae9f48e4",
+      "alms": 15362,
+      "m10ks": 296,
+      "m10ks_available": 308,
+      "m10ks_free": 12,
+      "ram_rows": [
+        "; core_top:ic|audio_mixer:audio_mixer_inst|altdpram:pos_latch_rtl_0|dpram_6no1:auto_generated|ALTDPRAM_INSTANCE                                                          ; MLAB       ; Simple Dual Port ; Single Clock ; 32           ; 22           ; 32           ; 22           ; yes                    ; no                      ; no                     ; yes                     ; 704    ; 32                          ; 22                          ; 32                          ; 22                          ; 704                 ; 0           ; 2     ; None                                      ; LAB_X45_Y32_N0, LAB_X28_Y36_N0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      ;                      ;                 ;                 ;          ;                        ;                                             ;",
+        "; core_top:ic|axi_sdram_slave:sdram_axi_slave|altdpram:wbuf_rtl_0|dpram_v9o1:auto_generated|ALTDPRAM_INSTANCE                                                            ; MLAB       ; Simple Dual Port ; Single Clock ; 16           ; 36           ; 16           ; 36           ; yes                    ; no                      ; no                     ; yes                     ; 576    ; 16                          ; 36                          ; 16                          ; 36                          ; 576                 ; 0           ; 2     ; None                                      ; LAB_X23_Y16_N0, LAB_X23_Y15_N0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      ;                      ;                 ;                 ;          ;                        ;                                             ;"
+      ],
+      "fresh_matching_source_fit_required": true
+    }
+  },
+  "behavioral_checks": {
+    "mixer_baseline": {
+      "path": "docs/measurements/os20-os25-remaining-20261030/ram/mixer-baseline/run.log",
+      "sha256": "25536eec2e87b3b6bfb353556e997581be40a23f9bea4a71c2881df3faea3136",
+      "passed": 177,
+      "failed": 0
+    },
+    "mixer_candidate": {
+      "path": "docs/measurements/os20-os25-remaining-20261030/ram/mixer-candidate/run.log",
+      "sha256": "25536eec2e87b3b6bfb353556e997581be40a23f9bea4a71c2881df3faea3136",
+      "passed": 177,
+      "failed": 0
+    },
+    "mmio_boundary": {
+      "path": "docs/measurements/os20-os25-remaining-20261030/ram/periph/run.log",
+      "sha256": "d923829e7fb3b5cc14265cca8f14c62630fbc8defb87125a68dcea3bad2f10b8",
+      "passed": 159,
+      "failed": 0
+    },
+    "wbuf_per_bank_rows": {
+      "path": "docs/measurements/os20-os25-remaining-20261030/ram/wbuf-check-generic/run.log",
+      "sha256": "84bf7e99f9f82a2d3a95f200001c4e7fa5f7593b5007e10c4359ab08e01ea4fb",
+      "passed": 491,
+      "failed": 0
+    },
+    "wbuf_single_row": {
+      "path": "docs/measurements/os20-os25-remaining-20261030/ram/wbuf-check-generic-single-row/run.log",
+      "sha256": "84bf7e99f9f82a2d3a95f200001c4e7fa5f7593b5007e10c4359ab08e01ea4fb",
+      "passed": 491,
+      "failed": 0
+    }
+  },
+  "mixer_outputs_exact": true,
+  "mapping_acceptance": {
+    "audio_pos": {
+      "depth": 32,
+      "width": 22,
+      "block": "M10K"
+    },
+    "sdram_wbuf": {
+      "depth": 16,
+      "width": 36,
+      "block": "M10K"
+    },
+    "shared": {
+      "ADDRESS_REG_B": "CLOCK0",
+      "OUTDATA_REG_B": "UNREGISTERED",
+      "READ_DURING_WRITE_MODE_MIXED_PORTS": "OLD_DATA"
+    },
+    "maximum_expected_added_m10ks": 2,
+    "additional_scheduled_cycles": 0
+  },
+  "promotion_gate": "Actual mapped primitive audit plus paired full fits and four-corner checks. Preserve or improve the same source baseline timing; no FPS gain claimed from placement changes.",
+  "limits": [
+    "Verilator ignores ramstyle attributes. This is exact behavioral source identity plus existing regressions, not primitive or post-route equivalence.",
+    "Saved baseline reports may differ from active source and cannot substitute for paired fresh fits.",
+    "No texture-queue branch/schedule change. No voice, cache, CPU, video, Dock or GPU feature removed."
+  ],
+  "final_physical_decision": "Rejected; see physical-decision.json. Generic audio and RAM placement remain unchanged.",
+  "promoted": false
+}

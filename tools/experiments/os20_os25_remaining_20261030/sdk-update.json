@@ -1,0 +1,316 @@
+{
+  "date": "2026-10-30",
+  "sdk": "/home/alberto/Repos/openfpgaSDK",
+  "applied": true,
+  "deployed_to_device": false,
+  "configured_mhz": 100,
+  "scope": "Only os20.rbf_r, os25.rbf_r, default os25 SOF and MANIFEST; SDK README documents this runtime.",
+  "changed_runtime": {
+    "MANIFEST": {
+      "bytes": 1384,
+      "md5": "2f47f304177b27ac8223bb27cbd50b04",
+      "sha256": "07187e64bbfa5521578bee825b73d6b7f53e895e2429a8f4a5939856e8f8be65"
+    },
+    "pocket/ap_core.sof": {
+      "bytes": 2441484,
+      "md5": "a972c86ad9093094959dfad000d84107",
+      "sha256": "7a885a63a4b5c4ed700bc39d4af0f24555c4b69ab35b009b46db1d7bbb2a407f"
+    },
+    "pocket/os20.rbf_r": {
+      "bytes": 2017464,
+      "md5": "0dd8c617219b42e245bfd87ad2e9f33c",
+      "sha256": "c6b536f556ef81cd2d7862ef9c032464f7dc05a554ee2c5c864e612a6e540cec"
+    },
+    "pocket/os25.rbf_r": {
+      "bytes": 2127048,
+      "md5": "0b705ccccd5b84d387b47c2cf2c45f5b",
+      "sha256": "d8d1210dff742c4b9c4177a8838ede99a0bd7967ee434f5b5ccaa1233860ff82"
+    }
+  },
+  "retained_runtime": {
+    "bank.ofsf": {
+      "bytes": 2848384,
+      "md5": "769c01d5b16c190a9d7745264e5072e4",
+      "sha256": "605fc6c6df4c3f7250854744475e9ed0a9c30e80353edab1454695f7ba8584c6"
+    },
+    "mister/openfpgaOS.rbf": {
+      "bytes": 3988128,
+      "md5": "2e5435c21ecd8f018f40b3e9acc927b9",
+      "sha256": "d4b448f43d4f26f9e94806328d69e4971fa1efa0aa3e281a9341c37a42202d52"
+    },
+    "mister/os.bin": {
+      "bytes": 147608,
+      "md5": "198dc5b243f94e8b47b81bdf4390c477",
+      "sha256": "0c607d0d480cee49b65c55c43ced3673495464d7f406174cea6dfbd0553e4ee5"
+    },
+    "pocket/loader.bin": {
+      "bytes": 199,
+      "md5": "48c625e82daf68d14680893ac8cb27af",
+      "sha256": "fc1f8d37eb0fb322006b4428f0b59d2801c9b74978bd3f24103f5f9bbfca3c99"
+    },
+    "pocket/os.bin": {
+      "bytes": 136808,
+      "md5": "bd9a5a7ecdada8625f01b691f82e3784",
+      "sha256": "054abd4b3d2c57d55b4ecec23f2fcaa3703206db3df14ebe7793c22941d34ef7"
+    },
+    "pocket/os25zf.rbf_r": {
+      "bytes": 2143688,
+      "md5": "3a960eeb817d8bd4e4f7d789e29e7f20",
+      "sha256": "eb6189f040ee56473f596cfc5f2c8c362c5f97329580a4dfe77f9aa95f603a33"
+    },
+    "pocket/os30-macxf.rbf_r": {
+      "bytes": 2163488,
+      "md5": "8558cba71c7bb0c1ac835b9c59046ec1",
+      "sha256": "b972b6bb4c9fba282a9ef23dea78581e17d1934655211290010c3718fb0b53b3"
+    },
+    "pocket/os30-vtx.rbf_r": {
+      "bytes": 2161288,
+      "md5": "a0811076cb58ea950f39cdecf67332be",
+      "sha256": "2b4a1df0d6f08d7e92cf6eaf79f3a252aef85e741079bdfc60b2054d9793250b"
+    },
+    "pocket/os30.rbf_r": {
+      "bytes": 2170428,
+      "md5": "85bd093d1935d16eecd68343ef5eb3b0",
+      "sha256": "80f46823357f99139e0a31e831510c2de5357a8c2afd2de41c38be3d42f3561e"
+    }
+  },
+  "all_unrelated_runtime_unchanged": true,
+  "pairing": {
+    "boot_rom_sha256": "e505071d970e68bb7672be27db82ff304e37d9cb3a9d04180c0f9cf61992b031",
+    "os_sha256": "054abd4b3d2c57d55b4ecec23f2fcaa3703206db3df14ebe7793c22941d34ef7",
+    "loader_sha256": "fc1f8d37eb0fb322006b4428f0b59d2801c9b74978bd3f24103f5f9bbfca3c99",
+    "same_elf_pairing_proof_sha256": "74e36a4fbaf5257c7d4c85b69d0b6e470d2bfdc1b42f0d155841e8f6e573546a"
+  },
+  "active_source_equivalence": {
+    "os20": {
+      "sources_checked": 90,
+      "only_differences": {
+        "src/fpga/vendor/vexriscv/VexiiRiscv/VexiiRiscv_os20.v": {
+          "fitted_sha256": "8c34f9e887f073f00a3eaf1f00df02b118fe9ac0f00f01f270b28606a62bba2f",
+          "canonical_sha256": "9d68f2c68cf6bf0b1ddb4f952f728fd3ca636b63fb00987000fcc131f22cf2d8",
+          "logic_sha256": "35b663636545144575dc3b69cad64b1e1de11faea44a4c5b0e26bdedcce24d9e"
+        }
+      },
+      "macros": [
+        "INCLUDE_ANALOGIZER",
+        "INCLUDE_HW_MIXER",
+        "INCLUDE_TRANSLUC",
+        "INCLUDE_PALETTE",
+        "INCLUDE_4PLAYER",
+        "EXCLUDE_GPU_PERSPECTIVE",
+        "EXCLUDE_GPU_DEPTH",
+        "INCLUDE_GPU_CLAMP_PIPE"
+      ],
+      "scope": "All frozen HDL/includes/QIP/SDC/MIF/HEX plus actual production macros and CPU, seed and processor count. CPU permits only two provenance comment lines.",
+      "selected_timing": {
+        "seed": 35,
+        "minimum_main_restricted_fmax_mhz": 95.26,
+        "worst_slack_ns": {
+          "hold": 0.042,
+          "pulse_width": 0.5,
+          "recovery": 2.287,
+          "removal": 0.33,
+          "setup": -0.498
+        },
+        "resources": {
+          "ALMs": {
+            "available": 18480,
+            "used": 16468
+          },
+          "DSPs": {
+            "available": 66,
+            "used": 22
+          },
+          "LABs": {
+            "available": 1848,
+            "used": 1822
+          },
+          "M10Ks": {
+            "available": 308,
+            "used": 228
+          }
+        },
+        "nonsetup_clean": true,
+        "nonmain_setup_clean": true,
+        "cross_clock_setup_clean": true,
+        "input_setup_clean": true,
+        "timing_closed_at_configured_100_mhz": false,
+        "actual_fitted_cpu_sha256": "8c34f9e887f073f00a3eaf1f00df02b118fe9ac0f00f01f270b28606a62bba2f",
+        "canonical_cpu_sha256": "9d68f2c68cf6bf0b1ddb4f952f728fd3ca636b63fb00987000fcc131f22cf2d8",
+        "cpu_body_sha256": "35b663636545144575dc3b69cad64b1e1de11faea44a4c5b0e26bdedcce24d9e"
+      }
+    },
+    "os25": {
+      "sources_checked": 90,
+      "only_differences": {
+        "src/fpga/vendor/vexriscv/VexiiRiscv/VexiiRiscv_os25.v": {
+          "fitted_sha256": "d73f954af9d56146e0172c62677e0cc46a3ce7e5661098c237ce0203382fe0ad",
+          "canonical_sha256": "bb48dc6a19a9bc8d36160172789c13ab17362154380bf4867c0bd1b2c414ca51",
+          "logic_sha256": "c0fa91d5d316df9e88cf06eafb4b890dc40883136c1abe35a88a142dbbe775d0"
+        }
+      },
+      "macros": [
+        "INCLUDE_ANALOGIZER",
+        "INCLUDE_HW_MIXER",
+        "INCLUDE_TRANSLUC",
+        "INCLUDE_PALETTE",
+        "INCLUDE_COLUMN_LIST",
+        "INCLUDE_COMPACT_SPAN",
+        "INCLUDE_PARAM_SPAN_Q29",
+        "INCLUDE_4PLAYER",
+        "INCLUDE_BANK_ROW_TRACK",
+        "INCLUDE_CPU_RING",
+        "INCLUDE_GPU_WRITE_BURSTS",
+        "EXCLUDE_GPU_COMMAND_DMA",
+        "INCLUDE_SPAN_DEDICATED_MULT"
+      ],
+      "scope": "All frozen HDL/includes/QIP/SDC/MIF/HEX plus actual production macros and CPU, seed and processor count. CPU permits only two provenance comment lines.",
+      "selected_timing": {
+        "seed": 20,
+        "minimum_main_restricted_fmax_mhz": 96.87,
+        "worst_slack_ns": {
+          "hold": 0.078,
+          "pulse_width": 0.5,
+          "recovery": 2.608,
+          "removal": 0.478,
+          "setup": -0.323
+        },
+        "resources": {
+          "ALMs": {
+            "available": 18480,
+            "used": 15490
+          },
+          "DSPs": {
+            "available": 66,
+            "used": 28
+          },
+          "LABs": {
+            "available": 1848,
+            "used": 1802
+          },
+          "M10Ks": {
+            "available": 308,
+            "used": 296
+          }
+        },
+        "nonsetup_clean": true,
+        "nonmain_setup_clean": true,
+        "cross_clock_setup_clean": true,
+        "input_setup_clean": true,
+        "timing_closed_at_configured_100_mhz": false,
+        "actual_fitted_cpu_sha256": "d73f954af9d56146e0172c62677e0cc46a3ce7e5661098c237ce0203382fe0ad",
+        "canonical_cpu_sha256": "bb48dc6a19a9bc8d36160172789c13ab17362154380bf4867c0bd1b2c414ca51",
+        "cpu_body_sha256": "c0fa91d5d316df9e88cf06eafb4b890dc40883136c1abe35a88a142dbbe775d0"
+      }
+    }
+  },
+  "sdk_image_validation": {
+    "passed": true,
+    "scope": "Real SDK image.sh and updated runtime bytes; placeholder app tests packaging, not hardware boot or app execution. All outputs temporary; no SD writes.",
+    "image_script_sha256": "868b784cde44fef8d857e4cbfa060a32d5e74cb9eaad6bcf9a6637038988a701",
+    "runtime_manifest_sha256": "07187e64bbfa5521578bee825b73d6b7f53e895e2429a8f4a5939856e8f8be65",
+    "cases": [
+      {
+        "case": "os20",
+        "selected_bitstreams": [
+          "os20.rbf_r"
+        ],
+        "verified_core_sha256": {
+          "Cores/os20.rbf_r": "c6b536f556ef81cd2d7862ef9c032464f7dc05a554ee2c5c864e612a6e540cec",
+          "Cores/loader.bin": "fc1f8d37eb0fb322006b4428f0b59d2801c9b74978bd3f24103f5f9bbfca3c99"
+        },
+        "os_sha256": "054abd4b3d2c57d55b4ecec23f2fcaa3703206db3df14ebe7793c22941d34ef7",
+        "manifest_guard_passed": true,
+        "dist_unchanged": true
+      },
+      {
+        "case": "os25",
+        "selected_bitstreams": [
+          "os25.rbf_r"
+        ],
+        "verified_core_sha256": {
+          "Cores/os25.rbf_r": "d8d1210dff742c4b9c4177a8838ede99a0bd7967ee434f5b5ccaa1233860ff82",
+          "Cores/loader.bin": "fc1f8d37eb0fb322006b4428f0b59d2801c9b74978bd3f24103f5f9bbfca3c99"
+        },
+        "os_sha256": "054abd4b3d2c57d55b4ecec23f2fcaa3703206db3df14ebe7793c22941d34ef7",
+        "manifest_guard_passed": true,
+        "dist_unchanged": true
+      },
+      {
+        "case": "os30",
+        "selected_bitstreams": [
+          "os30.rbf_r"
+        ],
+        "verified_core_sha256": {
+          "Cores/os30.rbf_r": "80f46823357f99139e0a31e831510c2de5357a8c2afd2de41c38be3d42f3561e",
+          "Cores/loader.bin": "fc1f8d37eb0fb322006b4428f0b59d2801c9b74978bd3f24103f5f9bbfca3c99"
+        },
+        "os_sha256": "054abd4b3d2c57d55b4ecec23f2fcaa3703206db3df14ebe7793c22941d34ef7",
+        "manifest_guard_passed": true,
+        "dist_unchanged": true
+      },
+      {
+        "case": "menu",
+        "selected_bitstreams": [
+          "os25.rbf_r",
+          "os30.rbf_r"
+        ],
+        "verified_core_sha256": {
+          "Cores/os30.rbf_r": "80f46823357f99139e0a31e831510c2de5357a8c2afd2de41c38be3d42f3561e",
+          "Cores/os25.rbf_r": "d8d1210dff742c4b9c4177a8838ede99a0bd7967ee434f5b5ccaa1233860ff82",
+          "Cores/loader.bin": "fc1f8d37eb0fb322006b4428f0b59d2801c9b74978bd3f24103f5f9bbfca3c99"
+        },
+        "os_sha256": "054abd4b3d2c57d55b4ecec23f2fcaa3703206db3df14ebe7793c22941d34ef7",
+        "manifest_guard_passed": true,
+        "dist_unchanged": true
+      },
+      {
+        "case": "override",
+        "selected_bitstreams": [
+          "os20.rbf_r",
+          "os30.rbf_r"
+        ],
+        "verified_core_sha256": {
+          "Cores/os20.rbf_r": "c6b536f556ef81cd2d7862ef9c032464f7dc05a554ee2c5c864e612a6e540cec",
+          "Cores/os30.rbf_r": "80f46823357f99139e0a31e831510c2de5357a8c2afd2de41c38be3d42f3561e",
+          "Cores/loader.bin": "fc1f8d37eb0fb322006b4428f0b59d2801c9b74978bd3f24103f5f9bbfca3c99"
+        },
+        "os_sha256": "054abd4b3d2c57d55b4ecec23f2fcaa3703206db3df14ebe7793c22941d34ef7",
+        "manifest_guard_passed": true,
+        "dist_unchanged": true
+      }
+    ]
+  },
+  "other_checks": {
+    "runtime_manifest_entries": 12,
+    "offline_packaging_groups_passed": 10,
+    "os25_gpu_acceptance_passed": 276,
+    "os25_gpu_acceptance_failed": 0,
+    "firmware_contract_check": "pass",
+    "generic_audio_and_os30_shadow_selection": "pass"
+  },
+  "limits": [
+    "Targeted fits, not a full sweep.",
+    "Main setup does not close at configured 100 MHz.",
+    "No new Pocket hardware test or measured game FPS result.",
+    "OS20 mixed CPU/IRQ cycle reduction is 5.516%; OS25 baseline cycle behavior retained."
+  ],
+  "local_evidence": {
+    "docs/measurements/os20-os25-remaining-20261030/integration/sdk-update/plan.json": {
+      "sha256": "bc4ca95949c3720087a578e1052447b7a8eae7d64e1a1e5cacc7480fc44f0bce"
+    },
+    "docs/measurements/os20-os25-remaining-20261030/integration/sdk-update/applied.json": {
+      "sha256": "86073f17f82d0f9c02823c3a5ada9944b045bdb44c2cc9f5f685d1024e446150"
+    },
+    "docs/measurements/os20-os25-remaining-20261030/integration/sdk-image-validation.json": {
+      "sha256": "0a53a3c35b57004a0ffcb8770f7731654da456ef82f0c41a279efeea5a71b658"
+    },
+    "docs/measurements/os20-os25-remaining-20261030/integration/active-os20-equivalence.json": {
+      "sha256": "43e6a915f127e086c517f67d4c54fc6a5d7dd466b577b8530d6b977ffd5a4f6a"
+    },
+    "docs/measurements/os20-os25-remaining-20261030/integration/active-os25-equivalence.json": {
+      "sha256": "9296d799c79a6bc41b54b636d761ac042eebb3728d1ba21e86d2e4aea592685a"
+    }
+  },
+  "backup": "docs/measurements/os20-os25-remaining-20261030/integration/sdk-update/backup/runtime"
+}

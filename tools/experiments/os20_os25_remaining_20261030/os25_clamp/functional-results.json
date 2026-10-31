@@ -1,0 +1,46 @@
+{
+  "change": "Only enable INCLUDE_GPU_CLAMP_PIPE in otherwise exact os25 configuration",
+  "sources_identical": true,
+  "parameters_identical": true,
+  "isa_or_cache_change": false,
+  "physical_pending": true,
+  "source_lines": {
+    "span_constant_mirrors": "src/fpga/common/gpu_core.v:2720",
+    "existing_stage_resolution": "src/fpga/common/gpu_core.v:4134",
+    "existing_stage_transfer": "src/fpga/common/gpu_core.v:9415",
+    "raw_coordinate_and_comparison_capture": "src/fpga/common/gpu_core.v:9468"
+  },
+  "tests": {
+    "quiet": {
+      "byte_identical": true,
+      "sha256": "1387e7f53b4a41e41fe70cd44e6b79bd8a1a2f9c7f42cc00752baaffd962084f",
+      "passed": 276,
+      "failed": 0,
+      "cycles": 20723980
+    },
+    "delayed": {
+      "byte_identical": true,
+      "sha256": "609d79bd3e2616fa4d51a88704a0c9615bdfe02df76aa304a4c7794f34e1a8e5",
+      "passed": 277,
+      "failed": 0,
+      "cycles": 21704223
+    },
+    "perf-quiet": {
+      "byte_identical": true,
+      "sha256": "18591633516e4e77934737f7041e9b9ae15e2c0523aba05cc0eea182f2912240",
+      "cycles": [
+        9826,
+        12312
+      ]
+    },
+    "perf-delayed": {
+      "byte_identical": true,
+      "sha256": "6c386f9b02d65cb2a75cfbd9c978f97be480406bbf2815d387c6665bdd892bc6",
+      "cycles": [
+        29433,
+        41747
+      ]
+    }
+  },
+  "all_pass": true
+}

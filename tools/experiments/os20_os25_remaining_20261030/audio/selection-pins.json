@@ -1,0 +1,6 @@
+{
+  "os30_audio_mixer": {
+    "path": "src/fpga/common/os30/audio_mixer.v",
+    "sha256": "f9cbfe37da81ae6d5564df076e75c6d28f46feabb992bb695392d06aa55e0ba4"
+  }
+}
