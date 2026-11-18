@@ -1,3 +1,29 @@
+OS20 audio level and memory update — 2026-11-17 (openfpgaOS v0.9.1)
+
+The hardware mixer's final mix-down divides by 4 instead of 16, so one
+full-scale centred voice now reaches about a quarter of full scale rather than
+a sixteenth (+12 dB). The software mixer and both mixer benches match. The
+change is in the shared mixer RTL; only the os20 bitstream has been rebuilt and
+republished, so os25/os30/MiSTer images keep the earlier level until they are
+rebuilt. Reported as openfpgaOS/Diablo#1.
+
+os20 now enables per-bank SDRAM open-row tracking, and the Pocket scanout
+fetches each line in 40-word sub-bursts so CPU word operations interleave with
+it. On the synthetic 100 MHz, 9-voice contention workload the row-tracking
+build takes about 6% fewer cycles; this is not a game FPS result. An earlier
+write-response pulse was measured, cost about 0.3 ns of setup slack for a 2.2%
+synthetic gain, and was not retained.
+
+Kernel: of_time_us/of_time_ms use the services table and a 32-bit divide,
+mmap slot scans are bounded by the highest slot in use, and loops align to 8
+bytes instead of 64 (os.bin 127,848 bytes, down from 136,808).
+
+Seed 25 (best of seeds 1-41) uses 16,005 ALMs and 228 M10Ks. Four-corner
+analysis estimates 94.66 MHz, with setup -0.564 ns at the configured 100 MHz
+and worst hold +0.074 ns. All 300 worst setup paths are internal to the CPU.
+This is not 100 MHz timing closure. The build boots and runs Diablo on a
+Pocket with the expected audio level; no soak or FPS measurement was made.
+
 OS20 / OS25 optimization qualification — 2026-10-30
 
 The current campaign is documented in:

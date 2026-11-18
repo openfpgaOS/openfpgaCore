@@ -61,6 +61,7 @@ module tb_scanout_race #(
     parameter GPU_HAS_COMPACT_SPAN   = 1,
     parameter GPU_HAS_COLUMN_LIST    = 1,
     parameter BANK_ROW_TRACK         = 1,
+    parameter FETCH_CHUNK_WORDS      = 0,   // scanout line-fetch sub-burst size (0 = one burst per line)
     // clk:clk_vid divider.  16 => clk_vid = 100/16 = 6.25 MHz model rate; the
     // RATIO that matters is (clk_sdram cycles per scanout line-burst) — see the
     // C++ notes.  Overridable from the Makefile to sweep GPU-vs-scanout rate.
@@ -578,7 +579,8 @@ assign scanout_burst_data_valid_o  = scan_burst_data_valid;
 assign scanout_burst_data_o        = scan_burst_data;
 
 video_CRT_scanout_indexed_BRAM #(
-    .HAS_ANALOG_RASTER(0)   // LCD-only: MiSTer prunes the analog raster cone
+    .HAS_ANALOG_RASTER(0),  // LCD-only: MiSTer prunes the analog raster cone
+    .FETCH_CHUNK_WORDS(FETCH_CHUNK_WORDS)
 ) scanout (
         .fetch_diag(),
     .clk_video(clk_vid),

@@ -26,7 +26,7 @@
  *   2. Per-sample render + DAC pump.  sw_mixer_render() reproduces
  *      audio_mixer.v's exact per-sample arithmetic (Q16.16 position,
  *      2-tap linear interpolation, group*master*voice volume composition,
- *      per-channel volume ramp, loop / one-shot voice-end, /16 mixdown +
+ *      per-channel volume ramp, loop / one-shot voice-end, /4 mixdown +
  *      s16 saturation).  sw_mixer_pump() polls the DAC FIFO status at
  *      AUDIO_BASE+0x00 and pushes finished stereo pairs to AUDIO_PCM_SAMPLE
  *      (AUDIO_BASE+0x04) until the FIFO is full.  Driven from the 1 kHz

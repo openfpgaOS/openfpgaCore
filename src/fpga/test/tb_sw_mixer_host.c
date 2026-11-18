@@ -16,7 +16,7 @@
 //      configs (mono/stereo, looping/one-shot, ramps, group/master volume).
 //
 //   2. Oracle anchors: the documented expectations from
-//      tb_audio_mixer_main.cpp (center sample ~1000, group composition
+//      tb_audio_mixer_main.cpp (center sample ~4000, group composition
 //      formula, master mute, voice-end IRQ) hold for sw_mixer_render().
 //
 // Build/run:
@@ -151,8 +151,8 @@ static void ref_render(ref_voice_t *vs, int nv, uint8_t master,
             uint8_t nl = ref_ramp(vl, tl, V->vol_rate & 0xFF), nrr = ref_ramp(vr, tr, V->vol_rate & 0xFF);
             if (nl != vl || nrr != vr) V->vol_lr = ((uint32_t)nrr << 8) | nl;
         }
-        out[f * 2]     = enabled ? ref_sat(al >> 4) : 0;
-        out[f * 2 + 1] = enabled ? ref_sat(ar >> 4) : 0;
+        out[f * 2]     = enabled ? ref_sat(al >> 2) : 0;
+        out[f * 2 + 1] = enabled ? ref_sat(ar >> 2) : 0;
     }
 }
 
@@ -242,7 +242,7 @@ int main(void) {
         }
     }
 
-    /* ---- Oracle anchor: center sample ~1000 (tb_audio_mixer
+    /* ---- Oracle anchor: center sample ~4000 (tb_audio_mixer
      * test_explicit_lr_targets: constant +16384 sample, full vol). ---- */
     {
         reset_all();
@@ -253,9 +253,9 @@ int main(void) {
         sw_mixer_render(out, 4);
         /* Sample 0 starts at vol_lr=0; with vol_rate=0 it snaps to target on
          * sample 1.  By sample 3 it is full-scale: 16384 * 255 >> 8 = 16320,
-         * mixed down >> 4 = 1020. */
-        ck_range("oracle: center L (~1000)", out[3*2],   900, 1100);
-        ck_range("oracle: center R (~1000)", out[3*2+1], 900, 1100);
+         * mixed down >> 2 = 4080. */
+        ck_range("oracle: center L (~4000)", out[3*2],   3600, 4400);
+        ck_range("oracle: center R (~4000)", out[3*2+1], 3600, 4400);
     }
 
     /* ---- Oracle anchor: group composition.  voice in group 2,

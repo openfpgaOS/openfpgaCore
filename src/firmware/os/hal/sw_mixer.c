@@ -521,11 +521,11 @@ void sw_mixer_render(int16_t *out, int nframes)
 
         sw_active_mask = live_mask;
 
-        /* ---- OUTPUT (S_OUTPUT): /16 mixdown + s16 saturate ---- */
+        /* ---- OUTPUT (S_OUTPUT): /4 mixdown + s16 saturate ---- */
         int16_t out_l, out_r;
         if (enabled) {
-            out_l = sat16(accum_l >> 4);
-            out_r = sat16(accum_r >> 4);
+            out_l = sat16(accum_l >> 2);
+            out_r = sat16(accum_r >> 2);
         } else {
             out_l = 0;
             out_r = 0;

@@ -3182,10 +3182,14 @@ assign video_hs = vidout_hs;
         // pipeline and the 2048x32 analog line cache (8 M10Ks).  The LCD
         // fetch/decode path is identical in both configs.
 `ifdef INCLUDE_ANALOGIZER
-        .HAS_ANALOG_RASTER(1)
+        .HAS_ANALOG_RASTER(1),
 `else
-        .HAS_ANALOG_RASTER(0)
+        .HAS_ANALOG_RASTER(0),
 `endif
+        // Fetch each line as sub-bursts of <= 40 words (4 per 640-wide 8bpp
+        // line) so a CPU miss or GPU write waits behind one chunk instead
+        // of a whole line.  See the parameter comment in the module.
+        .FETCH_CHUNK_WORDS(40)
     ) scanout (
         .fetch_diag(scanout_fetch_diag),
         .clk_video(clk_vid),

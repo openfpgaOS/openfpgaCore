@@ -472,6 +472,9 @@ $(GPU_CB_SCAN_DIR)/V$(SCANOUT_RACE_TOP): $(SCANOUT_RACE_SRCS) $(SCANOUT_RACE_CPP
 
 # Pocket model: out_height = app-native (200) — lower scanout bandwidth, the
 # source buffer is freed faster, so the GPU should never overtake the reader.
+# FETCH_CHUNK_WORDS=40 matches core_top's scanout instance (line fetch split
+# into sub-bursts so word ops interleave), so this is the bench that covers
+# the chunked fetch path against the real io_sdram.
 scanout-race-pocket: $(SCANOUT_RACE_POCKET_DIR)/V$(SCANOUT_RACE_TOP)
 	@printf "\n=== SCANOUT vs GPU read-during-write race (Pocket: out 640x200) ===\n"
 	@printf "\n--- REAL GPU-triggered flip path (Pocket scanout bandwidth) ---\n"
@@ -482,6 +485,7 @@ scanout-race-pocket: $(SCANOUT_RACE_POCKET_DIR)/V$(SCANOUT_RACE_TOP)
 $(SCANOUT_RACE_POCKET_DIR)/V$(SCANOUT_RACE_TOP): $(SCANOUT_RACE_SRCS) $(SCANOUT_RACE_CPP)
 	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) $(SCANOUT_RACE_FLAGS) \
 		-GOUT_HEIGHT=200 \
+		-GFETCH_CHUNK_WORDS=40 \
 		--top-module $(SCANOUT_RACE_TOP) --Mdir $(SCANOUT_RACE_POCKET_DIR) \
 		-I$(COMMON_DIR) \
 		$(SCANOUT_RACE_SRCS) $(SCANOUT_RACE_CPP)

@@ -1351,15 +1351,16 @@ always @(posedge clk) begin
         reg [15:0] out_l, out_r;
         reg signed [ACCUM_W-1:0] mix_l, mix_r;
         begin
-            /* Mix-down /16 — 8× more headroom than the original /2.
-             * audio_output's 1.25× boost + 2:1 soft-knee saturator
-             * has been removed (clean passthrough), so /16 is the
-             * sole attenuation in the chain.  Worst case 32 voices x
-             * full-scale exceeds s16 after /16 and clamps cleanly at the
-             * saturator boundary; realistic busy mixes well under.
-             * Loudness compensation lives in master_vol/group_vol. */
-            mix_l = accum_l >>> 4;
-            mix_r = accum_r >>> 4;
+            /* Mix-down /4.  One full-scale voice lands at 1/4 of s16
+             * (-12 dBFS); four coherent full-scale voices reach the
+             * clamp.  The earlier /16 left a single voice at -24 dBFS,
+             * which no app could win back (group/master top out at
+             * unity) -- every port was audibly quiet.  audio_output is
+             * a clean passthrough, so this shift plus the s16 clamp
+             * below is the whole output gain stage; dense mixes that
+             * need more headroom pull group_vol/master_vol down. */
+            mix_l = accum_l >>> 2;
+            mix_r = accum_r >>> 2;
             out_l = (mix_l > ACCUM_OUT_MAX) ? 16'h7FFF :
                     (mix_l < ACCUM_OUT_MIN) ? 16'h8000 :
                                              mix_l[15:0];

@@ -1934,6 +1934,25 @@ typedef struct {
 static mmap_slot_t mmap_slots[MMAP_SLOTS];
 static int         mmap_slots_used;
 
+/* Scan bound: every in-use slot has an index below mmap_slots_hi.
+ *
+ * The table is 4096 x 12 B = 48 KB, and each mmap/munmap used to sweep all
+ * of it several times (coalesce to fixed point, best-fit, slot search) --
+ * most of a 64 KB D-cache evicted per call, for a table that typically
+ * holds a few hundred live entries.  Slots are handed out lowest-index
+ * first, so the live entries stay packed at the bottom and the bound stays
+ * close to the live count.
+ *
+ * The invariant is one-sided on purpose: the bound may sit ABOVE the true
+ * highest live slot (after a table reset that did not clear it, say), which
+ * only costs scan time.  It must never sit below one. */
+static int         mmap_slots_hi;
+
+static void mmap_trim_hi(void) {
+    while (mmap_slots_hi > 0 && !mmap_slots[mmap_slots_hi - 1].base)
+        mmap_slots_hi--;
+}
+
 static int mmap_alloc_slot(void);   /* used by the splitting reuse path */
 
 static void mmap_coalesce_bottom(void) {
@@ -1950,7 +1969,7 @@ static void mmap_coalesce_bottom(void) {
     int changed;
     do {
         changed = 0;
-        for (int i = 0; i < MMAP_SLOTS; i++) {
+        for (int i = 0; i < mmap_slots_hi; i++) {
             mmap_slot_t *s = &mmap_slots[i];
             if (!s->base || !s->free)
                 continue;
@@ -1964,6 +1983,7 @@ static void mmap_coalesce_bottom(void) {
             }
         }
     } while (changed);
+    mmap_trim_hi();
 }
 
 /* Merge adjacent free regions into one slot.
@@ -1982,11 +2002,11 @@ static void mmap_merge_free(void) {
     int changed;
     do {
         changed = 0;
-        for (int i = 0; i < MMAP_SLOTS; i++) {
+        for (int i = 0; i < mmap_slots_hi; i++) {
             mmap_slot_t *s = &mmap_slots[i];
             if (!s->base || !s->free)
                 continue;
-            for (int j = 0; j < MMAP_SLOTS; j++) {
+            for (int j = 0; j < mmap_slots_hi; j++) {
                 mmap_slot_t *t = &mmap_slots[j];
                 if (i == j || !t->base || !t->free)
                     continue;
@@ -2001,6 +2021,7 @@ static void mmap_merge_free(void) {
             }
         }
     } while (changed);
+    mmap_trim_hi();
 }
 
 /* Best fit over the free regions, splitting the remainder back into the
@@ -2018,7 +2039,7 @@ static void mmap_merge_free(void) {
  * the caller's requested length, so sys_munmap's bookkeeping stays exact. */
 static int mmap_find_reusable(uintptr_t want_len) {
     int best = -1;
-    for (int i = 0; i < MMAP_SLOTS; i++) {
+    for (int i = 0; i < mmap_slots_hi; i++) {
         mmap_slot_t *s = &mmap_slots[i];
         if (!s->base || !s->free || s->len < want_len)
             continue;
@@ -2049,10 +2070,15 @@ static int mmap_find_reusable(uintptr_t want_len) {
     return best;
 }
 
+/* Lowest free slot.  Every caller fills the returned slot (sets .base)
+ * before the table is scanned again, so extending the bound here keeps the
+ * mmap_slots_hi invariant without a separate "commit" step. */
 static int mmap_alloc_slot(void) {
-    for (int i = 0; i < MMAP_SLOTS; i++)
+    for (int i = 0; i < mmap_slots_hi; i++)
         if (!mmap_slots[i].base)
             return i;
+    if (mmap_slots_hi < MMAP_SLOTS)
+        return mmap_slots_hi++;
     return -1;
 }
 
@@ -2191,7 +2217,7 @@ static long sys_munmap(long addr, long length) {
      * Base is unique across live regions, so it identifies the allocation on
      * its own; the caller's length is ignored entirely. */
     (void)len;
-    for (int i = 0; i < MMAP_SLOTS; i++) {
+    for (int i = 0; i < mmap_slots_hi; i++) {
         mmap_slot_t *s = &mmap_slots[i];
         if (s->base != base || s->free)
             continue;
@@ -2993,6 +3019,7 @@ void syscall_init(uintptr_t heap_start) {
      * reseeded. */
     memset(mmap_slots, 0, sizeof(mmap_slots));
     mmap_slots_used = 0;
+    mmap_slots_hi = 0;
 
     /* Reset file slot registry (apps re-register on startup) */
     file_slot_count = 0;
@@ -3020,5 +3047,6 @@ int syscall_set_app_stack_top(uintptr_t stack_top)
     mmap_bottom = bottom;
     memset(mmap_slots, 0, sizeof(mmap_slots));
     mmap_slots_used = 0;
+    mmap_slots_hi = 0;
     return 0;
 }

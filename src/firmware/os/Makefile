@@ -76,7 +76,7 @@ CFLAGS += -fno-builtin
 CFLAGS += -fsingle-precision-constant
 CFLAGS += $(EXTRA_CFLAGS)
 # Cache-line align hot code so I$ refills are one transaction.
-CFLAGS += -falign-functions=64 -falign-loops=64
+CFLAGS += -falign-functions=64 -falign-loops=8
 # Don't auto-rewrite plain loops as memset/memcpy calls.
 CFLAGS += -fno-tree-loop-distribute-patterns
 CFLAGS += -I. -I$(HAL_DIR) -I$(TARGET_DIR) -I$(KERNEL_DIR) -I$(BOOT_DIR) -I$(API_DIR) -I$(SHARED_DIR) -I$(ISO9660_DIR)
@@ -323,7 +323,7 @@ $(FW_TARGET).lst: $(FW_TARGET).elf
 # so losing the I-cache line alignment is fine.
 $(BLD)/$(BOOT_DIR)/%.o: $(BOOT_DIR)/%.c
 	@mkdir -p $(dir $@)
-	$(CC) $(filter-out -falign-functions=64 -falign-loops=64,$(CFLAGS)) -falign-functions=4 -falign-loops=4 -DOF_TARGET_BOOT_ABI=$(BOOT_ABI)u -c -o $@ $<
+	$(CC) $(filter-out -falign-functions=64 -falign-loops=8,$(CFLAGS)) -falign-functions=4 -falign-loops=4 -DOF_TARGET_BOOT_ABI=$(BOOT_ABI)u -c -o $@ $<
 
 $(BLD)/$(BOOT_DIR)/%.o: $(BOOT_DIR)/%.S
 	@mkdir -p $(dir $@)

@@ -29,7 +29,25 @@ module video_CRT_scanout_indexed_BRAM #(
     // Analog outputs park at their reset values (blank, syncs idle).
     // Set 0 on builds without INCLUDE_ANALOGIZER (Pocket OS30 / MiSTer);
     // the Analogizer-capable OS25 build keeps the default 1.
-    parameter HAS_ANALOG_RASTER = 1
+    parameter HAS_ANALOG_RASTER = 1,
+    // Line-fetch chunking.  0 (default) fetches each output line as ONE
+    // SDRAM burst, as always.  N > 0 splits it into sub-bursts of at most N
+    // words, issued back to back.
+    //
+    // Why: the line fetch outranks every other SDRAM client and cannot be
+    // preempted, so at 640x480x8 (160 words, ~330 cycles, once per line)
+    // every CPU cache miss and GPU write that lands behind it waits out the
+    // whole line.  Between sub-bursts the controller passes through its
+    // idle dispatch, where its existing one-shot defer lets at most ONE
+    // queued word op go first -- so the worst-case wait behind scanout drops
+    // from a full line to one chunk, while scanout is delayed by at most
+    // one word op per chunk boundary.  The fetch has a whole line period of
+    // slack, so that bounded delay is free.
+    //
+    // Off by default because MiSTer shares this module but arbitrates the
+    // burst port between scanout and the frame DMA (video_burst_arb), where
+    // sub-bursts would let the DMA in mid-line; enable per target.
+    parameter FETCH_CHUNK_WORDS = 0
 ) (
     // Video clock domain (12.288 MHz)
     input wire clk_video,
@@ -1203,6 +1221,7 @@ module video_CRT_scanout_indexed_BRAM #(
     localparam ST_IDLE = 2'd0;
     localparam ST_BURST = 2'd1;
     localparam ST_CALC = 2'd3;
+    localparam ST_CHUNK = 2'd2;   // issue next sub-burst (FETCH_CHUNK_WORDS != 0)
 
     reg [1:0] state;
 
@@ -1222,6 +1241,13 @@ module video_CRT_scanout_indexed_BRAM #(
 
     // Words received this burst, counting a beat landing on the done cycle.
     wire [10:0] rx_words_now = {2'b00, write_ptr} + (burst_data_valid ? 11'd1 : 11'd0);
+
+    // Sub-burst bookkeeping (unused, and optimised away, when
+    // FETCH_CHUNK_WORDS == 0).
+    reg  [10:0] fetch_rem;      // words of this line not yet requested
+    reg  [10:0] fetch_expect;   // words requested so far this line
+    wire [10:0] chunk_max = FETCH_CHUNK_WORDS;
+    wire [10:0] chunk_len = (fetch_rem > chunk_max) ? chunk_max : fetch_rem;
 
     function [10:0] burst_len_for_mode;
         input [2:0] mode;
@@ -1273,6 +1299,8 @@ module video_CRT_scanout_indexed_BRAM #(
             calc_stride <= 0;
             calc_mode <= 0;
             calc_width <= 0;
+            fetch_rem <= 0;
+            fetch_expect <= 0;
         end else begin
             fetch_request_sync1 <= fetch_request;
             fetch_request_sync2 <= fetch_request_sync1;
@@ -1337,7 +1365,26 @@ module video_CRT_scanout_indexed_BRAM #(
                 ST_CALC: begin
                     burst_addr <= calc_base +
                         line_offset_for_stride(calc_line, calc_stride);
-                    burst_len <= burst_len_for_mode(calc_mode, calc_width);
+                    if (FETCH_CHUNK_WORDS == 0) begin
+                        burst_len <= burst_len_for_mode(calc_mode, calc_width);
+                        burst_rd <= 1;
+                        state <= ST_BURST;
+                    end else begin
+                        // Chunked: stage the whole-line length and let
+                        // ST_CHUNK carve it, keeping the min() off this
+                        // state's multiply+add+len cone.
+                        fetch_rem <= burst_len_for_mode(calc_mode, calc_width);
+                        fetch_expect <= 11'd0;
+                        state <= ST_CHUNK;
+                    end
+                end
+
+                // Issue the next sub-burst (FETCH_CHUNK_WORDS != 0 only).
+                // burst_addr was set by ST_CALC or advanced by ST_BURST.
+                ST_CHUNK: begin
+                    burst_len    <= chunk_len;
+                    fetch_rem    <= fetch_rem - chunk_len;
+                    fetch_expect <= fetch_expect + chunk_len;
                     burst_rd <= 1;
                     state <= ST_BURST;
                 end
@@ -1352,12 +1399,24 @@ module video_CRT_scanout_indexed_BRAM #(
                     end
                     if (burst_data_done) begin
                         // Short/over-fetch detector: words received (incl. a
-                        // beat arriving this cycle) must equal burst_len.
-                        if (rx_words_now != burst_len) begin
+                        // beat arriving this cycle) must equal burst_len --
+                        // or, when chunking, the running total requested so
+                        // far (write_ptr counts across the whole line).
+                        if (rx_words_now != ((FETCH_CHUNK_WORDS == 0) ? burst_len
+                                                                      : fetch_expect)) begin
                             fetch_diag[15:0]  <= fetch_diag[15:0] + 16'd1;
                             fetch_diag[31:16] <= {5'b0, rx_words_now};
                         end
-                        state <= ST_IDLE;
+                        if ((FETCH_CHUNK_WORDS != 0) && (fetch_rem != 11'd0)) begin
+                            // More of this line to fetch: step past the
+                            // words just read (burst_addr counts 16-bit
+                            // units, two per 32-bit burst word) and issue
+                            // the next sub-burst.
+                            burst_addr <= burst_addr + {13'd0, burst_len, 1'b0};
+                            state <= ST_CHUNK;
+                        end else begin
+                            state <= ST_IDLE;
+                        end
                     end
                 end
 

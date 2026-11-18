@@ -16,13 +16,44 @@ void of_timer_init(void) {
     /* No initialization required */
 }
 
+/* Low 32 bits of (cycles / d) for a divisor below 2^16, using three 32-bit
+ * hardware divides instead of the 64-bit __udivdi3 libcall.
+ *
+ * Schoolbook long division in 16-bit digits.  Only the low 32 quotient bits
+ * are wanted, so the high word contributes just its remainder; each partial
+ * dividend is (remainder << 16 | digit) < d * 2^16, which fits 32 bits and
+ * yields a 16-bit quotient digit.  Exact -- bit-identical to the truncated
+ * 64-bit quotient, wrap included, which callers rely on for delta maths.
+ * Stateless, so it is safe from the timer ISR (the MIDI pump) and the main
+ * thread at once. */
+static inline uint32_t div_cycles_small(uint64_t cycles, uint32_t d) {
+    uint32_t hi = (uint32_t)(cycles >> 32);
+    uint32_t lo = (uint32_t)cycles;
+    uint32_t r  = hi % d;
+    uint32_t t1 = (r << 16) | (lo >> 16);
+    uint32_t q1 = t1 / d;
+    uint32_t t0 = ((t1 - q1 * d) << 16) | (lo & 0xFFFFu);
+    return (q1 << 16) + t0 / d;
+}
+
 uint32_t of_timer_get_us(void) {
     /* Use the clock reported by the core, including the 90 MHz fallback. */
-    return (uint32_t)(read_cycles() / (CPU_FREQ_HZ / 1000000));
+    uint32_t d = CPU_FREQ_HZ / 1000000;
+    uint64_t cycles = read_cycles();
+    if (d - 1u < 0xFFFFu)                       /* 1 <= d < 2^16 */
+        return div_cycles_small(cycles, d);
+    return (uint32_t)(cycles / d);
 }
 
 uint32_t of_timer_get_ms(void) {
-    return (uint32_t)(read_cycles() / (CPU_FREQ_HZ / 1000));
+    /* cycles-per-ms is 90000/100000 -- too wide for the 16-bit digit
+     * divide, but it is a multiple of 8 for every whole-MHz clock, and
+     * floor(floor(c / 8) / m) == floor(c / (8 * m)) exactly. */
+    uint32_t d = CPU_FREQ_HZ / 1000;
+    uint64_t cycles = read_cycles();
+    if ((d & 7u) == 0 && (d >> 3) - 1u < 0xFFFFu)
+        return div_cycles_small(cycles >> 3, d >> 3);
+    return (uint32_t)(cycles / d);
 }
 
 uint32_t of_timer_get_seconds(uint32_t *ns_out) {

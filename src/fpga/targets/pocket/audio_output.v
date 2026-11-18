@@ -139,7 +139,7 @@ wire signed [15:0] sfx_r = fifo_empty ? hold_r : $signed(fifo_r);
 
 // Latch mixer output on audio_pop (48 kHz) for stable I2S serialization.
 // Clean passthrough: the mixer already hard-saturates to 16-bit
-// (S_OUTPUT clamp at ±32767, accum >>> 4 mixdown in audio_mixer.v), so
+// (S_OUTPUT clamp at ±32767, accum >>> 2 mixdown in audio_mixer.v), so
 // no post-boost or compressor knee is needed here.
 reg [15:0] active_l = 16'h0;
 reg [15:0] active_r = 16'h0;
