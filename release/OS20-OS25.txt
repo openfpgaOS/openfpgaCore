@@ -24,6 +24,20 @@ and worst hold +0.074 ns. All 300 worst setup paths are internal to the CPU.
 This is not 100 MHz timing closure. The build boots and runs Diablo on a
 Pocket with the expected audio level; no soak or FPS measurement was made.
 
+OS25 audio level update — 2026-11-17 (openfpgaOS v0.9.1)
+
+os25 is rebuilt with the /4 mixer mix-down and the 40-word scanout
+sub-bursts. Seed 25 (best of seeds 13-30) uses 15,525 ALMs and 296 M10Ks.
+Four-corner analysis estimates 96.16 MHz, with setup -0.399 ns at the
+configured 100 MHz and worst hold +0.102 ns. This is not 100 MHz timing
+closure.
+
+OF_API_VERSION is now 0.9.1, so applications can tell which mix-down they
+are running on (of_get_version() >= OF_VERSION(0,9,1) means /4). The os.bin
+published with Diablo 1.1.1 predates this and still reports 0.9.0. A kernel
+reporting 0.9.1 must only ship with a bitstream built from the /4 mixer; the
+MiSTer bitstream has not been rebuilt yet.
+
 OS20 / OS25 optimization qualification — 2026-10-30
 
 The current campaign is documented in:

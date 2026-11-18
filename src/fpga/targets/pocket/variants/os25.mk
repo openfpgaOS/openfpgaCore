@@ -40,6 +40,8 @@ DEFS := INCLUDE_ANALOGIZER INCLUDE_HW_MIXER INCLUDE_TRANSLUC \
 # seed 20 fit estimates 96.87 MHz: setup -0.323 ns, worst hold +0.078 ns;
 # 15,490 ALMs and 296 M10Ks. 100 MHz still does not close timing.
 # Fetch/FPU, clamp staging and audio/RAM trials did not improve this fit.
+# 2026-11-17, /4 mixer mix-down and scanout sub-bursts: seed 25 estimates
+# 96.16 MHz, setup -0.399 ns, worst hold +0.102 ns; 15,525 ALMs, 296 M10Ks.
 
 # CPU uploads reuse the existing GPU command ring and avoid SDRAM DMA reads.
 # Gather masked framebuffer writes into SDRAM bursts; no triangle/depth
