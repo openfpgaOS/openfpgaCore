@@ -110,6 +110,8 @@ DIV_RADIX=2             # Integer and FP divider radix; qualified per variant.
 EXTRA_FLAGS=""
 DISPATCHER_AT=2         # Preserve every existing variant unless explicitly selected.
 OS30_RVC_PIPELINE=0     # os30-only isolated Scala source overlay.
+OS20_LSU_DISPATCH=0     # os20-only isolated Scala source overlay.
+RELAXED_SHIFT=1         # 0 = single-cycle shifts (no extra execute stage).
 MAXFAN_HINT=0
 FETCH_READ_HOLD=0        # Preserve stalled reads using a registered selector.
 ALIGNER_PC_HOLD=0        # Preserve the buffered PC with a registered enable.
@@ -138,6 +140,8 @@ OUTPUT_NAME="VexiiRiscv_$VARIANT.v"
 
 LSU_SW_PREFETCH_FLAG="--lsu-software-prefetch"
 [ "$LSU_SW_PREFETCH" = 0 ] && LSU_SW_PREFETCH_FLAG=""
+RELAXED_SHIFT_FLAG="--relaxed-shift"
+[ "$RELAXED_SHIFT" = 0 ] && RELAXED_SHIFT_FLAG=""
 RELAXED_LEARN_FLAG=""
 [ "$RELAXED_LEARN" = 1 ] && RELAXED_LEARN_FLAG="--relaxed-learn"
 [ "$FPU_I2F_PIPELINED" = 1 ] && RELAXED_LEARN_FLAG="$RELAXED_LEARN_FLAG --fpu-i2f-pipelined"
@@ -186,6 +190,29 @@ d77c0726a3c33dafe4cc4736530c80a0a35818e038a389f7ed8ffe6b68769e6e  src/main/scala
 OS30_SOURCE_AFTER
 fi
 
+# os20 store-buffer occupancy counter and decode-stage bypass flags. Applied
+# to a private copy for the same reason: every other variant keeps generating
+# from unchanged source.
+if [ "$OS20_LSU_DISPATCH" = 1 ]; then
+    [ "$VARIANT" = os20 ] || { echo "LSU/dispatch overlay is qualified only for os20" >&2; exit 1; }
+    GENERATION_DIR=$(mktemp -d "$SCRIPT_DIR/.os20-lsu-dispatch.XXXXXXXX")
+    cleanup_os20_source() { rm -rf -- "$GENERATION_DIR"; }
+    trap cleanup_os20_source EXIT
+    (set -o pipefail; tar --exclude=.git --exclude=target --exclude='VexiiRiscv*.v' \
+        --exclude=vexii_active.v -cf - . | tar -xf - -C "$GENERATION_DIR")
+    cd "$GENERATION_DIR"
+    sha256sum -c <<'OS20_SOURCE_BEFORE'
+de0ca41f2905bcfb80b030b208ca29c9ff9d4a3fbb8846ca3f0c35afc7c249c4  src/main/scala/vexiiriscv/schedule/DispatchPlugin.scala
+2f29a2fdcd8983cdf94d6bf3da5620bdfaa8d8d10cca42e7293c8539f35f6622  src/main/scala/vexiiriscv/execute/lsu/LsuPlugin.scala
+OS20_SOURCE_BEFORE
+    git apply --check "$SCRIPT_DIR/os20-lsu-dispatch.patch"
+    git apply "$SCRIPT_DIR/os20-lsu-dispatch.patch"
+    sha256sum -c <<'OS20_SOURCE_AFTER'
+178aad52609a4c3270da08ad720fd6167659de09d4b62afdba8866968b2f4094  src/main/scala/vexiiriscv/schedule/DispatchPlugin.scala
+6d1239371d3fa492fd6ff2eff96203a1c7be4ed2e9e4e755da8a4dbc20d68c72  src/main/scala/vexiiriscv/execute/lsu/LsuPlugin.scala
+OS20_SOURCE_AFTER
+fi
+
 # sbt always emits the bare name VexiiRiscv.v here; clear any stale copy from
 # an interrupted run so the post-gen rename can't pick up an old netlist.
 # Each variant's final file is VexiiRiscv_<variant>.v (no shared default).
@@ -212,7 +239,7 @@ sbt -Dsbt.server.forcestart=true --batch "Test/runMain vexiiriscv.Generate \
       --fpu-wb-at=$FPU_WB_AT \
       --fpu-add-preshift-stage=1 --fpu-add-shifter-stage=2 \
       --fpu-add-math-stage=3 --fpu-add-norm-stage=4 --fpu-add-pack-at=5 \
-      --relaxed-src --relaxed-branch --relaxed-div --relaxed-shift \
+      --relaxed-src --relaxed-branch --relaxed-div $RELAXED_SHIFT_FLAG \
       --div-radix=$DIV_RADIX --with-store-rs2-late \
       --dispatcher-at=$DISPATCHER_AT \
       --reset-vector=0 \

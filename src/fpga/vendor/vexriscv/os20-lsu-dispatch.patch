@@ -1,0 +1,117 @@
+diff --color -ruN a/src/main/scala/vexiiriscv/execute/lsu/LsuPlugin.scala b/src/main/scala/vexiiriscv/execute/lsu/LsuPlugin.scala
+--- a/src/main/scala/vexiiriscv/execute/lsu/LsuPlugin.scala	2026-11-18 19:36:17.188339305 -0800
++++ b/src/main/scala/vexiiriscv/execute/lsu/LsuPlugin.scala	2026-11-18 19:36:17.201877910 -0800
+@@ -284,8 +284,14 @@
+       val ops = new Area {
+         val mem = Mem.fill(storeBufferOps)(StoreBufferOp())
+         val pushPtr, popPtr, freePtr = Reg(SB_PTR) init (0)
+-        val full = (pushPtr ^ freePtr ^ storeBufferOps) === 0 // Assumes storeBufferOps is a power of 2
+-        val occupancy = pushPtr - freePtr
++        val freeFire = False
++        val occupancy = Reg(SB_PTR) init (0)
++        val full = occupancy.msb // Assumes storeBufferOps is a power of 2
++        when(push.fire && !freeFire) {
++          occupancy := occupancy + 1
++        } elsewhen (!push.fire && freeFire) {
++          occupancy := occupancy - 1
++        }
+ 
+         // Implement the pipeline which generate store retry commands (the pop interface)
+         val pip = new StagePipeline(){
+@@ -965,6 +971,7 @@
+             storeBuffer.waitL1.capture(down) // Seems like we need to wait on the L1 refill
+           }
+         } otherwise { // All went well :D
++          storeBuffer.ops.freeFire := True
+           storeBuffer.ops.freePtr := storeBuffer.ops.freePtr + 1
+           for (slot <- storeBuffer.slots) when(slot.ptr === storeBuffer.ops.freePtr) {
+             slot.valid := False
+diff --color -ruN a/src/main/scala/vexiiriscv/schedule/DispatchPlugin.scala b/src/main/scala/vexiiriscv/schedule/DispatchPlugin.scala
+--- a/src/main/scala/vexiiriscv/schedule/DispatchPlugin.scala	2026-11-18 19:36:17.187351808 -0800
++++ b/src/main/scala/vexiiriscv/schedule/DispatchPlugin.scala	2026-11-18 19:36:17.201904330 -0800
+@@ -209,6 +209,32 @@
+ 
+     val hcs = for((ll, llId) <- lanesLayers.zipWithIndex.toSeq) yield new HazardChecker(ll, llId)
+ 
++    case class BypassedSpec(el: ExecuteLaneService, at: Int, value : Payload[Bool])
++    val bypassedSpecs = mutable.LinkedHashMap[(ExecuteLaneService, Int), BypassedSpec]()
++    def getBypassed(el: ExecuteLaneService, at: Int): Payload[Bool] = {
++      bypassedSpecs.getOrElseUpdate(el -> at, BypassedSpec(el, at, Payload(Bool()).setName("BYPASSED_AT_" + el.laneName + "_" + at))).value
++    }
++    for (hc <- hcs; rs <- hc.onRs; (cFrom, cTo) <- rs.chunks) {
++      for (writeEu <- eus if writeEu.getUopLayerSpec().flatMap(_.rd).map(_.rf).distinctLinked.intersect(rs.regFiles).nonEmpty) {
++        val hazardRange = cFrom to (writeEu.getRdBroadcastedFromMax(rs.regFilesList) - 1 min cTo)
++        for (id <- hazardRange) getBypassed(writeEu, id)
++      }
++    }
++    for (spec <- bypassedSpecs.values) {
++      dp.addMicroOpDecodingDefault(spec.value, True)
++      hmKeys += spec.value
++      val uopBypassed = mutable.LinkedHashMap[MicroOp, Boolean]()
++      for (l <- spec.el.getLayers(); uop <- l.uops.values) {
++        uop.rd.foreach { rd =>
++          val ok = rd.broadcastedFrom <= spec.at
++          uopBypassed(uop.uop) = uopBypassed.getOrElse(uop.uop, true) && ok
++        }
++      }
++      for ((uop, ok) <- uopBypassed) {
++        dp.addMicroOpDecoding(uop, spec.value, Bool(ok))
++      }
++    }
++
+     case class MicroOpCtx() extends Bundle{
+       val valid = Bool()
+       val laneLayerHits = Bits(lanesLayers.size bits)
+@@ -251,12 +277,6 @@
+       c.age := CountOne(candidates.take(i).map(o => o.ctx.valid && o.ctx.hartId === c.ctx.hartId)).resize(Execute.LANE_AGE_WIDTH)
+     }
+ 
+-    case class BypassedSpec(el: ExecuteLaneService, at: Int, value : Payload[Bool])
+-    val bypassedSpecs = mutable.LinkedHashMap[(ExecuteLaneService, Int), BypassedSpec]()
+-    def getBypassed(el: ExecuteLaneService, at: Int): Payload[Bool] = {
+-      bypassedSpecs.getOrElseUpdate(el -> at, BypassedSpec(el, at, Payload(Bool()).setName("BYPASSED_AT_" + at))).value
+-    }
+-
+     // Generate the register source hazards for every candidates
+     val rsHazardChecker = for(c <- candidates) yield new Area {
+       val onLl = for(hc <- hcs) yield new Area{
+@@ -271,7 +291,7 @@
+               for (id <- hazardRange) {
+                 assert(id-offset >= 1)
+                 val node = writeEu.ctrl(id-offset) //id - hazardFrom + 1
+-                hazards += c.ctx.hm(enable) && node.up(rdKeys.ENABLE) && node.up(rdKeys.PHYS) === c.ctx.hm(rs.self.PHYS) && node.up(rdKeys.RFID) === c.ctx.hm(rs.self.RFID) && !node(getBypassed(writeEu, id))
++                hazards += c.ctx.hm(enable) && node.up(rdKeys.ENABLE) && node.up(rdKeys.PHYS) === c.ctx.hm(rs.self.PHYS) && node.up(rdKeys.RFID) === c.ctx.hm(rs.self.RFID) && !node.up(getBypassed(writeEu, id))
+               }
+             }
+           }
+@@ -281,14 +301,6 @@
+       }
+     }
+ 
+-    for (spec <- bypassedSpecs.values) yield new Area {
+-      for (l <- spec.el.getLayers(); uop <- l.uops.values) {
+-        uop.rd.foreach { rd =>
+-          uop.addDecoding(spec.value -> Bool(rd.broadcastedFrom <= spec.at))
+-        }
+-      }
+-    }
+-
+ 
+     // Generate the reservation hazards for every candidates
+     val reservationChecker = for (c <- candidates) yield new Area {
+@@ -330,15 +342,6 @@
+     }
+ 
+     //TODO this is a very clean implementation, but would need to move it in part before the dispatch to improve timings
+-    val bypassDecoding = for (spec <- bypassedSpecs.values) yield new Area{
+-      for (l <- spec.el.getLayers(); uop <- l.uops.values) {
+-        uop.rd.foreach { rd =>
+-          uop.addDecoding(spec.value -> Bool(rd.broadcastedFrom <= spec.at))
+-        }
+-      }
+-    }
+-
+-    //TODO this is a very clean implementation, but would need to move it in part before the dispatch to improve timings
+     val mayFlushDecoding = for (spec <- mayFlushSpecs.values) yield new Area {
+       val ctrl = spec.el.ctrl(spec.at)
+       for (l <- spec.el.getLayers(); uop <- l.uops.values) {

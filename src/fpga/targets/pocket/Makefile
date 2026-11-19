@@ -174,6 +174,7 @@ $(VEXII_OUT): $(VEXII_DIR)/../generate_vexii.sh \
               $(VEXII_DIR)/../retime_fetch_pipeline.pl \
               $(VEXII_DIR)/../optimize_os20_timing.pl \
               $(if $(filter os30,$(VARIANT)),$(VEXII_DIR)/../factor_os30_fp_rs3.pl $(VEXII_DIR)/../factor_os30_frontend.pl $(VEXII_DIR)/../os30-rvc-pipeline.patch $(VEXII_DIR)/../factor_os30_load_forward.pl $(VEXII_DIR)/../factor_os30_control_paths.pl $(VEXII_DIR)/../factor_os30_parallel_paths.pl $(VEXII_DIR)/../factor_os30_endpoint_paths.pl) \
+              $(if $(filter os20,$(VARIANT)),$(VEXII_DIR)/../os20-lsu-dispatch.patch) \
               $(VEXII_DIR)/../configs/$(VARIANT).cfg \
               $(wildcard $(VEXII_DIR)/../patches/*.patch) \
               | $(VEXII_DIR)/build.sbt $(VEXII_DIR)/ext/SpinalHDL/build.sbt

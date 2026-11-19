@@ -57,3 +57,12 @@ original memory returns.  The whole-CPU stress, scanout, IRQ and `cpu_i2f`
 runs are cycle-identical, and a shadow copy of each bank with the original
 write timing matched all ~4.9M read results in those runs; with the bypass
 disabled the shadow reports mismatches, so the bypass is exercised.
+
+`../os20-lsu-dispatch.patch` is not in this folder because it is applied only
+for os20 (`OS20_LSU_DISPATCH=1`), to a private copy of the generator source,
+so every other variant generates from unchanged Scala. It replaces the
+store-buffer full/occupancy subtraction with a registered occupancy counter,
+and decodes the dispatch bypass flags in the decode stage instead of the
+execute lanes. Cycle counts in the CPU stress and kernel bench are unchanged.
+os20 also sets `RELAXED_SHIFT=0`, which omits `--relaxed-shift` so shifts
+complete in one execute stage (bench: 972,199 -> 868,749 cycles).
