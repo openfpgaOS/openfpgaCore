@@ -49,6 +49,14 @@
 // time, holds until read completes (R.rlast) or write completes (B.bvalid).
 // M0 AW/W handshakes are decoupled from that grant by the posted queue.
 //
+// GPU_COMMIT_B (Pocket os25 INCLUDE_SDRAM_WRITE_PIPE, with axi_sdram_slave
+// EARLY_WRITE_ACK=1): the slave's B for a GPU queue write then means
+// "released into io_sdram's in-order queue", not "committed", so it only ends
+// the grant and pops the queue exactly as before.  The GPU's B is generated
+// from the slave's s_bcommit pulses instead, through a small in-order FIFO of
+// popped groups, so m0_bvalid keeps its "pixels are in SDRAM" meaning for
+// fences, flips and the blend/z read barrier.
+//
 `default_nettype none
 
 module axi_sdram_arbiter #(
@@ -56,7 +64,14 @@ module axi_sdram_arbiter #(
     parameter [3:0] BRG_FAIR_THRESHOLD   = 4'd12,// Force bridge grant after this many non-bridge grants
     parameter [3:0] GPU_WRITE_READ_BUDGET = 4'd4, // Max GPU reads while posted writes wait
     parameter BUFFERED_SLAVE = 1'b0, // Address queues may accept again before completion
-    parameter GPU_WRITE_QUEUE_DEPTH = 8 // Power of two, at least one 8-word burst
+    parameter GPU_WRITE_QUEUE_DEPTH = 8, // Power of two, at least one 8-word burst
+    parameter GPU_COMMIT_B = 0, // 1: m0_bvalid from s_bcommit (see header)
+    // 1 (Pocket os25 INCLUDE_SDRAM_MASKED_BURSTS): partial-strobe GPU queue
+    // entries join the coalesced run like full ones (see gwq_fs0 below).
+    parameter GPU_WQ_MASKED_MERGE = 0,
+    // 1 (Pocket os25 INCLUDE_SDRAM_WHOLE_BURSTS): a GPU write run is drained
+    // only once its AW's final beat is queued (see gpu_wq_head_ready).
+    parameter GPU_WQ_WHOLE_BURST = 0
 ) (
     input wire clk,
     input wire reset_n,
@@ -160,6 +175,9 @@ module axi_sdram_arbiter #(
     output wire        s_wlast,
     input  wire        s_bvalid,
     input  wire [1:0]  s_bresp,
+    // GPU_COMMIT_B: slave pulse, one per early-released write as it commits,
+    // oldest first.  Ignored when GPU_COMMIT_B == 0.
+    input  wire        s_bcommit,
     // Asserted while the active write's W data is supplied continuously by the
     // arbiter (the GPU posted-write queue) and so cannot underrun.  The slave
     // uses this to allow native streaming bursts only for the GPU; CPU/bridge
@@ -235,6 +253,11 @@ reg [31:0] m0w_addr;
 reg [7:0]  m0w_beats_left;
 reg        m0_bvalid_q;
 reg [3:0]  gpu_reads_since_write;
+// GPU_WQ_WHOLE_BURST: AWs whose WLAST beat is in the queue and not yet drained.
+// Entries are FIFO, so a non-zero count means the head entry's AW is
+// complete.  Bounded by the queue depth.
+reg [GPU_WQ_PTR_W:0] gpu_wq_awdone;
+reg                  gpu_wq_awdone_nz;   // registered (gpu_wq_awdone != 0)
 
 wire grant_m0 = (grant == 2'd0);
 wire grant_m1 = (grant == 2'd1);
@@ -263,6 +286,11 @@ wire       gpu_wq_pop      = active_wr && active_wr_gpuq && s_bvalid;
 // guaranteed by construction); we only require each entry be full-strobe so the
 // native burst path stays on its tested full-word path, and stop at the first
 // WLAST so exactly one B is returned per GPU AW.
+// GPU_WQ_MASKED_MERGE=1 drops the full-strobe requirement: every beat carries
+// its own byte enables through the native path (slave W0/W1 capture and
+// continuation pulls carry wstrb; io_sdram drives DQM per halfword from them
+// in ST_WRITE_2/3), so a masked beat costs DQM only, never a read-modify-write
+// and never its own SDRAM transaction.  Contiguity is still by construction.
 wire [GPU_WQ_PTR_W-1:0] gwq_p0 = gpu_wq_rd_ptr;
 wire [GPU_WQ_PTR_W-1:0] gwq_p1 = gpu_wq_rd_ptr + 3'd1;
 wire [GPU_WQ_PTR_W-1:0] gwq_p2 = gpu_wq_rd_ptr + 3'd2;
@@ -274,14 +302,22 @@ wire [GPU_WQ_PTR_W-1:0] gwq_p7 = gpu_wq_rd_ptr + 3'd7;
 // chainK: entries 0..K are all present and full-strobe, with no WLAST strictly
 // before K — i.e. entries 0..K-1 are non-last (so the run never crosses an AW
 // boundary; it stops AT the first WLAST entry, including it).
-wire gwq_fs0 = (gpu_wq_strb[gwq_p0] == 4'hF);
-wire gwq_c1 = gwq_fs0 && (gpu_wq_count >= 4'd2) && !gpu_wq_last[gwq_p0] && (gpu_wq_strb[gwq_p1] == 4'hF);
-wire gwq_c2 = gwq_c1  && (gpu_wq_count >= 4'd3) && !gpu_wq_last[gwq_p1] && (gpu_wq_strb[gwq_p2] == 4'hF);
-wire gwq_c3 = gwq_c2  && (gpu_wq_count >= 4'd4) && !gpu_wq_last[gwq_p2] && (gpu_wq_strb[gwq_p3] == 4'hF);
-wire gwq_c4 = gwq_c3  && (gpu_wq_count >= 4'd5) && !gpu_wq_last[gwq_p3] && (gpu_wq_strb[gwq_p4] == 4'hF);
-wire gwq_c5 = gwq_c4  && (gpu_wq_count >= 4'd6) && !gpu_wq_last[gwq_p4] && (gpu_wq_strb[gwq_p5] == 4'hF);
-wire gwq_c6 = gwq_c5  && (gpu_wq_count >= 4'd7) && !gpu_wq_last[gwq_p5] && (gpu_wq_strb[gwq_p6] == 4'hF);
-wire gwq_c7 = gwq_c6  && (gpu_wq_count >= 4'd8) && !gpu_wq_last[gwq_p6] && (gpu_wq_strb[gwq_p7] == 4'hF);
+wire gwq_f0 = GPU_WQ_MASKED_MERGE || (gpu_wq_strb[gwq_p0] == 4'hF);
+wire gwq_f1 = GPU_WQ_MASKED_MERGE || (gpu_wq_strb[gwq_p1] == 4'hF);
+wire gwq_f2 = GPU_WQ_MASKED_MERGE || (gpu_wq_strb[gwq_p2] == 4'hF);
+wire gwq_f3 = GPU_WQ_MASKED_MERGE || (gpu_wq_strb[gwq_p3] == 4'hF);
+wire gwq_f4 = GPU_WQ_MASKED_MERGE || (gpu_wq_strb[gwq_p4] == 4'hF);
+wire gwq_f5 = GPU_WQ_MASKED_MERGE || (gpu_wq_strb[gwq_p5] == 4'hF);
+wire gwq_f6 = GPU_WQ_MASKED_MERGE || (gpu_wq_strb[gwq_p6] == 4'hF);
+wire gwq_f7 = GPU_WQ_MASKED_MERGE || (gpu_wq_strb[gwq_p7] == 4'hF);
+wire gwq_fs0 = gwq_f0;
+wire gwq_c1 = gwq_fs0 && (gpu_wq_count >= 4'd2) && !gpu_wq_last[gwq_p0] && gwq_f1;
+wire gwq_c2 = gwq_c1  && (gpu_wq_count >= 4'd3) && !gpu_wq_last[gwq_p1] && gwq_f2;
+wire gwq_c3 = gwq_c2  && (gpu_wq_count >= 4'd4) && !gpu_wq_last[gwq_p2] && gwq_f3;
+wire gwq_c4 = gwq_c3  && (gpu_wq_count >= 4'd5) && !gpu_wq_last[gwq_p3] && gwq_f4;
+wire gwq_c5 = gwq_c4  && (gpu_wq_count >= 4'd6) && !gpu_wq_last[gwq_p4] && gwq_f5;
+wire gwq_c6 = gwq_c5  && (gpu_wq_count >= 4'd7) && !gpu_wq_last[gwq_p5] && gwq_f6;
+wire gwq_c7 = gwq_c6  && (gpu_wq_count >= 4'd8) && !gpu_wq_last[gwq_p6] && gwq_f7;
 // awlen = length-1 of the contiguous full-strobe run currently present from
 // rd_ptr (capped at the first WLAST entry).  This coalesces opportunistically
 // like the old 2-beat path — it does NOT wait for the AW's WLAST to be queued,
@@ -297,9 +333,50 @@ wire [2:0] gpu_wq_run =
       gwq_c2 ? 3'd2 :
       gwq_c1 ? 3'd1 : 3'd0;
 wire [GPU_WQ_PTR_W-1:0] active_gpuq_last_ptr = gpu_wq_rd_ptr + active_gpuq_awlen;
-wire       gpu_wq_head_ready = !gpu_wq_empty
-                            && (gpu_wq_last[gpu_wq_rd_ptr] ||
-                                (gpu_wq_count >= 4'd2));
+// GPU_COMMIT_B commit FIFO: one entry per popped group (in pop order):
+// {carries the AW's WLAST, refused (SLVERR: no SDRAM write, so no commit
+// will come)}.  The head retires on a commit pulse (or at once if refused);
+// commits that arrive while a refused head is retiring are counted, never
+// dropped.  Released groups outstanding at the slave are at most two (one
+// executing in io_sdram, one queued), refused ones retire immediately, and a
+// new GPU write is only granted with at most two entries present, so four
+// entries cannot overflow.  All of this is swept when GPU_COMMIT_B == 0.
+reg  [3:0] gcb_last;
+reg  [3:0] gcb_err;
+reg  [1:0] gcb_rd, gcb_wr;
+reg  [2:0] gcb_count;
+reg  [2:0] gcb_commits;
+wire [2:0] gcb_commits_avail = gcb_commits + (s_bcommit ? 3'd1 : 3'd0);
+wire       gcb_head_err = gcb_err[gcb_rd];
+wire       gcb_retire = GPU_COMMIT_B && (gcb_count != 3'd0) &&
+                        (gcb_head_err || (gcb_commits_avail != 3'd0));
+wire [2:0] gcb_count_next = gcb_count + (gpu_wq_pop ? 3'd1 : 3'd0)
+                                      - (gcb_retire ? 3'd1 : 3'd0);
+// Room for another GPU write group: registered (from the next count) so the
+// grant decision only sees one more flop input.
+reg        gcb_room_r;
+wire       gcb_room = !GPU_COMMIT_B || gcb_room_r;
+wire [GPU_WQ_PTR_W:0] gpu_wq_awdone_next = gpu_wq_awdone
+                     + ((m0_w_post_fire && m0_w_post_last) ? 1'b1 : 1'b0)
+                     - ((gpu_wq_pop && gpu_wq_last[active_gpuq_last_ptr]) ? 1'b1 : 1'b0);
+// Legacy: drain as soon as two entries (or a lone final beat) are queued, so
+// an 8-beat AW streaming in at one beat per cycle is cut into 2 + 6.
+// GPU_WQ_WHOLE_BURST=1: wait until the head AW's final beat is queued (a
+// registered count).  The GPU's W beats for an accepted AW are continuous and
+// the AW was only accepted with room for all of them, so the wait is at most
+// AWLEN cycles; meanwhile reads and other masters are granted as usual.
+// Unless masked beats merge, a run cannot grow past a partial-strobe entry, so
+// a partial head, or a partial second entry, drains at once (4-bit compares on
+// the first two entries, next to the legacy head WLAST test).
+wire       gpu_wq_head_ready = !gpu_wq_empty && gcb_room
+                            && (GPU_WQ_WHOLE_BURST
+                                ? (gpu_wq_awdone_nz || gpu_wq_full ||
+                                   (!GPU_WQ_MASKED_MERGE &&
+                                    ((gpu_wq_strb[gwq_p0] != 4'hF) ||
+                                     ((gpu_wq_count >= 4'd2) &&
+                                      (gpu_wq_strb[gwq_p1] != 4'hF)))))
+                                : (gpu_wq_last[gpu_wq_rd_ptr] ||
+                                   (gpu_wq_count >= 4'd2)));
 // Combinational (not registered) so the burst length reflects the queue at the
 // exact grant cycle — a registered value lags the count by one cycle and would
 // drain singles on the cycle count first reaches 2.  The scan is only
@@ -321,6 +398,7 @@ wire       active_gpuq_wlast = (gpuq_w_idx == active_gpuq_awlen);
 // re-land the early-free without first resurrecting tb_gpu_wrpath and
 // adding a count/B-per-AW invariant soak there.
 wire [3:0] gpu_wq_pop_count = gpu_wq_pop ? ({1'b0, active_gpuq_awlen} + 4'd1) : 4'd0;
+
 wire       gpu_wq_high     = (gpu_wq_count >= GPU_WQ_HIGH_WATERMARK);
 wire [3:0] gpu_wq_read_budget_limit = gpu_wq_high ? 4'd1 : GPU_WRITE_READ_BUDGET;
 wire       gpu_wq_read_budget_spent = (gpu_reads_since_write >= gpu_wq_read_budget_limit);
@@ -371,6 +449,13 @@ always @(posedge clk or posedge reset) begin
         m0w_beats_left <= 8'd0;
         m0_bvalid_q <= 1'b0;
         gpu_reads_since_write <= 4'd0;
+        gcb_rd <= 2'd0;
+        gcb_wr <= 2'd0;
+        gcb_count <= 3'd0;
+        gcb_room_r <= 1'b1;
+        gcb_commits <= 3'd0;
+        gpu_wq_awdone <= 0;
+        gpu_wq_awdone_nz <= 1'b0;
     end else begin
         m0_bvalid_q <= 1'b0;
 
@@ -395,14 +480,35 @@ always @(posedge clk or posedge reset) begin
         end
 
         if (gpu_wq_pop) begin
-            if (gpu_wq_last[active_gpuq_last_ptr])
+            if (!GPU_COMMIT_B && gpu_wq_last[active_gpuq_last_ptr])
                 m0_bvalid_q <= 1'b1;
             gpu_wq_rd_ptr <= gpu_wq_rd_ptr + active_gpuq_awlen + 3'd1;
+        end
+
+        if (GPU_COMMIT_B) begin
+            if (gpu_wq_pop) begin
+                gcb_last[gcb_wr] <= gpu_wq_last[active_gpuq_last_ptr];
+                gcb_err[gcb_wr]  <= (s_bresp != 2'b00);
+                gcb_wr <= gcb_wr + 2'd1;
+            end
+            if (gcb_retire) begin
+                if (gcb_last[gcb_rd])
+                    m0_bvalid_q <= 1'b1;
+                gcb_rd <= gcb_rd + 2'd1;
+            end
+            gcb_count <= gcb_count_next;
+            gcb_room_r <= (gcb_count_next <= 3'd2);
+            gcb_commits <= gcb_commits_avail
+                         - ((gcb_retire && !gcb_head_err) ? 3'd1 : 3'd0);
         end
 
         gpu_wq_count <= gpu_wq_count
                       + (m0_w_post_fire ? 4'd1 : 4'd0)
                       - gpu_wq_pop_count;
+        if (GPU_WQ_WHOLE_BURST) begin
+            gpu_wq_awdone <= gpu_wq_awdone_next;
+            gpu_wq_awdone_nz <= (gpu_wq_awdone_next != 0);
+        end
 
         if (active_wr && active_wr_gpuq && s_wvalid && s_wready && !active_gpuq_wlast)
             gpuq_w_idx <= gpuq_w_idx + 3'd1;

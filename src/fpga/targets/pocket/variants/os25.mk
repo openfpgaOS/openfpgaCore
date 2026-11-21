@@ -32,7 +32,18 @@ DEFS := INCLUDE_ANALOGIZER INCLUDE_HW_MIXER INCLUDE_TRANSLUC \
         INCLUDE_PALETTE INCLUDE_COLUMN_LIST INCLUDE_COMPACT_SPAN \
         INCLUDE_PARAM_SPAN_Q29 INCLUDE_4PLAYER INCLUDE_BANK_ROW_TRACK \
         INCLUDE_CPU_RING INCLUDE_GPU_WRITE_BURSTS EXCLUDE_GPU_COMMAND_DMA \
-        INCLUDE_SPAN_DEDICATED_MULT
+        INCLUDE_SPAN_DEDICATED_MULT INCLUDE_SDRAM_WRITE_PIPE \
+        INCLUDE_SDRAM_MASKED_BURSTS INCLUDE_SDRAM_WHOLE_BURSTS \
+        INCLUDE_GPU_CMAP_STORE INCLUDE_GPU_TEX_LINE64 \
+        INCLUDE_GPU_SPAN_EARLY_HANDOFF INCLUDE_GPU_SPAN_PREP
+
+# INCLUDE_GPU_SPAN_EARLY_HANDOFF: opaque depth-free parametric (long-form 0x48)
+# records take the compact-lane early record handoff, so the next record's
+# setup and perspective anchor pass overlap the previous record's pipe tail.
+# Pixel output unchanged; see build/gpu-candidates/c_overlap.
+# INCLUDE_GPU_SPAN_PREP: the next parametric record's setup products are
+# computed during the current record's pixels (shadow walk on the dedicated
+# span multipliers); see build/gpu-candidates/c_overlap_prep.
 
 # Separate span products from the shared perspective DSP operand mux.
 # Bit-exact and cycle-identical in Quake/Doom replays; paired seeds 15/20
@@ -48,7 +59,24 @@ DEFS := INCLUDE_ANALOGIZER INCLUDE_HW_MIXER INCLUDE_TRANSLUC \
 # combining logic or additional texture storage is required.
 # Command-DMA removal requires the SDK's automatic CPU-ring selection.
 
+# INCLUDE_GPU_CMAP_STORE: palookup (colormap) reads use their own 4 KB
+# direct-mapped store in gpu_tex_cache (+5 M10K) instead of aliasing texture
+# lines in the shared 16 KB cache.  Software invisible, byte-identical.
+# Its tags are palookup-relative (6-bit hit compare); a GPU_PALOOKUP_BASE
+# write therefore also flushes the texture cache.
+# INCLUDE_GPU_TEX_LINE64: the 16 KB texture cache uses 256 x 64-byte lines
+# (16-beat fills) instead of 1024 x 16-byte lines; tag RAM 1 M10K instead
+# of 2.  Software invisible, byte-identical.
+
 # CPU, textures, mixer samples and scanout can occupy different SDRAM banks.
 # Preserve each bank's open row across master switches to avoid unnecessary
 # PRECHARGE/ACTIVATE commands. See docs/POCKET_PERFORMANCE.md for measurements
 # and the separate 90/100 MHz timing results.
+
+# GPU framebuffer writes no longer hold the SDRAM slave until io_sdram's
+# write-done: the slave releases a GPU queue write once io_sdram has accepted
+# it (io_sdram latches write data at dispatch), so the next request already
+# waits in io_sdram's queue.  The GPU's B still waits for the commit.
+# Consecutive GPU framebuffer words that carry partial byte enables join the
+# arbiter's native SDRAM burst like full words (DQM applies the byte enables),
+# and a burst is drained once its final beat is queued instead of 2 + 6.

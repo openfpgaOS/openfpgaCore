@@ -1242,7 +1242,10 @@ GPU_OS25_FLAGS = +define+INCLUDE_TRANSLUC +define+INCLUDE_SPAN_DEDICATED_MULT \
     -GGPU_Z_READ_WINDOW=1 -GGPU_CB_READ_WINDOW=4 -GINCLUDE_DIRECT_COLOR=0 \
     -GINCLUDE_XFORM_RGB=0 -GINCLUDE_VTX_CACHE=0 -GINCLUDE_GPU_LIGHT=0 \
     -GINCLUDE_GPU_XFORM_MAC=0 -GINCLUDE_CLIP_TRI=0 -GINCLUDE_PALETTE=1 \
-    -GINCLUDE_COMBINE=0 -GINCLUDE_PARAM_SPAN_Q29=1 -GINCLUDE_TEX_MEM=0
+    -GINCLUDE_COMBINE=0 -GINCLUDE_PARAM_SPAN_Q29=1 -GINCLUDE_TEX_MEM=0 \
+    -GGPU_TEX_CMAP_SET_BITS=8 -GGPU_TEX_CMAP_REL_TAG=1 \
+    -GGPU_TEX_CACHE_SET_BITS=8 -GGPU_TEX_CACHE_LINE_BITS=6 \
+    -GGPU_SPAN_EARLY_HANDOFF=1 -GGPU_SPAN_PREP=1
 GPU_PERF_POCKET_DIR = obj_dir_gpu_perf_pocket
 GPU_ACCEPT_OS25X_DIR = obj_dir_gpu_acceptance_os25x
 .PHONY: gpu-perf-pocket gpu-acceptance-os25-exact
@@ -1823,3 +1826,112 @@ $(SDRAM_STRESS_DIR)/V$(SDRAM_STRESS_TOP): $(SDRAM_STRESS_SRCS) $(SDRAM_STRESS_CP
 		--top-module $(SDRAM_STRESS_TOP) --Mdir $(SDRAM_STRESS_DIR) \
 		-I$(COMMON_DIR) \
 		$(SDRAM_STRESS_SRCS) $(SDRAM_STRESS_CPP)
+
+# ============================================================
+# os25 SDRAM write-path switches (W round): the SDRAM-path benches rebuilt
+# with the os25 setting of the switch(es) this tree adds, as top-level
+# parameters of the unchanged harnesses.  Targets end in -os25w.
+#   SDRAM_OS25W_FLAGS: INCLUDE_SDRAM_WRITE_PIPE -> SDRAM_WRITE_PIPE=1,
+#     INCLUDE_SDRAM_MASKED_BURSTS -> GPU_WQ_MASKED_MERGE=1, INCLUDE_SDRAM_WHOLE_BURSTS -> GPU_WQ_WHOLE_BURST=1
+# gpu-transluc-pocket(-os25w) run the translucent-column RMW rig on the Pocket
+# io_sdram (the stock gpu-transluc target uses the MiSTer controller).
+# ============================================================
+SDRAM_OS25W_FLAGS = -GSDRAM_WRITE_PIPE=1 -GGPU_WQ_MASKED_MERGE=1 -GGPU_WQ_WHOLE_BURST=1
+# tb_sdram (slave + io_sdram, no arbiter) only takes the write-pipe switch.
+SDRAM_OS25W_TBSDRAM_FLAGS = -GSDRAM_WRITE_PIPE=1
+.PHONY: sdram-os25w sdram-wcont0-os25w sdram-cont-os25w sdram-stress-os25w sdram-lock90-os25w \
+        sdram-lock90-100-os25w gpu-wrpath-os25w gpu-wstall-os25w scanout-race-pocket-os25w \
+        scanout-race-os25w gpu-transluc-pocket gpu-transluc-pocket-os25w os25w-all
+
+sdram-os25w: obj_dir_sdram_os25w/V$(SDRAM_TOP)
+	./obj_dir_sdram_os25w/V$(SDRAM_TOP)
+obj_dir_sdram_os25w/V$(SDRAM_TOP): $(SDRAM_SRCS) $(SDRAM_SYNCH) $(SDRAM_CPP) Makefile
+	$(VERILATOR) $(VERILATOR_FLAGS) $(SDRAM_OS25W_TBSDRAM_FLAGS) --top-module $(SDRAM_TOP) \
+		--Mdir obj_dir_sdram_os25w $(SDRAM_SRCS) $(SDRAM_SYNCH) $(SDRAM_CPP)
+
+sdram-wcont0-os25w: obj_dir_sdram_wcont0_os25w/V$(SDRAM_TOP)
+	./obj_dir_sdram_wcont0_os25w/V$(SDRAM_TOP)
+obj_dir_sdram_wcont0_os25w/V$(SDRAM_TOP): $(SDRAM_SRCS) $(SDRAM_SYNCH) $(SDRAM_CPP) Makefile
+	$(VERILATOR) $(VERILATOR_FLAGS) $(SDRAM_OS25W_TBSDRAM_FLAGS) -GWCONT_TIE=0 --top-module $(SDRAM_TOP) \
+		--Mdir obj_dir_sdram_wcont0_os25w $(SDRAM_SRCS) $(SDRAM_SYNCH) $(SDRAM_CPP)
+
+sdram-cont-os25w: obj_dir_sdram_cont_os25w/V$(SDRAM_CONT_TOP)
+	./obj_dir_sdram_cont_os25w/V$(SDRAM_CONT_TOP)
+obj_dir_sdram_cont_os25w/V$(SDRAM_CONT_TOP): $(SDRAM_CONT_SRCS) $(SDRAM_CONT_CPP) Makefile
+	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) $(SDRAM_CONT_FLAGS) $(SDRAM_OS25W_FLAGS) \
+		--top-module $(SDRAM_CONT_TOP) --Mdir obj_dir_sdram_cont_os25w -I$(COMMON_DIR) \
+		$(SDRAM_CONT_SRCS) $(SDRAM_CONT_CPP)
+
+sdram-stress-os25w: obj_dir_sdram_stress_os25w/V$(SDRAM_STRESS_TOP)
+	./obj_dir_sdram_stress_os25w/V$(SDRAM_STRESS_TOP)
+obj_dir_sdram_stress_os25w/V$(SDRAM_STRESS_TOP): $(SDRAM_STRESS_SRCS) $(SDRAM_STRESS_CPP) Makefile
+	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) $(SDRAM_STRESS_FLAGS) $(SDRAM_OS25W_FLAGS) \
+		--top-module $(SDRAM_STRESS_TOP) --Mdir obj_dir_sdram_stress_os25w -I$(COMMON_DIR) \
+		$(SDRAM_STRESS_SRCS) $(SDRAM_STRESS_CPP)
+
+sdram-lock90-os25w: obj_dir_sdram_lock90_os25w/V$(SDRAM_LOCK90_TOP)
+	./obj_dir_sdram_lock90_os25w/V$(SDRAM_LOCK90_TOP)
+obj_dir_sdram_lock90_os25w/V$(SDRAM_LOCK90_TOP): $(SDRAM_LOCK90_SRCS) $(SDRAM_LOCK90_CPP) Makefile
+	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) $(SDRAM_LOCK90_FLAGS) $(SDRAM_OS25W_FLAGS) \
+		-GREFRESH_INTERVAL=504 --top-module $(SDRAM_LOCK90_TOP) --Mdir obj_dir_sdram_lock90_os25w \
+		-I$(COMMON_DIR) $(SDRAM_LOCK90_SRCS) $(SDRAM_LOCK90_CPP)
+
+sdram-lock90-100-os25w: obj_dir_sdram_lock90_100_os25w/V$(SDRAM_LOCK90_TOP)
+	./obj_dir_sdram_lock90_100_os25w/V$(SDRAM_LOCK90_TOP)
+obj_dir_sdram_lock90_100_os25w/V$(SDRAM_LOCK90_TOP): $(SDRAM_LOCK90_SRCS) $(SDRAM_LOCK90_CPP) Makefile
+	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) $(SDRAM_LOCK90_FLAGS) $(SDRAM_OS25W_FLAGS) \
+		-GREFRESH_INTERVAL=560 --top-module $(SDRAM_LOCK90_TOP) --Mdir obj_dir_sdram_lock90_100_os25w \
+		-I$(COMMON_DIR) $(SDRAM_LOCK90_SRCS) $(SDRAM_LOCK90_CPP)
+
+gpu-wrpath-os25w: obj_dir_gpu_wrpath_os25w/V$(GPU_WRPATH_TOP)
+	./obj_dir_gpu_wrpath_os25w/V$(GPU_WRPATH_TOP)
+obj_dir_gpu_wrpath_os25w/V$(GPU_WRPATH_TOP): $(GPU_WRPATH_SRCS) $(GPU_WRPATH_CPP) Makefile
+	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) $(GPU_WRPATH_FLAGS) $(SDRAM_OS25W_FLAGS) \
+		--top-module $(GPU_WRPATH_TOP) --Mdir obj_dir_gpu_wrpath_os25w -I$(COMMON_DIR) \
+		$(GPU_WRPATH_SRCS) $(GPU_WRPATH_CPP)
+
+gpu-wstall-os25w: obj_dir_gpu_wstall_os25w/V$(GPU_WSTALL_TOP)
+	./obj_dir_gpu_wstall_os25w/V$(GPU_WSTALL_TOP)
+obj_dir_gpu_wstall_os25w/V$(GPU_WSTALL_TOP): $(GPU_WSTALL_SRCS) $(GPU_WSTALL_CPP) Makefile
+	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) $(GPU_WSTALL_FLAGS) $(SDRAM_OS25W_FLAGS) \
+		--top-module $(GPU_WSTALL_TOP) --Mdir obj_dir_gpu_wstall_os25w -I$(COMMON_DIR) \
+		$(GPU_WSTALL_SRCS) $(GPU_WSTALL_CPP)
+
+scanout-race-pocket-os25w: obj_dir_scanout_race_pocket_os25w/V$(SCANOUT_RACE_TOP)
+	./obj_dir_scanout_race_pocket_os25w/V$(SCANOUT_RACE_TOP) 16 0 0 0
+	./obj_dir_scanout_race_pocket_os25w/V$(SCANOUT_RACE_TOP) 8 0 0 2
+obj_dir_scanout_race_pocket_os25w/V$(SCANOUT_RACE_TOP): $(SCANOUT_RACE_SRCS) $(SCANOUT_RACE_CPP) Makefile
+	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) $(SCANOUT_RACE_FLAGS) $(SDRAM_OS25W_FLAGS) \
+		-GOUT_HEIGHT=200 -GFETCH_CHUNK_WORDS=40 \
+		--top-module $(SCANOUT_RACE_TOP) --Mdir obj_dir_scanout_race_pocket_os25w -I$(COMMON_DIR) \
+		$(SCANOUT_RACE_SRCS) $(SCANOUT_RACE_CPP)
+
+scanout-race-os25w: obj_dir_scanout_race_os25w/V$(SCANOUT_RACE_TOP)
+	./obj_dir_scanout_race_os25w/V$(SCANOUT_RACE_TOP) 16 0 0 0
+	./obj_dir_scanout_race_os25w/V$(SCANOUT_RACE_TOP) 16 0 0 1
+	./obj_dir_scanout_race_os25w/V$(SCANOUT_RACE_TOP) 8 0 0 2
+obj_dir_scanout_race_os25w/V$(SCANOUT_RACE_TOP): $(SCANOUT_RACE_SRCS) $(SCANOUT_RACE_CPP) Makefile
+	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) $(SCANOUT_RACE_FLAGS) $(SDRAM_OS25W_FLAGS) \
+		-GOUT_HEIGHT=480 \
+		--top-module $(SCANOUT_RACE_TOP) --Mdir obj_dir_scanout_race_os25w -I$(COMMON_DIR) \
+		$(SCANOUT_RACE_SRCS) $(SCANOUT_RACE_CPP)
+
+GPU_TRANSLUC_POCKET_SRCS = $(filter-out io_sdram_mister_test.v,$(GPU_TRANSLUC_SRCS)) io_sdram_test.v
+gpu-transluc-pocket: obj_dir_gpu_transluc_pocket/V$(GPU_TRANSLUC_TOP)
+	./obj_dir_gpu_transluc_pocket/V$(GPU_TRANSLUC_TOP)
+obj_dir_gpu_transluc_pocket/V$(GPU_TRANSLUC_TOP): $(GPU_TRANSLUC_POCKET_SRCS) $(GPU_TRANSLUC_CPP) Makefile
+	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) $(GPU_TRANSLUC_FLAGS) \
+		+define+INCLUDE_TRANSLUC +define+TB_POCKET_IO_SDRAM \
+		--top-module $(GPU_TRANSLUC_TOP) --Mdir obj_dir_gpu_transluc_pocket -I$(COMMON_DIR) \
+		$(GPU_TRANSLUC_POCKET_SRCS) $(GPU_TRANSLUC_CPP)
+gpu-transluc-pocket-os25w: obj_dir_gpu_transluc_pocket_os25w/V$(GPU_TRANSLUC_TOP)
+	./obj_dir_gpu_transluc_pocket_os25w/V$(GPU_TRANSLUC_TOP)
+obj_dir_gpu_transluc_pocket_os25w/V$(GPU_TRANSLUC_TOP): $(GPU_TRANSLUC_POCKET_SRCS) $(GPU_TRANSLUC_CPP) Makefile
+	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) $(GPU_TRANSLUC_FLAGS) $(SDRAM_OS25W_FLAGS) \
+		+define+INCLUDE_TRANSLUC +define+TB_POCKET_IO_SDRAM \
+		--top-module $(GPU_TRANSLUC_TOP) --Mdir obj_dir_gpu_transluc_pocket_os25w -I$(COMMON_DIR) \
+		$(GPU_TRANSLUC_POCKET_SRCS) $(GPU_TRANSLUC_CPP)
+
+os25w-all: sdram-os25w sdram-wcont0-os25w sdram-cont-os25w sdram-stress-os25w sdram-lock90-os25w \
+        sdram-lock90-100-os25w gpu-wrpath-os25w gpu-wstall-os25w scanout-race-pocket-os25w \
+        scanout-race-os25w gpu-transluc-pocket-os25w

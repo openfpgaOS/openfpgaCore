@@ -24,7 +24,9 @@ module tb_sdram #(
     // Forwarded verbatim to io_sdram so the OS25 single open-bank/row
     // config can be exercised straight from the command line with
     // -GBANK_ROW_TRACK=0.  Default matches io_sdram's default (per-bank).
-    parameter BANK_ROW_TRACK = 1
+    parameter BANK_ROW_TRACK = 1,
+    // W candidate 1 (INCLUDE_SDRAM_WRITE_PIPE): slave EARLY_WRITE_ACK + io_sdram WR_DATA_LATCH
+    parameter SDRAM_WRITE_PIPE = 0
 ) (
     input  wire        clk,
     input  wire        reset_n,
@@ -137,7 +139,7 @@ always @(posedge clk or negedge reset_n) begin
         if (!sdram_rd && !sdram_wr)
             cmd_forwarded <= 0;
 
-        if (!word_busy && !cmd_forwarded && (sdram_rd || sdram_wr)) begin
+        if (!(SDRAM_WRITE_PIPE ? word_queue_pending : word_busy) && !cmd_forwarded && (sdram_rd || sdram_wr)) begin
             word_rd <= sdram_rd;
             word_wr <= sdram_wr;
             word_addr <= sdram_addr;
@@ -160,7 +162,8 @@ assign dbg_serialize_write_bursts = SERIALIZE_WRITE_BURSTS;
 // AXI SDRAM Slave
 axi_sdram_slave #(
     .SERIALIZE_WRITE_BURSTS(SERIALIZE_WRITE_BURSTS),
-    .MAX_NATIVE_WRITE_BURST_LEN(MAX_NATIVE_WRITE_BURST_LEN)
+    .MAX_NATIVE_WRITE_BURST_LEN(MAX_NATIVE_WRITE_BURST_LEN),
+    .EARLY_WRITE_ACK(SDRAM_WRITE_PIPE)
 ) slave (
     .clk(clk), .reset_n(reset_n),
     .s_axi_arvalid(s_axi_arvalid), .s_axi_arready(s_axi_arready),
@@ -172,7 +175,8 @@ axi_sdram_slave #(
     .s_axi_wvalid(s_axi_wvalid), .s_axi_wready(s_axi_wready),
     .s_axi_wdata(s_axi_wdata), .s_axi_wstrb(s_axi_wstrb), .s_axi_wlast(s_axi_wlast),
     .s_axi_bvalid(s_axi_bvalid), .s_axi_bready(1'b1), .s_axi_bresp(s_axi_bresp),
-    .s_axi_wcont(WCONT_TIE),  // 1: native streaming path; 0: buffered writeback path
+    .s_axi_wcont(WCONT_TIE),
+    .s_axi_bcommit(),  // 1: native streaming path; 0: buffered writeback path
     .sdram_rd(sdram_rd), .sdram_wr(sdram_wr),
     .sdram_addr(sdram_addr), .sdram_wdata(sdram_wdata), .sdram_wstrb(sdram_wstrb),
     .sdram_burst_len(sdram_burst_len), .sdram_burst_wr_len(sdram_burst_wr_len),
@@ -188,7 +192,8 @@ axi_sdram_slave #(
 
 // io_sdram (test variant with split DQ)
 io_sdram #(
-    .BANK_ROW_TRACK(BANK_ROW_TRACK)
+    .BANK_ROW_TRACK(BANK_ROW_TRACK),
+    .WR_DATA_LATCH(SDRAM_WRITE_PIPE)
 ) sdram_ctrl (
     .controller_clk(clk), .chip_clk(clk), .clk_90(clk), .reset_n(reset_n),
     .phy_cke(phy_cke), .phy_clk(phy_clk),

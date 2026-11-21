@@ -34,6 +34,27 @@
 //                      that was at stage 1 last cycle (i.e. now at stage 2).
 //                      Combinational hit detect, register resp_valid/resp_data.
 //
+// Optional geometry (both default to the historical layout, which is then
+// unchanged bit for bit):
+//   LINE_BITS     log2 bytes per line of the texture/shared store
+//                 (4 = 16 B, the default; 6 = 64 B).  Fills request
+//                 2^(LINE_BITS-2) beats.  Capacity = 2^(SET_BITS+LINE_BITS).
+//   CMAP_SET_BITS 0 (default): port B reads the same store as port A.
+//                 N > 0: port B (colormap) gets its own direct-mapped store of
+//                 2^N sets x 16 B with its own tags, so palookup rows no longer
+//                 evict texture lines (or each other through texture
+//                 aliasing).  The single fill machine, its blocking behaviour,
+//                 the port timing and the response-queue protocol are
+//                 unchanged; a port-B fill simply lands in the port-B store.
+//   CMAP_REL_TAG  (only with CMAP_SET_BITS > 0) 0: port-B tags are absolute
+//                 address bits [25:4+CMAP_SET_BITS].  1: tags are the
+//                 palookup-relative offset bits req_off_b[17:4+CMAP_SET_BITS]
+//                 ({colormap_id, light} high bits, 6 bits for N = 8) supplied
+//                 by the consumer; the set index and word still come from the
+//                 absolute address (identical bits, the palookup base is 16 KB
+//                 aligned).  The consumer must flush the cache when the
+//                 palookup base changes.  Shrinks the port-B hit compare.
+//
 // Latency: one cycle from request acceptance to a hit response. Both
 // ports can hit concurrently; port B holds responses until resp_pop_b.
 // Throughput: one hit per port per cycle. Misses share one AXI fill
@@ -46,7 +67,10 @@
 `default_nettype none
 
 module gpu_tex_cache #(
-    parameter SET_BITS = 10   // 2^SET_BITS sets x 16 B/line; 10 = 16 KB
+    parameter SET_BITS = 10,      // 2^SET_BITS sets; 10 x 16 B lines = 16 KB
+    parameter LINE_BITS = 4,      // log2 bytes per line (4 = 16 B)
+    parameter CMAP_SET_BITS = 0,  // 0 = port B shares the store; N = own 2^N x 16 B store
+    parameter CMAP_REL_TAG = 0    // 1 = port-B store tags from req_off_b (needs CMAP_SET_BITS 1..10)
 ) (
     input wire clk,
     input wire reset_n,
@@ -66,6 +90,7 @@ module gpu_tex_cache #(
     input  wire         req_valid_b,
     output wire         req_ready_b,
     input  wire  [25:0] req_addr_b,
+    input  wire  [17:0] req_off_b,      // palookup-relative offset (CMAP_REL_TAG only)
     input  wire         req_wide_b,
 
     output wire         resp_valid_b,
@@ -92,13 +117,27 @@ module gpu_tex_cache #(
     input wire          axi_rlast
 );
 
-//   addr[3:0]           = byte offset within 16-byte line
-//   addr[TAG_LO-1:4]    = set index (SET_BITS bits)
-//   addr[25:TAG_LO]     = tag
+//   addr[LINE_BITS-1:0]         = byte offset within the line
+//   addr[TAG_LO-1:LINE_BITS]    = set index (SET_BITS bits)
+//   addr[25:TAG_LO]             = tag
 localparam SETS       = 1 << SET_BITS;
-localparam TAG_LO     = 4 + SET_BITS;
+localparam WORD_BITS  = LINE_BITS - 2;
+localparam LINE_WORDS = 1 << WORD_BITS;
+localparam TAG_LO     = LINE_BITS + SET_BITS;
 localparam TAG_BITS   = 26 - TAG_LO;
-localparam LINE_WORDS = 4;
+// Port-B geometry: identical to port A unless port B has its own store.
+localparam SPLIT_B      = (CMAP_SET_BITS != 0);
+localparam B_SET_BITS   = SPLIT_B ? CMAP_SET_BITS : SET_BITS;
+localparam B_LINE_BITS  = SPLIT_B ? 4 : LINE_BITS;
+localparam B_WORD_BITS  = B_LINE_BITS - 2;
+localparam B_LINE_WORDS = 1 << B_WORD_BITS;
+localparam B_SETS       = 1 << B_SET_BITS;
+localparam B_TAG_LO     = B_LINE_BITS + B_SET_BITS;
+localparam REL_B        = SPLIT_B && (CMAP_REL_TAG != 0) && (CMAP_SET_BITS <= 10);
+localparam B_KEY_BITS   = REL_B ? 18 : 26;     // width of the address the port-B tag comes from
+localparam B_TAG_BITS   = B_KEY_BITS - B_TAG_LO;
+localparam INIT_BITS    = (B_SET_BITS > SET_BITS) ? B_SET_BITS : SET_BITS;
+localparam FB_BITS      = (B_WORD_BITS > WORD_BITS) ? B_WORD_BITS : WORD_BITS;
 
 // ---- Storage ----
 // Each memory has one read/write port A and one read-only port B. Keeping
@@ -139,7 +178,7 @@ localparam S_FILL_OUT  = 3'd3;
 localparam S_INIT      = 3'd4;
 
 reg [2:0] state /*verilator public_flat_rd*/;
-reg [SET_BITS-1:0] init_counter;
+reg [INIT_BITS-1:0] init_counter;
 
 // Keep separate state-decode copies for the hot ready/prime paths.  The
 // fitter report shows the synthesized state-derived cache enable as a
@@ -161,14 +200,14 @@ reg         pipe_wide_a;
 
 reg pipe_valid_b /*verilator public_flat_rd*/;
 reg  [25:0] pipe_addr_b;
-reg  [TAG_BITS-1:0] pipe_tag_b_r;
+reg  [B_TAG_BITS-1:0] pipe_tag_b_r;
 reg  [1:0]          pipe_byte_b_r;
 reg         pipe_wide_b;
 
 wire [TAG_BITS-1:0] pipe_tag_a  = pipe_addr_a[25:TAG_LO];
 wire [1:0]          pipe_byte_a = pipe_addr_a[1:0];
 
-wire [TAG_BITS-1:0] pipe_tag_b  = pipe_tag_b_r;
+wire [B_TAG_BITS-1:0] pipe_tag_b  = pipe_tag_b_r;
 wire [1:0]          pipe_byte_b = pipe_byte_b_r;
 
 // ---- RAM read result registers — one set per port ----
@@ -176,7 +215,7 @@ reg [TAG_BITS-1:0] rd_tag_a;
 reg                rd_valid_a;
 reg [31:0]         rd_data_a;
 
-reg [TAG_BITS-1:0] rd_tag_b;
+reg [B_TAG_BITS-1:0] rd_tag_b;
 reg                rd_valid_b;
 reg [31:0]         rd_data_b;
 
@@ -255,11 +294,11 @@ assign resp_valid_b = held_valid_b
 // Same gate-on-accept rationale as the SDP-era cache (without it, rd_*
 // drift to the next pixel's address while pipe_addr is still the prior
 // pixel — produces glitched bytes when the consumer is mid-stall).
-wire [SET_BITS-1:0] addr_set_a  = req_addr[TAG_LO-1:4];
-wire [1:0]          addr_word_a = req_addr[3:2];
+wire [SET_BITS-1:0]    addr_set_a  = req_addr[TAG_LO-1:LINE_BITS];
+wire [WORD_BITS-1:0]   addr_word_a = req_addr[LINE_BITS-1:2];
 
-wire [SET_BITS-1:0] addr_set_b  = req_addr_b[TAG_LO-1:4];
-wire [1:0]          addr_word_b = req_addr_b[3:2];
+wire [B_SET_BITS-1:0]  addr_set_b  = req_addr_b[B_TAG_LO-1:B_LINE_BITS];
+wire [B_WORD_BITS-1:0] addr_word_b = req_addr_b[B_LINE_BITS-1:2];
 
 // Quartus M10K-inference rule: each rd_*_x reg has exactly one source
 // (the M10K read), with a single read-address signal and a single
@@ -289,13 +328,13 @@ wire prime_b = state_fillout_prime && (lat_port == 1'b1)
             && !flush_block
             && !accept_b;
 
-wire [SET_BITS-1:0] read_set_a  = prime_a ? lat_set  : addr_set_a;
-wire [1:0]          read_word_a = prime_a ? lat_word : addr_word_a;
-wire                read_en_a   = (req_valid && req_ready) || prime_a;
+wire [SET_BITS-1:0]    read_set_a  = prime_a ? lat_set  : addr_set_a;
+wire [WORD_BITS-1:0]   read_word_a = prime_a ? lat_word : addr_word_a;
+wire                   read_en_a   = (req_valid && req_ready) || prime_a;
 
-wire [SET_BITS-1:0] read_set_b  = prime_b ? lat_set  : addr_set_b;
-wire [1:0]          read_word_b = prime_b ? lat_word : addr_word_b;
-wire                read_en_b   = accept_b || prime_b;
+wire [B_SET_BITS-1:0]  read_set_b  = prime_b ? lat_set_b  : addr_set_b;
+wire [B_WORD_BITS-1:0] read_word_b = prime_b ? lat_word_b : addr_word_b;
+wire                   read_en_b   = accept_b || prime_b;
 
 // Reads and fills occupy disjoint FSM states. Multiplex the fill address
 // onto port A so each memory has two physical ports, rather than inferring
@@ -304,12 +343,14 @@ wire                read_en_b   = accept_b || prime_b;
 // S_FILL_DATA, the only writer states. It also lets Quartus select the
 // native TDP read-during-write mode instead of replicating SDP memories
 // to implement OLD_DATA for a collision that cannot occur.
-wire data_write = reset_n && (state == S_FILL_DATA) && axi_rvalid;
+// With a separate port-B store, a port-B fill writes only that store.
+wire fill_to_b  = SPLIT_B && lat_port;
+wire data_write = reset_n && (state == S_FILL_DATA) && axi_rvalid && !fill_to_b;
 wire tag_write = reset_n && ((state == S_INIT) || (data_write && axi_rlast));
 wire [SET_BITS-1:0] tag_address_a = tag_write
-    ? ((state == S_INIT) ? init_counter : lat_set) : read_set_a;
-wire [SET_BITS+1:0] data_address_a = data_write
-    ? {lat_set, fill_beat} : {read_set_a, read_word_a};
+    ? ((state == S_INIT) ? init_counter[SET_BITS-1:0] : lat_set) : read_set_a;
+wire [SET_BITS+WORD_BITS-1:0] data_address_a = data_write
+    ? {lat_set, fill_beat[WORD_BITS-1:0]} : {read_set_a, read_word_a};
 wire [TAG_BITS:0] tag_write_data = (state == S_INIT)
     ? {(TAG_BITS+1){1'b0}} : {1'b1, lat_tag};
 
@@ -324,12 +365,38 @@ always @(posedge clk) begin
     end
 end
 
-always @(posedge clk) begin
-    if (read_en_b) begin
-        {rd_valid_b, rd_tag_b} <= tagv_mem[read_set_b];
-        rd_data_b  <= data_mem[{read_set_b, read_word_b}];
+generate if (SPLIT_B) begin : g_cmap_store
+    // Port-B (colormap) store: simple dual port per memory -- the fill
+    // writes one port (S_INIT / S_FILL_DATA only), port-B reads the other
+    // (S_PIPE / S_FILL_OUT only), so no read-during-write value is consumed.
+    (* ramstyle = "M10K, no_rw_check" *) reg [B_TAG_BITS:0] tagv_b_mem [0:B_SETS-1];
+    (* ramstyle = "M10K, no_rw_check" *) reg [31:0]         data_b_mem [0:B_SETS*B_LINE_WORDS-1];
+    wire b_data_write = reset_n && (state == S_FILL_DATA) && axi_rvalid && lat_port;
+    wire b_tag_write  = reset_n && ((state == S_INIT) || (b_data_write && axi_rlast));
+    wire [B_SET_BITS-1:0] b_tag_waddr = (state == S_INIT) ? init_counter[B_SET_BITS-1:0]
+                                                          : lat_set_b;
+    wire [B_TAG_BITS:0]   b_tag_wdata = (state == S_INIT) ? {(B_TAG_BITS+1){1'b0}}
+                                                          : {1'b1, lat_tag_b};
+    always @(posedge clk) begin
+        if (b_tag_write)
+            tagv_b_mem[b_tag_waddr] <= b_tag_wdata;
+        if (b_data_write)
+            data_b_mem[{lat_set_b, fill_beat[B_WORD_BITS-1:0]}] <= axi_rdata;
     end
-end
+    always @(posedge clk) begin
+        if (read_en_b) begin
+            {rd_valid_b, rd_tag_b} <= tagv_b_mem[read_set_b];
+            rd_data_b  <= data_b_mem[{read_set_b, read_word_b}];
+        end
+    end
+end else begin : g_cmap_shared
+    always @(posedge clk) begin
+        if (read_en_b) begin
+            {rd_valid_b, rd_tag_b} <= tagv_mem[read_set_b];
+            rd_data_b  <= data_mem[{read_set_b, read_word_b}];
+        end
+    end
+end endgenerate
 
 // ---- Byte/halfword extraction per port ----
 wire [7:0] byte_from_rd_a =
@@ -352,11 +419,26 @@ wire [15:0] hw_from_rd_b = pipe_byte_b[1] ? rd_data_b[31:16] : rd_data_b[15:0];
 reg [25:0] lat_addr;
 reg        lat_wide;
 
-wire [TAG_BITS-1:0] lat_tag  = lat_addr[25:TAG_LO];
-wire [SET_BITS-1:0] lat_set  = lat_addr[TAG_LO-1:4];
-wire [1:0]          lat_word = lat_addr[3:2];
+wire [TAG_BITS-1:0]    lat_tag    = lat_addr[25:TAG_LO];
+wire [SET_BITS-1:0]    lat_set    = lat_addr[TAG_LO-1:LINE_BITS];
+wire [WORD_BITS-1:0]   lat_word   = lat_addr[LINE_BITS-1:2];
+// Port-B tag of the request being filled: captured from pipe_tag_b_r with
+// the miss (identical to lat_addr[25:B_TAG_LO] in the absolute-tag forms).
+reg  [B_TAG_BITS-1:0]  lat_tag_b_r;
+wire [B_TAG_BITS-1:0]  lat_tag_b  = REL_B ? lat_tag_b_r : lat_addr[B_KEY_BITS-1:B_TAG_LO];
+// Port-B request tag: relative offset bits or absolute address bits.
+wire [B_TAG_BITS-1:0]  req_tag_b  = REL_B ? req_off_b[B_KEY_BITS-1:B_TAG_LO]
+                                          : req_addr_b[B_KEY_BITS-1:B_TAG_LO];
+wire [B_SET_BITS-1:0]  lat_set_b  = lat_addr[B_TAG_LO-1:B_LINE_BITS];
+wire [B_WORD_BITS-1:0] lat_word_b = lat_addr[B_LINE_BITS-1:2];
+// Beat index of the requested word within the line being filled (the
+// narrower word index is zero-extended by assignment; no zero-width
+// replication in the default geometry, where all widths are equal).
+wire [FB_BITS-1:0]     lat_word_x   = lat_word;
+wire [FB_BITS-1:0]     lat_word_b_x = lat_word_b;
+wire [FB_BITS-1:0]     lat_beat     = lat_port ? lat_word_b_x : lat_word_x;
 
-reg [1:0]  fill_beat;
+reg [FB_BITS-1:0] fill_beat;
 reg [31:0] fill_target_word;
 
 // ---- Combinational resp_data per port ----
@@ -402,6 +484,7 @@ always @(posedge clk) begin
         fill_beat   <= 0;
         fill_target_word <= 0;
         lat_addr    <= 0;
+        lat_tag_b_r <= 0;
         lat_wide    <= 0;
         lat_port    <= 0;
         flush_pending <= 1'b0;
@@ -455,7 +538,7 @@ always @(posedge clk) begin
         // 1024 cycles ≈ 10 µs at 100 MHz — negligible at boot/flush.
         // ----------------------------------------------------------------
         S_INIT: begin
-            if (init_counter == {SET_BITS{1'b1}}) begin
+            if (init_counter == {INIT_BITS{1'b1}}) begin
                 state <= S_PIPE;
                 flush_pending <= 1'b0;  // walk-clear done, clear pending
             end
@@ -498,7 +581,7 @@ always @(posedge clk) begin
             // cannot race with an accept on the same port.
             if (pipe_miss_a) begin
                 axi_arvalid <= 1;
-                axi_araddr  <= {6'b0, pipe_addr_a[25:4], 4'b0};
+                axi_araddr  <= {6'b0, pipe_addr_a[25:LINE_BITS], {LINE_BITS{1'b0}}};
                 axi_arlen   <= LINE_WORDS[7:0] - 8'd1;
                 fill_beat   <= 0;
                 state       <= S_FILL_AR;
@@ -508,11 +591,12 @@ always @(posedge clk) begin
                 pipe_valid_a <= 0;          // explicit clear on miss
             end else if (pipe_miss_b) begin
                 axi_arvalid <= 1;
-                axi_araddr  <= {6'b0, pipe_addr_b[25:4], 4'b0};
-                axi_arlen   <= LINE_WORDS[7:0] - 8'd1;
+                axi_araddr  <= {6'b0, pipe_addr_b[25:B_LINE_BITS], {B_LINE_BITS{1'b0}}};
+                axi_arlen   <= B_LINE_WORDS[7:0] - 8'd1;
                 fill_beat   <= 0;
                 state       <= S_FILL_AR;
                 lat_addr    <= pipe_addr_b;
+                lat_tag_b_r <= pipe_tag_b_r;
                 lat_wide    <= pipe_wide_b;
                 lat_port    <= 1'b1;       // serving B
                 pipe_valid_b <= 0;          // explicit clear on miss
@@ -543,7 +627,7 @@ always @(posedge clk) begin
             if (accept_b) begin
                 pipe_valid_b <= 1;
                 pipe_addr_b  <= req_addr_b;
-                pipe_tag_b_r <= req_addr_b[25:TAG_LO];
+                pipe_tag_b_r <= req_tag_b;
                 pipe_byte_b_r <= req_addr_b[1:0];
                 pipe_wide_b  <= req_wide_b;
             end
@@ -558,8 +642,8 @@ always @(posedge clk) begin
 
         S_FILL_DATA: begin
             if (axi_rvalid) begin
-                if (fill_beat == lat_word) fill_target_word <= axi_rdata;
-                fill_beat <= fill_beat + 2'd1;
+                if (fill_beat == lat_beat) fill_target_word <= axi_rdata;
+                fill_beat <= fill_beat + 1'b1;
                 if (axi_rlast) begin
                     if (lat_port == 1'b0) fill_resp_valid_a <= 1;
                     else fill_resp_valid_b <= 1;
@@ -632,13 +716,13 @@ always @(posedge clk) begin
                     if (accept_b) begin
                         pipe_valid_b <= 1;
                         pipe_addr_b  <= req_addr_b;
-                        pipe_tag_b_r <= req_addr_b[25:TAG_LO];
+                        pipe_tag_b_r <= req_tag_b;
                         pipe_byte_b_r <= req_addr_b[1:0];
                         pipe_wide_b  <= req_wide_b;
                     end else begin
                         pipe_valid_b <= 1;
                         pipe_addr_b  <= lat_addr;
-                        pipe_tag_b_r <= lat_addr[25:TAG_LO];
+                        pipe_tag_b_r <= lat_tag_b;
                         pipe_byte_b_r <= lat_addr[1:0];
                         pipe_wide_b  <= lat_wide;
                     end

@@ -44,6 +44,9 @@ module tb_gpu #(
     parameter GPU_WRITE_COMBINE_PIPE = 0,
     parameter GPU_EW_PARALLEL_DIVS   = 1,
     parameter GPU_TEX_CACHE_SET_BITS = 10,
+    parameter GPU_TEX_CACHE_LINE_BITS = 4,
+    parameter GPU_TEX_CMAP_SET_BITS  = 0,
+    parameter GPU_TEX_CMAP_REL_TAG   = 0,
     parameter INCLUDE_COMPACT_SPAN   = 1,
     parameter INCLUDE_COLUMN_LIST    = 1,
     parameter INCLUDE_DIRECT_COLOR   = 0,
@@ -55,6 +58,10 @@ module tb_gpu #(
     parameter INCLUDE_PALETTE        = 1,
     parameter INCLUDE_COMBINE        = 1,
     parameter INCLUDE_PARAM_SPAN_Q29 = 1,
+    // Parametric-record early handoff (gpu_core GPU_SPAN_EARLY_HANDOFF).
+    parameter GPU_SPAN_EARLY_HANDOFF = 0,
+    // Prepared-span shadow setup (gpu_core GPU_SPAN_PREP).
+    parameter GPU_SPAN_PREP = 0,
     // Fast texture memory fold.  Default 1 = gpu_core's default (matches every
     // pre-existing acceptance config).  The tb has no fast-tex model: the
     // gpu_tex_mem_* fill-master inputs are tied idle below, exactly like the
@@ -315,6 +322,9 @@ gpu_core #(
     .GPU_WRITE_COMBINE(GPU_WRITE_COMBINE),
     .GPU_EW_PARALLEL_DIVS(GPU_EW_PARALLEL_DIVS),
     .GPU_TEX_CACHE_SET_BITS(GPU_TEX_CACHE_SET_BITS),
+    .GPU_TEX_CACHE_LINE_BITS(GPU_TEX_CACHE_LINE_BITS),
+    .GPU_TEX_CMAP_SET_BITS(GPU_TEX_CMAP_SET_BITS),
+    .GPU_TEX_CMAP_REL_TAG(GPU_TEX_CMAP_REL_TAG),
     .INCLUDE_COMPACT_SPAN(INCLUDE_COMPACT_SPAN),
     .INCLUDE_COLUMN_LIST(INCLUDE_COLUMN_LIST),
     .INCLUDE_DIRECT_COLOR(INCLUDE_DIRECT_COLOR),
@@ -329,6 +339,8 @@ gpu_core #(
     .INCLUDE_PARAM_SPAN_LIST(INCLUDE_PARAM_SPAN_LIST),
     .INCLUDE_COMBINE(INCLUDE_COMBINE),
     .INCLUDE_PARAM_SPAN_Q29(INCLUDE_PARAM_SPAN_Q29),
+    .GPU_SPAN_EARLY_HANDOFF(GPU_SPAN_EARLY_HANDOFF),
+    .GPU_SPAN_PREP(GPU_SPAN_PREP),
     .INCLUDE_TEX_MEM(INCLUDE_TEX_MEM)
 ) gpu (
     .clk(clk),

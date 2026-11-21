@@ -27,7 +27,21 @@ module io_sdram #(
     parameter REFRESH_INTERVAL = 10'd736,
     // Opt-in Pocket AS4C32M16MSA-6BIN timing at 166 MHz, CL=3.
     // Keep legacy cycle counts bit-identical when this is zero.
-    parameter FAST_166 = 0
+    parameter FAST_166 = 0,
+    // Write data latched at dispatch (os25 INCLUDE_SDRAM_WRITE_PIPE).
+    //   0 (default) — legacy: ST_WRITE_2/3 read the capture registers
+    //       (word_data_captured / word_data_next_captured) directly, so a word
+    //       op captured while a write executes would overwrite that write's
+    //       data.  Safe only because axi_sdram_slave keeps one op outstanding.
+    //   1 — the capture registers are a true one-deep queue for writes, as
+    //       they already are for addresses: ST_IDLE copies the queued write's
+    //       beats 0/1 into wx_* (the executing-write registers), and the data
+    //       states, the burst preload shift and the continuation pull capture
+    //       use wx_* only.  A new op may then be captured at any time after
+    //       dispatch (axi_sdram_slave EARLY_WRITE_ACK).  Command sequencing,
+    //       DQM timing and every SDRAM timing parameter are unchanged; only the
+    //       source register of phy_dq_out / phy_dqm differs.
+    parameter WR_DATA_LATCH = 0
 ) (
 
 input   wire            controller_clk,
@@ -175,6 +189,13 @@ assign {phy_ras, phy_cas, phy_we} = cmd;
 
 
     reg     [23:0]  delay_boot;
+    // The two boot-delay compares, taken one cycle early.  Comparing the
+    // 24-bit counter in the cycle it is used put the compare in front of
+    // the route to the A10 pin register.  delay_boot counts by one in
+    // ST_BOOT_0 only, so the previous cycle's (count == N-1) is this
+    // cycle's (count == N); both clear in ST_RESET.
+    reg             boot_cke_hit;
+    reg             boot_done_hit;
     // SDRAM command timing counter.  The long boot delay has its own counter;
     // this one only needs to cover tRFC=8 cycles, so keep it narrow to avoid
     // wide terminal-count compares on the 100MHz SDRAM command path.
@@ -235,6 +256,14 @@ assign dbg_io = {1'b0, (refresh_pending != 3'd0), state[5:0]};
     // ST_WRITE_4_NR_ACT — the slave holds the selected beat stable until
     // the next pull, so late capture is always safe.
     reg        pull_inflight;
+    // WR_DATA_LATCH: executing write's current beat (wx_data/strb) and its
+    // preloaded next beat (wx_next_*).  Swept when WR_DATA_LATCH == 0.
+    reg [31:0] wx_data;
+    reg [3:0]  wx_strb;
+    reg [31:0] wx_next_data;
+    reg [3:0]  wx_next_strb;
+    wire [31:0] wr_cur_data = WR_DATA_LATCH ? wx_data : word_data_captured;
+    wire [3:0]  wr_cur_strb = WR_DATA_LATCH ? wx_strb : word_wstrb_captured;
 
     reg burst_rd_queue;
     // Set when burst_rd arrives while a word op is already queued (or its
@@ -439,6 +468,8 @@ always @(posedge controller_clk) begin
         phy_cke <= 0;
         cmd <= CMD_NOP;
         delay_boot <= 0;
+        boot_cke_hit <= 1'b0;
+        boot_done_hit <= 1'b0;
         refresh_pending <= 3'd0;
         phy_dqm <= 2'b00;
 
@@ -447,8 +478,11 @@ always @(posedge controller_clk) begin
     ST_BOOT_0: begin
         delay_boot <= delay_boot + 1'b1;
 
-        if(delay_boot == BOOT_CYCLES-16) phy_cke <= 1;
-        if(delay_boot == BOOT_CYCLES) begin
+        boot_cke_hit <= (delay_boot == BOOT_CYCLES-17);
+        boot_done_hit <= (delay_boot == BOOT_CYCLES-1);
+
+        if(boot_cke_hit) phy_cke <= 1;
+        if(boot_done_hit) begin
             // >=200us power-up delay (30000 cycles @90MHz ~= 333us)
             dc <= 0;
 
@@ -505,6 +539,16 @@ always @(posedge controller_clk) begin
 
 
     ST_IDLE: begin
+
+        // WR_DATA_LATCH: snapshot the queued write's beats every IDLE cycle; the
+        // snapshot taken on the dispatching cycle is the one the write uses.
+        // (No capture can land on a dispatch edge: the queue is full then.)
+        if (WR_DATA_LATCH) begin
+            wx_data      <= word_data_captured;
+            wx_strb      <= word_wstrb_captured;
+            wx_next_data <= word_data_next_captured;
+            wx_next_strb <= word_wstrb_next_captured;
+        end
 
         read_newrow <= 0;
         word_busy <= 0;
@@ -769,8 +813,8 @@ always @(posedge controller_clk) begin
         phy_a <= addr[9:0];
         cmd <= CMD_WRITE;
         phy_dq_oe <= 1;
-        phy_dq_out <= word_data_captured[15:0];
-        phy_dqm <= ~word_wstrb_captured[1:0];
+        phy_dq_out <= wr_cur_data[15:0];
+        phy_dqm <= ~wr_cur_strb[1:0];
 
         // Rolling preload: capture the beat requested by the PREVIOUS
         // WRITE_2's pull into the preload slot (freed by last WRITE_3's
@@ -778,8 +822,13 @@ always @(posedge controller_clk) begin
         // A pull is only needed while at least two beats remain after the
         // current one (the next beat is already preloaded).
         if (pull_inflight) begin
-            word_data_next_captured <= burst_wr_direct_data;
-            word_wstrb_next_captured <= burst_wr_direct_strb;
+            if (WR_DATA_LATCH) begin
+                wx_next_data <= burst_wr_direct_data;
+                wx_next_strb <= burst_wr_direct_strb;
+            end else begin
+                word_data_next_captured <= burst_wr_direct_data;
+                word_wstrb_next_captured <= burst_wr_direct_strb;
+            end
         end
         if (wr_burst_remaining >= 4'd2)
             word_wr_data_next <= 1;
@@ -791,8 +840,8 @@ always @(posedge controller_clk) begin
         dc <= 0;
 
         phy_dq_oe <= 1;
-        phy_dq_out <= word_data_captured[31:16];
-        phy_dqm <= ~word_wstrb_captured[3:2];
+        phy_dq_out <= wr_cur_data[31:16];
+        phy_dqm <= ~wr_cur_strb[3:2];
 
         if (wr_burst_remaining > 0) begin
             wr_burst_remaining <= wr_burst_remaining - 4'd1;
@@ -800,8 +849,13 @@ always @(posedge controller_clk) begin
             // Shift preload->active: the continuation beat is already in
             // controller registers, so the next BL=2 write issues on the
             // very next cycle — no cross-module pull/capture bubble.
-            word_data_captured <= word_data_next_captured;
-            word_wstrb_captured <= word_wstrb_next_captured;
+            if (WR_DATA_LATCH) begin
+                wx_data <= wx_next_data;
+                wx_strb <= wx_next_strb;
+            end else begin
+                word_data_captured <= word_data_next_captured;
+                word_wstrb_captured <= word_wstrb_next_captured;
+            end
             if ((addr[9:0] + 10'd2) <= 10'd1) begin
                 // Next write would cross SDRAM row boundary.
                 // Must finish current write, precharge, activate
@@ -875,8 +929,13 @@ always @(posedge controller_clk) begin
             // burst_wr_direct_* until the next pull, so capturing it during
             // the precharge/activate pause is always safe.
             if (pull_inflight) begin
-                word_data_next_captured <= burst_wr_direct_data;
-                word_wstrb_next_captured <= burst_wr_direct_strb;
+                if (WR_DATA_LATCH) begin
+                    wx_next_data <= burst_wr_direct_data;
+                    wx_next_strb <= burst_wr_direct_strb;
+                end else begin
+                    word_data_next_captured <= burst_wr_direct_data;
+                    word_wstrb_next_captured <= burst_wr_direct_strb;
+                end
                 pull_inflight <= 0;
             end
             phy_dq_oe <= 1;

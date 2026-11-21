@@ -111,6 +111,8 @@ EXTRA_FLAGS=""
 DISPATCHER_AT=2         # Preserve every existing variant unless explicitly selected.
 OS30_RVC_PIPELINE=0     # os30-only isolated Scala source overlay.
 OS20_LSU_DISPATCH=0     # os20-only isolated Scala source overlay.
+OS25_FRONTEND_LSU=0     # os25-only isolated Scala source overlay.
+RELAXED_BTB=1           # 0 = BTB redirect without the relaxed stages.
 RELAXED_SHIFT=1         # 0 = single-cycle shifts (no extra execute stage).
 MAXFAN_HINT=0
 FETCH_READ_HOLD=0        # Preserve stalled reads using a registered selector.
@@ -141,6 +143,8 @@ OUTPUT_NAME="VexiiRiscv_$VARIANT.v"
 LSU_SW_PREFETCH_FLAG="--lsu-software-prefetch"
 [ "$LSU_SW_PREFETCH" = 0 ] && LSU_SW_PREFETCH_FLAG=""
 RELAXED_SHIFT_FLAG="--relaxed-shift"
+RELAXED_BTB_FLAGS="--relaxed-btb --relaxed-btb-hit"
+[ "$RELAXED_BTB" = 0 ] && RELAXED_BTB_FLAGS=""
 [ "$RELAXED_SHIFT" = 0 ] && RELAXED_SHIFT_FLAG=""
 RELAXED_LEARN_FLAG=""
 [ "$RELAXED_LEARN" = 1 ] && RELAXED_LEARN_FLAG="--relaxed-learn"
@@ -213,6 +217,40 @@ OS20_SOURCE_BEFORE
 OS20_SOURCE_AFTER
 fi
 
+# os25 front-end, predictor and load/store changes: a one-entry skid buffer
+# between the last fetch stage and the aligner, branch-predictor learning and
+# return-stack repair, and narrower data-cache hazard handling. Private copy,
+# as above, so every other variant generates from unchanged source.
+if [ "$OS25_FRONTEND_LSU" = 1 ]; then
+    [ "$VARIANT" = os25 ] || { echo "Front-end/LSU overlay is qualified only for os25" >&2; exit 1; }
+    GENERATION_DIR=$(mktemp -d "$SCRIPT_DIR/.os25-frontend-lsu.XXXXXXXX")
+    cleanup_os25_source() { rm -rf -- "$GENERATION_DIR"; }
+    trap cleanup_os25_source EXIT
+    (set -o pipefail; tar --exclude=.git --exclude=target --exclude='VexiiRiscv*.v' \
+        --exclude=vexii_active.v -cf - . | tar -xf - -C "$GENERATION_DIR")
+    cd "$GENERATION_DIR"
+    sha256sum -c <<'OS25_SOURCE_BEFORE'
+f4caaf7bb9f885ac252ca32cd751a9394076d26da789ebf324af9ea946626460  src/main/scala/vexiiriscv/decode/AlignerPlugin.scala
+ecfa0f160214e35bc7081a801afd973f1f4c79a36949bd443f26659fb733dc2c  src/main/scala/vexiiriscv/execute/BranchPlugin.scala
+dcdf57c57fdd319cdab8f679816e4490fe03923066e5a5a12637c0bc58273ed7  src/main/scala/vexiiriscv/execute/lsu/LsuL1Plugin.scala
+0c68d916dac332410126ee7b8b36f172b2ad53f975c449c613a235cb900e5818  src/main/scala/vexiiriscv/fetch/FetchPipelinePlugin.scala
+fbc7bdc77eff02dc76bde0aa8079de0b7c219bbd4bf4b3cdd434a6735ed82ee8  src/main/scala/vexiiriscv/misc/TrapPlugin.scala
+d8b940942351be1b0454d25beb65a605cef4fc32554fb9d18af13f404426c425  src/main/scala/vexiiriscv/prediction/BtbPlugin.scala
+a667e0127ba6f3313455fdd7443339f84d83214304337ecad649d1a2163db0cc  src/main/scala/vexiiriscv/prediction/Service.scala
+OS25_SOURCE_BEFORE
+    git apply --check "$SCRIPT_DIR/os25-frontend-lsu.patch"
+    git apply "$SCRIPT_DIR/os25-frontend-lsu.patch"
+    sha256sum -c <<'OS25_SOURCE_AFTER'
+bdeddeb6b3ac13be4b64778c7a5e26c9ea0485e21446310000b013bd552d1710  src/main/scala/vexiiriscv/decode/AlignerPlugin.scala
+88b4877f49d8326a4193a9a2c5a89b6ae72a8bd75efe4fb13bd421413170c7ab  src/main/scala/vexiiriscv/execute/BranchPlugin.scala
+a8ce7f6ea03a66e9ba674294de742f9482b29017e673ac5623cdffb13e82de4c  src/main/scala/vexiiriscv/execute/lsu/LsuL1Plugin.scala
+81317cbbe7a001fc5b52697eb45788d7f5dab93b51190b66303de23f1552d6b2  src/main/scala/vexiiriscv/fetch/FetchPipelinePlugin.scala
+efdd6a71dc5c646904644a7e09aa76ff1a7f6e907ea2ea80ecad8d752cb202d1  src/main/scala/vexiiriscv/misc/TrapPlugin.scala
+9538c38514d2f455ee5cbe4489ecfbab76be6fff234ad8c202879c6f29a387c3  src/main/scala/vexiiriscv/prediction/BtbPlugin.scala
+9cd0c4d1fae7d834b27df2f2007ae265bb86704818e1007491ec22d28947ae76  src/main/scala/vexiiriscv/prediction/Service.scala
+OS25_SOURCE_AFTER
+fi
+
 # sbt always emits the bare name VexiiRiscv.v here; clear any stale copy from
 # an interrupted run so the post-gen rename can't pick up an old netlist.
 # Each variant's final file is VexiiRiscv_<variant>.v (no shared default).
@@ -232,7 +270,7 @@ sbt -Dsbt.server.forcestart=true --batch "Test/runMain vexiiriscv.Generate \
       --lsu-l1-store-buffer-slots=$LSU_SB_SLOTS --lsu-l1-store-buffer-ops=$LSU_SB_OPS \
       --lsu-l1-axi4 \
       $LSU_SW_PREFETCH_FLAG --lsu-hardware-prefetch=none \
-      --with-btb --btb-sets=$BTB_SETS --relaxed-btb --relaxed-btb-hit \
+      --with-btb --btb-sets=$BTB_SETS $RELAXED_BTB_FLAGS \
       --with-gshare --gshare-bytes=$GSHARE_BYTES --with-ras \
       --allow-bypass-from=0 \
       --fpu-ignore-subnormal \

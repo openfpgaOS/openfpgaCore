@@ -48,7 +48,13 @@ module tb_gpu_wstall #(
     parameter GPU_EW_PARALLEL_DIVS   = 1,
     parameter GPU_HAS_COMPACT_SPAN   = 1,
     parameter GPU_HAS_COLUMN_LIST    = 1,
-    parameter BANK_ROW_TRACK         = 1
+    parameter BANK_ROW_TRACK         = 1,
+    // W candidate 3 (INCLUDE_SDRAM_WHOLE_BURSTS): 1 = drain whole GPU AW bursts
+    parameter GPU_WQ_WHOLE_BURST = 0,
+    // W candidate 2 (INCLUDE_SDRAM_MASKED_BURSTS): 1 = masked GPU queue beats join bursts
+    parameter GPU_WQ_MASKED_MERGE = 0,
+    // W candidate 1 (INCLUDE_SDRAM_WRITE_PIPE): 1 = early write ack + commit B
+    parameter SDRAM_WRITE_PIPE = 0
 ) (
     input  wire        clk,
     input  wire        reset_n,
@@ -228,6 +234,10 @@ reg  [3:0]  ram1_word_burst_len;
 reg  [3:0]  ram1_word_burst_wr_len;
 wire [31:0] ram1_word_q;
 wire        ram1_word_busy;
+wire        ram1_word_queue_pending;
+// SDRAM_WRITE_PIPE=1 uses core_top.v's gating (queue occupancy), which the
+// overlap depends on; 0 keeps this harness's historical word_busy gating.
+wire        ram1_fwd_gate = SDRAM_WRITE_PIPE ? ram1_word_queue_pending : ram1_word_busy;
 wire        ram1_word_q_valid;
 
 wire        phy_cke, phy_clk, phy_cas, phy_ras, phy_we;
@@ -299,7 +309,7 @@ always @(posedge clk or negedge reset_n) begin
         if (!sdram_slave_rd && !sdram_slave_wr)
             sdram_cmd_forwarded <= 0;
 
-        if (!ram1_word_busy && !sdram_cmd_forwarded &&
+        if (!ram1_fwd_gate && !sdram_cmd_forwarded &&
             (sdram_slave_rd || sdram_slave_wr) && !stall_active) begin
             ram1_word_rd <= sdram_slave_rd;
             ram1_word_wr <= sdram_slave_wr;
@@ -321,7 +331,8 @@ end
 // READ path is uncontended (command-fetch never starves).  The W channel is
 // backpressured purely by the write-completion stall above.
 // ============================================================
-axi_sdram_arbiter sdram_arb (
+wire arb_s_bcommit;
+axi_sdram_arbiter #(.GPU_COMMIT_B(SDRAM_WRITE_PIPE), .GPU_WQ_MASKED_MERGE(GPU_WQ_MASKED_MERGE), .GPU_WQ_WHOLE_BURST(GPU_WQ_WHOLE_BURST)) sdram_arb (
     .clk(clk), .reset_n(reset_n),
 
     .m0_arvalid(gpu_rd_arvalid), .m0_arready(gpu_rd_arready),
@@ -377,6 +388,7 @@ axi_sdram_arbiter sdram_arb (
     .s_wlast(arb_s_wlast),
     .s_bvalid(arb_s_bvalid),   .s_bresp(arb_s_bresp),
     .s_wcont(arb_s_wcont),
+    .s_bcommit(arb_s_bcommit),
 
     .dbg_arb_state(),
     .dbg_cpu_pending(),
@@ -388,7 +400,8 @@ axi_sdram_arbiter sdram_arb (
 // ============================================================
 axi_sdram_slave #(
     .SERIALIZE_WRITE_BURSTS(1'b0),
-    .MAX_NATIVE_WRITE_BURST_LEN(8'd15)
+    .MAX_NATIVE_WRITE_BURST_LEN(8'd15),
+    .EARLY_WRITE_ACK(SDRAM_WRITE_PIPE)
 ) slave (
     .clk(clk), .reset_n(reset_n),
     .s_axi_arvalid(arb_s_arvalid), .s_axi_arready(arb_s_arready),
@@ -401,10 +414,11 @@ axi_sdram_slave #(
     .s_axi_wdata(arb_s_wdata),     .s_axi_wstrb(arb_s_wstrb), .s_axi_wlast(arb_s_wlast),
     .s_axi_bvalid(arb_s_bvalid),   .s_axi_bready(1'b1),       .s_axi_bresp(arb_s_bresp),
     .s_axi_wcont(arb_s_wcont),
+    .s_axi_bcommit(arb_s_bcommit),
     .sdram_rd(sdram_slave_rd), .sdram_wr(sdram_slave_wr),
     .sdram_addr(sdram_slave_addr), .sdram_wdata(sdram_slave_wdata), .sdram_wstrb(sdram_slave_wstrb),
     .sdram_burst_len(sdram_slave_burst_len), .sdram_burst_wr_len(sdram_slave_burst_wr_len),
-    .sdram_rdata(ram1_word_q), .sdram_busy(ram1_word_busy),
+    .sdram_rdata(ram1_word_q), .sdram_busy(ram1_fwd_gate),
     .sdram_accepted(sdram_accepted_r), .sdram_rdata_valid(ram1_word_q_valid),
     .sdram_wr_data_next(sdram_slave_wr_data_next),
     .sdram_wr_done(sdram_slave_wr_done),
@@ -418,7 +432,8 @@ axi_sdram_slave #(
 // io_sdram (MiSTer controller; split-DQ test variant).  No scanout burst.
 // ============================================================
 io_sdram #(
-    .BANK_ROW_TRACK(BANK_ROW_TRACK)
+    .BANK_ROW_TRACK(BANK_ROW_TRACK),
+    .WR_DATA_LATCH(SDRAM_WRITE_PIPE)
 ) sdram_ctrl (
     .controller_clk(clk), .chip_clk(clk), .clk_90(clk), .reset_n(reset_n),
     .phy_cke(phy_cke), .phy_clk(phy_clk),
@@ -436,7 +451,7 @@ io_sdram #(
     .word_addr(ram1_word_addr), .word_data(ram1_word_data), .word_wstrb(ram1_word_wstrb),
     .word_data_next(ram1_word_data_next), .word_wstrb_next(ram1_word_wstrb_next),
     .word_burst_len(ram1_word_burst_len), .word_burst_wr_len(ram1_word_burst_wr_len),
-    .word_q(ram1_word_q), .word_busy(ram1_word_busy), .word_q_valid(ram1_word_q_valid),
+    .word_q(ram1_word_q), .word_busy(ram1_word_busy), .word_queue_pending(ram1_word_queue_pending), .word_q_valid(ram1_word_q_valid),
     .word_wr_data_next(sdram_slave_wr_data_next),
     .word_wr_done(sdram_slave_wr_done),
     .burst_wr_direct_data(sdram_slave_next_wdata),

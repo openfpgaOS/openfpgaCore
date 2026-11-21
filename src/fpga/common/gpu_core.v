@@ -158,6 +158,21 @@ module gpu_core #(
     // cost doubles per step (replicated dual-read RAM — see the
     // gpu_tex_cache header before going bigger).
     parameter GPU_TEX_CACHE_SET_BITS = 10,
+    // Texture/cmap cache line length (gpu_tex_cache LINE_BITS): log2 bytes
+    // per line.  Default 4 = 16 B (unchanged).  Capacity is
+    // 2^(GPU_TEX_CACHE_SET_BITS + GPU_TEX_CACHE_LINE_BITS) bytes.
+    parameter GPU_TEX_CACHE_LINE_BITS = 4,
+    // Dedicated colormap (port-B) store (gpu_tex_cache CMAP_SET_BITS).
+    // Default 0 = palookup rows share the texture cache (unchanged).  N > 0
+    // gives palookup reads their own direct-mapped 2^N x 16 B store, so
+    // colormap rows and texture lines stop evicting each other.  Pixel
+    // output is identical either way; only fill counts/timing change.
+    parameter GPU_TEX_CMAP_SET_BITS = 0,
+    // With a dedicated colormap store: 1 = tag it with the palookup-relative
+    // offset ({colormap_id, light} high bits, 6 bits at N = 8) instead of
+    // absolute address bits (14 at N = 8), shrinking the port-B hit compare.
+    // A GPU_PALOOKUP_BASE write then also flushes the texture cache.
+    parameter GPU_TEX_CMAP_REL_TAG = 0,
 
     // ----------------------------------------------------------------
     // 0x48 compact-direct lane form (4-word header + 7 words/lane, payload
@@ -241,7 +256,25 @@ module gpu_core #(
     // perspective branches.  SM64 never arms Q29 (gpu_q29_word stub=0, vt_q29_en=0,
     // no param-span/tri path), so it is dead logic on os30; os25/mister keep it
     // (Quake param-span perspective precision).
-    parameter INCLUDE_PARAM_SPAN_Q29 = 1
+    parameter INCLUDE_PARAM_SPAN_Q29 = 1,
+    // Early record handoff for parametric (long-form 0x48) records.  The
+    // relaxed intra-chunk continuation that sp_fastpath gives compact/column
+    // lanes (next record's SELECT/SETUP/CAPTURE/EMIT start once the issue
+    // stages p0a/p0 and the texture queues are empty, while p1..p3/FBSS hold
+    // the previous record's opaque pixels) is extended to parametric records
+    // that are opaque, depth-free, palettized and not walker-fed, and to the
+    // packed-record chunk hand-off (next chunk's payload fetch + EXECUTE);
+    // their tail then drains during the next record's setup / perspective
+    // anchor pass.  Retire keeps the full drain.
+    // Default 0: sp_fastpath stays 0 for parametric records (unchanged).
+    parameter GPU_SPAN_EARLY_HANDOFF = 0,
+    // Prepared-span setup: while record N's pixels run in S_FRAG_PIPE, a
+    // shadow walk (prep_st) performs record N+1's SELECT / SETUP / MUL_WAIT /
+    // CAPTURE on the dedicated span multipliers, so the hand-off goes
+    // straight to S_SPANPROD_EMIT.  Parametric, non-walker records inside one
+    // chunk only; needs INCLUDE_SPAN_DEDICATED_MULT (the shared DSPs belong
+    // to the PSS during S_FRAG_PIPE).  Default 0: prep_st is constant IDLE.
+    parameter GPU_SPAN_PREP = 0
 ) (
     input wire clk,
     input wire reset_n,
@@ -649,6 +682,10 @@ always @(posedge clk) begin
                 end
                 4'd12: begin // GPU_PALOOKUP_BASE
                     palookup_base <= reg_wdata[25:0];
+                    // Relative-tag colormap store: cached rows are keyed on
+                    // the offset from this base, so a new base invalidates.
+                    if ((GPU_TEX_CMAP_SET_BITS != 0) && (GPU_TEX_CMAP_REL_TAG != 0))
+                        tex_flush_req <= 1;
                 end
                 4'd14: begin // GPU_TEX_MEM_ROUTE: bit0 routes tex fills to fast tex
                     // No-op when INCLUDE_TEX_MEM == 0 (route stays constant 0,
@@ -912,6 +949,7 @@ end
 // of_gpu_palookup_upload() on the host side.
 reg        cmap_pending_valid;
 reg [25:0] cmap_pending_addr;
+reg [17:0] cmap_pending_off;    // {colormap_id, light, texel}: offset from palookup_base
 wire [11:0] cmap_slot_page = palookup_base[25:14] + {8'b0, p1_colormap_id};
 wire [25:0] cmap_slot_addr = {cmap_slot_page, 14'b0};
 
@@ -1045,7 +1083,10 @@ wire        tex_axi_rlast;
 // shared AXI fill machine; the consumer-side stall is enforced by
 // fp_pipe_stall's cmap_pipe_wait term.
 gpu_tex_cache #(
-    .SET_BITS(GPU_TEX_CACHE_SET_BITS)
+    .SET_BITS(GPU_TEX_CACHE_SET_BITS),
+    .LINE_BITS(GPU_TEX_CACHE_LINE_BITS),
+    .CMAP_SET_BITS(GPU_TEX_CMAP_SET_BITS),
+    .CMAP_REL_TAG(GPU_TEX_CMAP_REL_TAG)
 ) tex_cache (
     .clk(clk),
     .reset_n(reset_n),
@@ -1061,6 +1102,7 @@ gpu_tex_cache #(
     .req_valid_b(cmap_req_valid_b),
     .req_ready_b(cmap_req_ready_b),
     .req_addr_b(cmap_req_addr_b),
+    .req_off_b(cmap_pending_off),
     .req_wide_b(1'b0),
     .resp_valid_b(cmap_resp_valid_b),
     .resp_data_b(cmap_resp_data_b),
@@ -1595,7 +1637,6 @@ reg [15:0] sp_tex_width;
 reg        sp_truecolor;       // sticky: this surface renders direct RGB565
 reg        sp_rgb;             // sticky: this surface modulates by per-vertex RGB (0x4E)
 reg        sp_blend;           // sticky: src-over alpha blend (OF_GPU_SPAN_BLEND)
-reg [7:0]  sp_const_alpha;     // sticky: per-surface src alpha (0x4A word 16)
 reg [6:0]  sp_a6;              // sticky: precomputed blend weight 0..64 (off the per-pixel path)
 // POT wrap masks: (sp_s[31:16] & sp_tex_w_mask) and
 // (sp_t[31:16] & sp_tex_h_mask)
@@ -2422,9 +2463,35 @@ task store_direct_tstep;
     end
 endtask
 
+// GPU_SPAN_PREP shadow setup walk.  prep_st runs only in S_FRAG_PIPE (it is
+// forced IDLE in every other state) and drives the SAME setup datapath the
+// S_SPANPROD_* states drive, through spx_state: the setup-side selects below
+// read spx_state instead of state, which equals state except while prep_st
+// is walking.  Nothing the running span reads is written by the walk:
+// spanprod_cur_* / *_start_r / *_step_pre / launch+calc pointers are read
+// only by the setup states and EMIT, except the two step pre-captures the
+// PSS consumes, which it now reads from EMIT-time copies (persp_s/tZstep_r).
+localparam SPAN_DEDICATED_MULT = `ifdef INCLUDE_SPAN_DEDICATED_MULT 1 `else 0 `endif;
+localparam EFF_SPAN_PREP = (GPU_SPAN_PREP != 0) && (SPAN_DEDICATED_MULT != 0);
+localparam [2:0] PREP_IDLE = 3'd0, PREP_SELECT = 3'd1, PREP_SETUP = 3'd2,
+                 PREP_MUL = 3'd3, PREP_CAP = 3'd4, PREP_READY = 3'd5,
+                 PREP_SKIP = 3'd6;
+reg [2:0] prep_st;
+wire prep_busy  = EFF_SPAN_PREP && (prep_st != PREP_IDLE) && (prep_st != PREP_READY)
+                  && (prep_st != PREP_SKIP);
+wire prep_ready = EFF_SPAN_PREP && (prep_st == PREP_READY);
+wire prep_walk  = prep_busy && (state == S_FRAG_PIPE);
+wire [5:0] spx_state = !prep_walk ? state
+                     : (prep_st == PREP_SELECT) ? S_SPANPROD_SELECT
+                     : (prep_st == PREP_SETUP)  ? S_SPANPROD_SETUP
+                     : (prep_st == PREP_MUL)    ? S_SPANPROD_MUL_WAIT
+                     :                            S_SPANPROD_CAPTURE;
+// The walk prepares the NEXT lane of the chunk.
+wire [1:0] spanprod_rd_idx = prep_walk ? (spanprod_idx + 2'd1) : spanprod_idx;
+
 // Synchronous lane reads use the existing SELECT cycle. Keep masks outside
 // the RAM output registers so each bank can map to one M10K read port.
-wire spanprod_select = reset_n && !soft_reset && (state == S_SPANPROD_SELECT);
+wire spanprod_select = reset_n && !soft_reset && (spx_state == S_SPANPROD_SELECT);
 reg spanprod_cur_valid;
 reg spanprod_cur_count_valid;
 reg spanprod_cur_s_zeroed, spanprod_cur_sstep_zeroed;
@@ -2438,22 +2505,22 @@ always @(posedge clk) begin
     else if (spanprod_select)
         spanprod_cur_valid <= 1'b1;
     if (spanprod_select) begin
-        spanprod_cur_u <= spanprod_u[spanprod_idx];
-        spanprod_cur_v <= spanprod_v[spanprod_idx];
-        spanprod_cur_count_raw <= spanprod_count[spanprod_idx];
-        spanprod_cur_count_valid <= spanprod_cnt_valid[spanprod_idx];
+        spanprod_cur_u <= spanprod_u[spanprod_rd_idx];
+        spanprod_cur_v <= spanprod_v[spanprod_rd_idx];
+        spanprod_cur_count_raw <= spanprod_count[spanprod_rd_idx];
+        spanprod_cur_count_valid <= spanprod_cnt_valid[spanprod_rd_idx];
         if (INCLUDE_COMPACT_SPAN != 0) begin
-            spanprod_cur_direct_fb_addr <= spanprod_direct_fb_addr[spanprod_idx];
-            spanprod_cur_direct_tex_addr <= spanprod_direct_tex_addr[spanprod_idx];
-            spanprod_cur_s_raw <= spanprod_direct_s[spanprod_idx];
-            spanprod_cur_direct_t <= spanprod_direct_t[spanprod_idx];
-            spanprod_cur_sstep_raw <= spanprod_direct_sstep[spanprod_idx];
-            spanprod_cur_direct_tstep <= spanprod_direct_tstep[spanprod_idx];
-            spanprod_cur_cmap_raw <= spanprod_direct_colormap_id[spanprod_idx];
-            spanprod_cur_direct_light <= spanprod_direct_light[spanprod_idx];
-            spanprod_cur_s_zeroed <= spanprod_s_zeroed[spanprod_idx];
-            spanprod_cur_sstep_zeroed <= spanprod_sstep_zeroed[spanprod_idx];
-            spanprod_cur_cmap_valid <= spanprod_cmap_valid[spanprod_idx];
+            spanprod_cur_direct_fb_addr <= spanprod_direct_fb_addr[spanprod_rd_idx];
+            spanprod_cur_direct_tex_addr <= spanprod_direct_tex_addr[spanprod_rd_idx];
+            spanprod_cur_s_raw <= spanprod_direct_s[spanprod_rd_idx];
+            spanprod_cur_direct_t <= spanprod_direct_t[spanprod_rd_idx];
+            spanprod_cur_sstep_raw <= spanprod_direct_sstep[spanprod_rd_idx];
+            spanprod_cur_direct_tstep <= spanprod_direct_tstep[spanprod_rd_idx];
+            spanprod_cur_cmap_raw <= spanprod_direct_colormap_id[spanprod_rd_idx];
+            spanprod_cur_direct_light <= spanprod_direct_light[spanprod_rd_idx];
+            spanprod_cur_s_zeroed <= spanprod_s_zeroed[spanprod_rd_idx];
+            spanprod_cur_sstep_zeroed <= spanprod_sstep_zeroed[spanprod_rd_idx];
+            spanprod_cur_cmap_valid <= spanprod_cmap_valid[spanprod_rd_idx];
         end
     end
 end
@@ -2584,9 +2651,9 @@ endfunction
 // Prefetch the next walk slot into synchronous plane RAM outputs. SETUP
 // launches the framebuffer product; MUL_WAIT and CAPTURE advance the launch
 // pointer once per cycle. The origin pointer follows the capture schedule.
-wire [3:0] spanprod_plane_launch_addr = (state == S_SPANPROD_SETUP)
+wire [3:0] spanprod_plane_launch_addr = (spx_state == S_SPANPROD_SETUP)
     ? spanprod_next_calc(4'd0) : spanprod_next_calc(spanprod_launch_step);
-wire [3:0] spanprod_plane_origin_addr = (state == S_SPANPROD_CAPTURE)
+wire [3:0] spanprod_plane_origin_addr = (spx_state == S_SPANPROD_CAPTURE)
     ? spanprod_next_calc(spanprod_calc_step) : spanprod_calc_step;
 reg signed [31:0] spanprod_plane_du, spanprod_plane_dv;
 reg signed [31:0] spanprod_plane_origin;
@@ -2660,7 +2727,7 @@ wire signed [31:0] spanprod_capture_origin_w =
 reg signed [15:0] span_mul_u, span_mul_v;
 reg signed [31:0] span_mul_du, span_mul_dv;
 (* multstyle = "dsp" *) reg signed [31:0] span_mul_pu, span_mul_pv;
-wire span_mul_fb = (state == S_SPANPROD_SETUP);
+wire span_mul_fb = (spx_state == S_SPANPROD_SETUP);
 wire span_mul_address = span_mul_fb || (spanprod_launch_step == 4'd5);
 always @(posedge clk) begin
     span_mul_u <= (span_mul_address && !spanprod_span_axis)
@@ -2688,6 +2755,37 @@ wire signed [31:0] spanprod_capture_sum =
     + $signed(dsp_p[31:0]) + $signed(dsp2_p[31:0]);
 `endif
 
+// S_SPANPROD_CAPTURE product write (shared with the GPU_SPAN_PREP walk).
+task spanprod_capture_write;
+    begin
+        case (spanprod_calc_step)
+            3'd0: spanprod_fb_addr_r <= spanprod_capture_sum[GPU_ADDR_W-1:0];
+            3'd5: spanprod_z_addr_r <= spanprod_capture_sum[GPU_ADDR_W-1:0];
+            3'd1: spanprod_attr0_start_r <= spanprod_capture_sum;
+            3'd2: begin
+                spanprod_attr1_start_r <= spanprod_capture_sum;
+                if (!spanprod_attr_persp) begin
+                    spanprod_attr2_start_r <= 32'sd0;
+                    if (!(spanprod_flags[SPAN_COLORMAP] || spanprod_truecolor))
+                        spanprod_light_start_r <= 24'sd0;
+                end
+            end
+            3'd3: begin
+                spanprod_attr2_start_r <= spanprod_capture_sum;
+                if (!(spanprod_flags[SPAN_COLORMAP] || spanprod_truecolor))
+                    spanprod_light_start_r <= 24'sd0;
+            end
+            SPANPROD_STEP_R: spanprod_R_start_r <= spanprod_capture_sum[23:0];
+            SPANPROD_STEP_B: spanprod_B_start_r <= spanprod_capture_sum[23:0];
+            SPANPROD_STEP_DEPTH: spanprod_depth_start_r <= spanprod_capture_sum;
+            SPANPROD_STEP_DR: spanprod_Dr_start_r <= spanprod_capture_sum[23:0];
+            SPANPROD_STEP_DG: spanprod_Dg_start_r <= spanprod_capture_sum[23:0];
+            SPANPROD_STEP_DB: spanprod_Db_start_r <= spanprod_capture_sum[23:0];
+            default: spanprod_light_start_r <= spanprod_capture_sum[23:0];
+        endcase
+    end
+endtask
+
 // Same-cycle rgb-mode select for the unified zc pipeline: this is the exact
 // value being written into sp_rgb at EMIT (NOT the stale sp_rgb register,
 // which still holds the previous surface's mode during the EMIT cycle).
@@ -2703,7 +2801,6 @@ task spanprod_load_generated_span;
         sp_tex_width   <= spanprod_tex_width_nz ? spanprod_tex_width : 16'd1;
         sp_truecolor   <= spanprod_truecolor;
         sp_blend       <= spanprod_blend;
-        sp_const_alpha <= spanprod_const_alpha;
         sp_a6          <= (spanprod_const_alpha == 8'd255) ? 7'd64
                                                           : {1'b0, spanprod_const_alpha[7:2]};
 `ifdef INCLUDE_CB_SPLIT_MULT
@@ -2729,6 +2826,10 @@ task spanprod_load_generated_span;
 `endif
 
         sp_cd_combine  <= spanprod_cd_combine;
+        if (EFF_SPAN_PREP) begin
+            persp_sZstep_r <= spanprod_attr0_step_pre;
+            persp_tZstep_r <= spanprod_attr1_step_pre;
+        end
 
         if (spanprod_direct_affine) begin
             // Fastpath gate: direct && !z && !transluc (&& !persp — this
@@ -2773,7 +2874,16 @@ task spanprod_load_generated_span;
             persp_pass        <= PSS_PASS_ANCHOR;
             sp_seg_left       <= 4'd0;
         end else begin
-            sp_fastpath    <= 1'b0;
+            // GPU_SPAN_EARLY_HANDOFF: same eligibility as the direct lane
+            // (opaque, no z write/test) plus palettized and not walker-fed,
+            // so every field the frozen tail reads (sp_truecolor/sp_rgb/
+            // sp_blend/sp_cd_combine: command-constant) and every FBSS state
+            // it can occupy (IDLE / FLUSH_W_RSP) match the proven direct case.
+            sp_fastpath    <= (GPU_SPAN_EARLY_HANDOFF != 0)
+                              && !spanprod_flags[SPAN_TRANSLUC]
+                              && !(INCLUDE_DEPTH && (spanprod_z_write || spanprod_z_test))
+                              && !spanprod_truecolor && !spanprod_rgb_mode_w
+                              && !cmd_is_tri_walker;
             sp_fb_addr     <= spanprod_fb_addr_r;
             sp_tex_addr    <= spanprod_tex_addr;
             sp_colormap_id <= spanprod_colormap_id;
@@ -3195,23 +3305,16 @@ reg [12:0] cmd_payload_words;
 // 8-bit case decoder before this change).
 reg cmd_is_fence;
 reg cmd_is_clear_rect;
-reg cmd_is_set_fb;
 reg cmd_is_draw_param_span_list;
 reg cmd_is_draw_column_list;
 reg cmd_is_draw_param_tri;
-reg cmd_is_set_tri_state;
 reg cmd_is_draw_vert_tri;
 reg cmd_is_draw_vert_tri_rgb;    // 0x4E (truecolor per-vertex RGB)
 reg cmd_is_draw_param_tri_recs;
-reg cmd_is_set_object_state;     // 0x50
 reg cmd_is_draw_xform_tri;       // 0x51
 reg cmd_is_draw_xform_tri_rgb;   // 0x52 (T1 truecolor transform tri)
 reg cmd_is_draw_clip_tri;        // 0x4F clip-space-feed truecolor tri (skips the MAC)
-reg cmd_is_load_verts;
-reg cmd_is_load_vert_clip;           // 0x53 (T3 transform -> vertex cache)
 reg cmd_is_draw_indexed_tri;     // 0x54 (T3 indexed draw from cache)
-reg cmd_is_set_light_state;      // 0x55 (T4 sticky light state)
-reg cmd_is_load_vert_lit;        // 0x57 (T4 transform+light -> cache)
 reg cmd_is_flip;
 
 // Registered command class for the S_PAY_DATA / S_EXECUTE dispatch.
@@ -3231,7 +3334,7 @@ localparam [4:0] CMDCLS_FENCE            = 5'd1;
 localparam [4:0] CMDCLS_FLIP             = 5'd2;
 localparam [4:0] CMDCLS_CLEAR_RECT       = 5'd3;
 localparam [4:0] CMDCLS_SET_FB           = 5'd4;
-localparam [4:0] CMDCLS_SET_TEXTURE      = 5'd5;
+// 5'd5 was CMDCLS_SET_TEXTURE (0x20 now decodes to CMDCLS_NONE).
 localparam [4:0] CMDCLS_SPAN_COL         = 5'd6;   // 0x48 span list / 0x4C column list
 localparam [4:0] CMDCLS_PARAM_TRI        = 5'd7;   // 0x49
 localparam [4:0] CMDCLS_SET_TRI_STATE    = 5'd8;   // 0x4A
@@ -4020,7 +4123,6 @@ reg [4:0]  lt_lr, lt_lb;                  // light colour R/B (5-bit)
 reg [5:0]  lt_lg;                         // light colour G (6-bit)
 reg [4:0]  lt_ar, lt_ab;                  // ambient R/B
 reg [5:0]  lt_ag;                         // ambient G
-reg        lt_enable;
 reg signed [31:0] xf_nx, xf_ny, xf_nz;    // per-vertex normal (lit load), Q16.16
 reg        xf_lit;                         // this S_XFORM run computes lighting
 reg        xf_clip;                        // this S_XFORM run is a clip-space feed (skips the MAC)
@@ -5121,8 +5223,6 @@ wire [1:0]  cbw_p2_idx     = (CBW_LG == 2) ? p2_fb_addr[3:2]
                            : (CBW_LG == 1) ? {1'b0, p2_fb_addr[2]} : 2'd0;
 wire [GPU_ADDR_W-1:0] p2_fb_word_addr_w
                            = p2_fb_addr & {{(GPU_ADDR_W-2){1'b1}}, 2'b00};
-wire [GPU_ADDR_W-1:0] p2b_fb_word_addr_w
-                           = p2b_fb_addr & {{(GPU_ADDR_W-2){1'b1}}, 2'b00};
 wire        cbw_p2_hit_w   = (CBW_WORDS > 1)
                           && cbw_valid[cbw_p2_idx]
                           && (cbw_base == p2_fb_addr[GPU_ADDR_W-1:CBW_LOW])
@@ -5495,8 +5595,13 @@ end endgenerate
 reg signed [31:0] sp_sZ;        // s/z, 16.16 signed
 reg signed [31:0] sp_tZ;        // t/z, 16.16 signed
 reg signed [31:0] sp_zinv;      // 1/z, 16.16 or high-precision param q28
-wire signed [31:0] sp_sZstep = spanprod_attr0_step_pre;    // d(s/z)/dx, per-pixel
-wire signed [31:0] sp_tZstep = spanprod_attr1_step_pre;    // d(t/z)/dx, per-pixel
+// GPU_SPAN_PREP: the shadow walk rewrites the step pre-captures for the
+// next record while this span's PSS still runs, so the PSS reads copies
+// taken at EMIT (the value it saw before: written by this record's walk,
+// unchanged until the next record's walk).
+reg signed [31:0] persp_sZstep_r, persp_tZstep_r;
+wire signed [31:0] sp_sZstep = EFF_SPAN_PREP ? persp_sZstep_r : spanprod_attr0_step_pre;    // d(s/z)/dx, per-pixel
+wire signed [31:0] sp_tZstep = EFF_SPAN_PREP ? persp_tZstep_r : spanprod_attr1_step_pre;    // d(t/z)/dx, per-pixel
 reg signed [31:0] sp_zinv_step; // d(1/z)/dx, per-pixel
 reg               sp_zinv_step_zero;
 // Perspective correction runs as affine sub-segments.  The PSS setup path
@@ -6159,25 +6264,18 @@ always @(posedge clk) begin : main_fsm
         cr_addr <= 0; cr_row_addr <= 0;
         cr_w_remaining <= 0; cr_w_total <= 0;
         cr_y_remaining <= 0; cr_stride <= 0; cr_color <= 0;
-        cmd_is_set_fb <= 0;
         cmd_is_draw_param_span_list <= 0;
         cmd_is_draw_column_list <= 0;
         cmd_is_draw_param_tri <= 0;
-        cmd_is_set_tri_state <= 0;
         cmd_is_draw_vert_tri <= 0;
         cmd_is_draw_vert_tri_rgb <= 0;
         cmd_is_draw_param_tri_recs <= 0;
-        cmd_is_set_object_state <= 0;
         cmd_is_draw_xform_tri <= 0;
         cmd_is_draw_xform_tri_rgb <= 0;
         cmd_is_draw_clip_tri <= 0;
-        cmd_is_load_verts <= 0;
         cmd_is_draw_indexed_tri <= 0;
-        cmd_is_set_light_state <= 0;
-        cmd_is_load_vert_lit <= 0;
         xf_to_cache <= 1'b0;
         xf_lit <= 1'b0;
-        lt_enable <= 1'b0;
         // B6: zc_s1/zc_s2/sp_zc_la carry no reset — any consumed zc_s2 read
         // (load_p0a with z enabled, rgb/truecolor) is preceded by a parametric
         // EMIT writing sp_zc_la/sp_zc_step + the 2-cycle g_zwarm warm rewriting
@@ -6251,6 +6349,7 @@ always @(posedge clk) begin : main_fsm
         transluc_lookup_fire <= 1'b0;
         cmap_pending_valid <= 1'b0;
         cmap_pending_addr <= 26'b0;
+        cmap_pending_off  <= 18'b0;
         fbss <= FBSS_IDLE;
         ztest_acc_old_half <= 16'd0;
         ztest_acc_from_read <= 1'b0;
@@ -6278,6 +6377,7 @@ always @(posedge clk) begin : main_fsm
         blend_p3_match_r <= 0;
         src_done <= 0;
         sp_fastpath <= 1'b0;
+        prep_st <= PREP_IDLE;
         sp_clamp_enable <= 2'b00;
         sp_z_write_enable <= 1'b0;
         sp_z_test_enable <= 1'b0;
@@ -6423,6 +6523,7 @@ always @(posedge clk) begin : main_fsm
             p3_z_test <= 1'b0;
             p3_z_write <= 1'b0;
             sp_fastpath <= 1'b0;
+            prep_st <= PREP_IDLE;
             sp_z_write_enable <= 1'b0;
             sp_z_test_enable <= 1'b0;
             sp_zinv_step_zero <= 1'b1;
@@ -6451,17 +6552,13 @@ always @(posedge clk) begin : main_fsm
             spanprod_direct_affine <= 1'b0;
             cmd_is_draw_column_list <= 1'b0;
             cmd_is_draw_param_tri <= 1'b0;
-            cmd_is_set_tri_state <= 1'b0;
             cmd_is_draw_vert_tri <= 1'b0;
             cmd_is_draw_vert_tri_rgb <= 1'b0;
             cmd_is_draw_param_tri_recs <= 1'b0;
-            cmd_is_set_object_state <= 1'b0;
             cmd_is_draw_xform_tri <= 1'b0;
             cmd_is_draw_xform_tri_rgb <= 1'b0;
             cmd_is_draw_clip_tri <= 1'b0;
-            cmd_is_load_verts <= 1'b0;
             cmd_is_draw_indexed_tri <= 1'b0;
-            cmd_is_set_light_state <= 1'b0;
             // 0x4A sticky bank is invalidated on soft_reset so a 0x4B after a
             // reset is a no-op until a fresh 0x4A re-arms the state.
             tri_state_valid <= 1'b0;
@@ -6475,6 +6572,7 @@ always @(posedge clk) begin : main_fsm
 
             cmap_pending_valid <= 1'b0;
             cmap_pending_addr <= 26'b0;
+            cmap_pending_off  <= 18'b0;
         end else begin
             // ------------------------------------------------------------
             // Always-on housekeeping (runs every non-reset cycle).
@@ -6594,6 +6692,12 @@ always @(posedge clk) begin : main_fsm
                 end
             end
 
+            // GPU_SPAN_PREP: the shadow walk lives only inside S_FRAG_PIPE;
+            // leaving that state (hand-off, chunk reload, retire) drops any
+            // prepared record.
+            if (EFF_SPAN_PREP && (state != S_FRAG_PIPE))
+                prep_st <= PREP_IDLE;
+
         case (state)
 
         // ============================================================
@@ -6640,7 +6744,6 @@ always @(posedge clk) begin : main_fsm
             cbw_valid <= 4'b0;
             cmd_is_fence          <= (cmd_type == CMD_FENCE);
             cmd_is_clear_rect     <= (cmd_type == CMD_CLEAR_RECT);
-            cmd_is_set_fb         <= (cmd_type == CMD_SET_FB);
             // PRUNE GATE: when INCLUDE_COMPACT_SPAN==0 the size bound rises
             // to the long-form minimum (31-word header + first record pair),
             // so a compact-sized 0x48 (11..32 words) falls to CMDCLS_NONE:
@@ -6732,12 +6835,10 @@ always @(posedge clk) begin : main_fsm
             // ALSO wrapped in the same constant) stays constant-inactive, so
             // the derivation logic sweeps even though tri_state_valid is now
             // a live register on every target.
-            // Accept 16-word (legacy) OR 17-word (w16 = OF_GPU_SPAN_BLEND const
-            // alpha) 0x4A.  Forcing ==17 would no-op every existing 16-word
-            // sender (palettized/Quake2, all current tests).
-            cmd_is_set_tri_state <=
-                (cmd_type == CMD_SET_TRI_STATE
-                 && (cmd_payload_words == 13'd16 || cmd_payload_words == 13'd17));
+            // 0x4A accepts 16-word (legacy) OR 17-word (w16 = OF_GPU_SPAN_BLEND
+            // const alpha) payloads; dispatch is the CMDCLS_SET_TRI_STATE
+            // cmd_class arm below (the old cmd_is_set_tri_state flag had no
+            // reader on any target and was removed).
             cmd_is_draw_vert_tri <= (INCLUDE_VERT_TRI != 0) &&
                 (cmd_type == CMD_DRAW_VERT_TRI && cmd_payload_words == 13'd14);
             // 0x4E: per-vertex RGB truecolor triangle (16-word payload).  Gated
@@ -6760,11 +6861,9 @@ always @(posedge clk) begin : main_fsm
             // no-op drain path — and Quartus sweeps the 0x4D routing/bring-up arms.
             cmd_is_draw_param_tri_recs <= (INCLUDE_PARAM_TRI_RECS != 0) &&
                 (cmd_type == CMD_DRAW_PARAM_TRI_RECS && cmd_payload_words == 13'd16);
-            // 0x50 sticky transform matrix/proj; 0x51 raw-vertex transform tri.
-            // Gated on INCLUDE_VERT_TRI (they feed the same derive datapath).
-            cmd_is_set_object_state <= (INCLUDE_VERT_TRI != 0) &&
-                ((INCLUDE_GPU_XFORM_MAC != 0) || (INCLUDE_XFORM_RGB != 0) || (INCLUDE_CLIP_TRI != 0)) &&
-                (cmd_type == CMD_SET_OBJECT_STATE && cmd_payload_words == 13'd26);
+            // 0x50 sticky transform matrix/proj (cmd_class arm only; its
+            // cmd_is_* flag had no reader) and 0x51 raw-vertex transform tri,
+            // both gated on INCLUDE_VERT_TRI (same derive datapath).
             cmd_is_draw_xform_tri <= !SM64_GEOMETRY && (INCLUDE_VERT_TRI != 0) && (INCLUDE_GPU_XFORM_MAC != 0) &&
                 (cmd_type == CMD_DRAW_XFORM_TRI && cmd_payload_words == 13'd16);
             // T1: 0x52 truecolor transform tri.  18-word payload: 3 verts {x,y,z}
@@ -6783,32 +6882,15 @@ always @(posedge clk) begin : main_fsm
             cmd_is_draw_clip_tri <= (INCLUDE_VERT_TRI != 0) && (INCLUDE_DIRECT_COLOR != 0) &&
                 (INCLUDE_CLIP_TRI != 0) &&
                 (cmd_type == CMD_DRAW_CLIP_TRI && cmd_payload_words == 13'd18);
-            // T3: 0x53 LOAD_VERTS (header word + up to 8 verts x 6 words -> <=49
-            // payload words, fits the 6-bit pay_idx) and 0x54 DRAW_INDEXED_TRI
-            // (1 word: 3 cache indices).  Gated on the vertex cache.
-            cmd_is_load_verts <= !SM64_GEOMETRY && (INCLUDE_VTX_CACHE != 0) && (INCLUDE_XFORM_RGB != 0) &&
-                (INCLUDE_GPU_XFORM_MAC != 0) &&
-                (cmd_type == CMD_LOAD_VERTS &&
-                 cmd_payload_words >= 13'd7 && cmd_payload_words <= 13'd49);
-            // T3 0x56: clip-space cache load -- 7 words wire-identical to 0x53
-            // but w1-3 carry CPU-computed M*v clip {x,y,w}; S_XFORM enters at
-            // XF_CLIP_FEED (recip+project only), so this deliberately has NO
-            // MAC term: it is the load path for MAC-less configs and for hosts
-            // that pre-transform (Quake2 CPU geometry).
-            cmd_is_load_vert_clip <= !GEOMETRY_WORKER && (INCLUDE_VTX_CACHE != 0) && (INCLUDE_XFORM_RGB != 0) &&
-                (cmd_type == CMD_LOAD_VERT_CLIP && cmd_payload_words == 13'd8);
+            // T3: 0x53 LOAD_VERTS / 0x56 clip-space cache load dispatch only
+            // through their cmd_class arms (their cmd_is_* flags had no
+            // reader); 0x54 DRAW_INDEXED_TRI (1 word: 3 cache indices) keeps
+            // its flag, gated on the vertex cache.
             cmd_is_draw_indexed_tri <= (INCLUDE_VTX_CACHE != 0) && (INCLUDE_XFORM_RGB != 0) &&
                 ((cmd_type == CMD_DRAW_INDEXED_TRI
                   || (SM64_GEOMETRY && !GEOMETRY_WORKER && cmd_type == CMD_DRAW_GEOMETRY_TRI)) && cmd_payload_words == 13'd1);
-            // T4: 0x55 SET_LIGHT_STATE sticky (6 words: dir x/y/z, light RGB565,
-            // ambient RGB565, enable/count).
-            cmd_is_set_light_state <= (INCLUDE_GPU_LIGHT != 0) && (INCLUDE_XFORM_RGB != 0) &&
-                (cmd_type == CMD_SET_LIGHT_STATE && cmd_payload_words == 13'd6);
-            // T4: 0x57 LOAD_VERT_LIT (9 words: slot + xyz + normal-xyz + s/t) —
-            // GPU transforms position AND computes lighting -> cache slot.
-            cmd_is_load_vert_lit <= (INCLUDE_GPU_LIGHT != 0) && (INCLUDE_VTX_CACHE != 0) &&
-                (INCLUDE_XFORM_RGB != 0) && (INCLUDE_GPU_XFORM_MAC != 0) &&
-                (cmd_type == CMD_LOAD_VERT_LIT && cmd_payload_words == 13'd9);
+            // T4: 0x55 SET_LIGHT_STATE / 0x57 LOAD_VERT_LIT dispatch only
+            // through their cmd_class arms (flags had no reader).
             cmd_is_flip           <= (cmd_type == CMD_FLIP);
             // Registered command class — same decode, same cycle as the
             // cmd_is_* flags above, but as a parallel case on cmd_type so
@@ -6822,7 +6904,10 @@ always @(posedge clk) begin : main_fsm
                 CMD_FLIP:        cmd_class <= CMDCLS_FLIP;
                 CMD_CLEAR_RECT:  cmd_class <= CMDCLS_CLEAR_RECT;
                 CMD_SET_FB:      cmd_class <= CMDCLS_SET_FB;
-                CMD_SET_TEXTURE: cmd_class <= CMDCLS_SET_TEXTURE;
+                // CMD_SET_TEXTURE (0x20): no texture state exists (the pipe
+                // reads per-span tex fields), so it takes the CMDCLS_NONE
+                // drain below -- the same no-write payload drain and
+                // S_EXECUTE retire its own class code used to select.
                 CMD_DRAW_PARAM_SPAN_LIST:
                     cmd_class <= (((INCLUDE_PARAM_SPAN_LIST != 0)
                                    && cmd_payload_words >= 13'd33)
@@ -7412,7 +7497,7 @@ always @(posedge clk) begin : main_fsm
                     6'd4: begin lt_ar <= ring_rd_data[15:11];
                                 lt_ag <= ring_rd_data[10:5];
                                 lt_ab <= ring_rd_data[4:0]; end
-                    6'd5: lt_enable <= ring_rd_data[0];
+                    // w5 (enable) has no reader on any target: drained.
                     default: ;
                 endcase
             end
@@ -7470,7 +7555,7 @@ always @(posedge clk) begin : main_fsm
                     default: ;
                 endcase
             end
-            // CMDCLS_NONE / CMDCLS_SET_TEXTURE: payload drains word-by-word
+            // CMDCLS_NONE (incl. 0x20 SET_TEXTURE): payload drains word-by-word
             // via pay_remaining with no destination writes — the old chain's
             // fall-through.
             default: ;
@@ -7548,7 +7633,7 @@ always @(posedge clk) begin : main_fsm
                     state         <= S_IDLE;
                 end
             end
-            CMDCLS_SET_TEXTURE, CMDCLS_SET_FB: begin
+            CMDCLS_SET_FB: begin
                 state <= S_IDLE;
             end
             CMDCLS_CLEAR_RECT: begin
@@ -8853,6 +8938,21 @@ always @(posedge clk) begin : main_fsm
                                 state <= S_IDLE;
                             end
                         end
+                        // GPU_SPAN_EARLY_HANDOFF: a parametric record may now
+                        // hand off with its tail frozen in p1..p3, and a
+                        // zero-count record can end the chunk.  Bounce
+                        // through S_FRAG_PIPE (src_done armed) so the tail
+                        // drains before the chunk hand-off or retire; the
+                        // full drain detector then takes the same branch
+                        // this arm would have taken.  Constant 0 when off.
+                        else if ((GPU_SPAN_EARLY_HANDOFF != 0)
+                                 && (p0a_valid || p0_valid || p1_valid
+                                     || p2_valid || p2b_valid || p3_valid
+                                     || (fbss != FBSS_IDLE)
+                                     || blend_group_active)) begin
+                            src_done <= 1'b1;
+                            state <= S_FRAG_PIPE;
+                        end
                         else if (spanprod_more_records_w
                             && (pay_remaining != 13'd0)) begin
                             spanprod_prepare_next_record_chunk;
@@ -8929,31 +9029,7 @@ always @(posedge clk) begin : main_fsm
             // muxed by calc_step); narrow destinations slice its low bits.
             spanprod_launch_step_mul(spanprod_launch_step);
             spanprod_launch_step <= spanprod_next_calc(spanprod_launch_step);
-            case (spanprod_calc_step)
-                3'd0: spanprod_fb_addr_r <= spanprod_capture_sum[GPU_ADDR_W-1:0];
-                3'd5: spanprod_z_addr_r <= spanprod_capture_sum[GPU_ADDR_W-1:0];
-                3'd1: spanprod_attr0_start_r <= spanprod_capture_sum;
-                3'd2: begin
-                    spanprod_attr1_start_r <= spanprod_capture_sum;
-                    if (!spanprod_attr_persp) begin
-                        spanprod_attr2_start_r <= 32'sd0;
-                        if (!(spanprod_flags[SPAN_COLORMAP] || spanprod_truecolor))
-                            spanprod_light_start_r <= 24'sd0;
-                    end
-                end
-                3'd3: begin
-                    spanprod_attr2_start_r <= spanprod_capture_sum;
-                    if (!(spanprod_flags[SPAN_COLORMAP] || spanprod_truecolor))
-                        spanprod_light_start_r <= 24'sd0;
-                end
-                SPANPROD_STEP_R: spanprod_R_start_r <= spanprod_capture_sum[23:0];
-                SPANPROD_STEP_B: spanprod_B_start_r <= spanprod_capture_sum[23:0];
-                SPANPROD_STEP_DEPTH: spanprod_depth_start_r <= spanprod_capture_sum;
-                SPANPROD_STEP_DR: spanprod_Dr_start_r <= spanprod_capture_sum[23:0];
-                SPANPROD_STEP_DG: spanprod_Dg_start_r <= spanprod_capture_sum[23:0];
-                SPANPROD_STEP_DB: spanprod_Db_start_r <= spanprod_capture_sum[23:0];
-                default: spanprod_light_start_r <= spanprod_capture_sum[23:0];
-            endcase
+            spanprod_capture_write;
             if (spanprod_next_calc(spanprod_calc_step) == SPANPROD_STEP_NONE)
                 state <= S_SPANPROD_EMIT;
             else
@@ -9050,6 +9126,49 @@ always @(posedge clk) begin : main_fsm
             // slot between cache issue and the tail pipe; using p1 availability
             // instead of fp_pipe_stall keeps p2/p3 feedback out of the cache
             // RAM read-enable/address cone.
+            // ----------------------------------------------------------
+            // GPU_SPAN_PREP shadow walk for record spanprod_idx+1: the same
+            // per-state datapath actions as S_SPANPROD_SELECT / SETUP /
+            // MUL_WAIT / CAPTURE (the setup-side selects follow spx_state),
+            // one state per cycle, never stalled, so it ends in READY (or
+            // SKIP for a zero-count record, which keeps the normal path)
+            // within 3 + products cycles.  The hand-off below waits for it.
+            // ----------------------------------------------------------
+            if (EFF_SPAN_PREP) begin
+                case (prep_st)
+                    PREP_IDLE:
+                        if (spanprod_active && !spanprod_direct_affine
+                            && !cmd_is_tri_walker
+                            && (spanprod_idx != spanprod_last_idx))
+                            prep_st <= PREP_SELECT;
+                    PREP_SELECT: prep_st <= PREP_SETUP;
+                    PREP_SETUP: begin
+                        if (!spanprod_cur_nonzero) begin
+                            prep_st <= PREP_SKIP;
+                        end else begin
+                            spanprod_calc_step <= 3'd0;
+                            spanprod_launch_step <= spanprod_next_calc(3'd0);
+                            prep_st <= PREP_MUL;
+                        end
+                    end
+                    PREP_MUL: begin
+                        spanprod_launch_step_mul(spanprod_launch_step);
+                        spanprod_launch_step <= spanprod_next_calc(spanprod_launch_step);
+                        prep_st <= PREP_CAP;
+                    end
+                    PREP_CAP: begin
+                        spanprod_launch_step_mul(spanprod_launch_step);
+                        spanprod_launch_step <= spanprod_next_calc(spanprod_launch_step);
+                        spanprod_capture_write;
+                        if (spanprod_next_calc(spanprod_calc_step) == SPANPROD_STEP_NONE)
+                            prep_st <= PREP_READY;
+                        else
+                            spanprod_calc_step <= spanprod_next_calc(spanprod_calc_step);
+                    end
+                    default: ;   // READY / SKIP hold until the hand-off
+                endcase
+            end
+
             issue_committed = tex_req_valid && tex_req_ready;
             p1_to_p2 = !fp_pipe_stall && p1_valid;
             p3_consumed = 1'b0;
@@ -9343,6 +9462,7 @@ always @(posedge clk) begin : main_fsm
                         cmap_pending_valid <= 1'b1;
                         cmap_pending_addr  <= cmap_slot_addr
                                             | {12'b0, p1_light, p1_pixel_color[7:0]};
+                        cmap_pending_off   <= {p1_colormap_id, p1_light, p1_pixel_color[7:0]};
                     end
                 end
 
@@ -10783,7 +10903,7 @@ always @(posedge clk) begin : main_fsm
 		            if (src_done && !stream_pending && !p0a_valid && !p0_valid && !p1_valid && !p2_valid && !p2b_valid
 		                         && !p3_valid && fbss == FBSS_IDLE && !zw_fill_busy
 		                         && !blend_group_active
-		                         && !persp_active) begin
+		                         && !persp_active && !prep_busy) begin
 	                src_done <= 0;
 	                persp_active      <= 0;  // disarm so PSS doesn't keep running
 	                persp_swap_pending <= 1'b0;
@@ -10807,7 +10927,7 @@ always @(posedge clk) begin : main_fsm
 	                        end
 	                    end else begin
 	                        spanprod_idx <= spanprod_idx + 2'd1;
-	                        state <= S_SPANPROD_SELECT;
+	                        state <= prep_ready ? S_SPANPROD_EMIT : S_SPANPROD_SELECT;
                     end
                 end else
                     state    <= S_FB_FLUSH;
@@ -10835,10 +10955,30 @@ always @(posedge clk) begin : main_fsm
             else if (sp_fastpath && spanprod_active
                   && (spanprod_idx != spanprod_last_idx)
                   && src_done && !stream_pending && !p0a_valid && !p0_valid
-                  && !blend_group_active && !persp_active && !zw_fill_busy) begin
+                  && !blend_group_active && !persp_active && !zw_fill_busy
+                  && !prep_busy) begin
                 src_done <= 0;
                 spanprod_idx <= spanprod_idx + 2'd1;
-                state <= S_SPANPROD_SELECT;
+                state <= prep_ready ? S_SPANPROD_EMIT : S_SPANPROD_SELECT;
+            end
+            // GPU_SPAN_EARLY_HANDOFF: the same relaxed condition also covers
+            // the packed-record chunk hand-off of a parametric list, so the
+            // next chunk's 6 payload words and EXECUTE run while p1..p3 hold
+            // this record's opaque pixels.  S_PAY_DATA / S_EXECUTE write only
+            // lane RAMs, the record counters and span-control state the tail
+            // never reads (header fields stay fixed for the whole command),
+            // and the chunk always continues into SELECT (next_left > 0), so
+            // the frozen tail resumes in S_FRAG_PIPE.  Retire still takes the
+            // full drain above.  Only parametric records reach this arm:
+            // compact/column commands never have more records.
+            else if ((GPU_SPAN_EARLY_HANDOFF != 0)
+                  && sp_fastpath && spanprod_active && !cmd_is_tri_walker
+                  && (spanprod_idx == spanprod_last_idx)
+                  && spanprod_more_records_w && (pay_remaining != 13'd0)
+                  && src_done && !stream_pending && !p0a_valid && !p0_valid
+                  && !blend_group_active && !persp_active && !zw_fill_busy) begin
+                src_done <= 0;
+                spanprod_prepare_next_record_chunk;
             end
         end
 

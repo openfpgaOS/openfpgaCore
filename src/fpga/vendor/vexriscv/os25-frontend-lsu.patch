@@ -1,0 +1,458 @@
+diff --color -ruN a/src/main/scala/vexiiriscv/decode/AlignerPlugin.scala b/src/main/scala/vexiiriscv/decode/AlignerPlugin.scala
+--- a/src/main/scala/vexiiriscv/decode/AlignerPlugin.scala	2026-11-20 18:31:15.946962979 -0800
++++ b/src/main/scala/vexiiriscv/decode/AlignerPlugin.scala	2026-11-20 18:31:15.947605761 -0800
+@@ -73,7 +73,7 @@
+       }
+     }
+ 
+-    val up = fpp.fetch(fetchAt).down
++    val up = if(withBuffer) fpp.skidOutput() else fpp.fetch(fetchAt).down
+     val downCtrl = dpp.ctrl(0)
+     val downNode = downCtrl.link.up
+ 
+diff --color -ruN a/src/main/scala/vexiiriscv/execute/BranchPlugin.scala b/src/main/scala/vexiiriscv/execute/BranchPlugin.scala
+--- a/src/main/scala/vexiiriscv/execute/BranchPlugin.scala	2026-11-20 18:31:15.950134271 -0800
++++ b/src/main/scala/vexiiriscv/execute/BranchPlugin.scala	2026-11-20 18:31:15.950917356 -0800
+@@ -18,7 +18,7 @@
+ import vexiiriscv.memory.{AddressTranslationPortUsage, AddressTranslationService}
+ import vexiiriscv.misc.{PerformanceCounterService, TrapService}
+ import vexiiriscv.prediction.Prediction.BRANCH_HISTORY_WIDTH
+-import vexiiriscv.prediction.{FetchWordPrediction, HistoryPlugin, LearnCmd, LearnService, LearnSource, Prediction}
++import vexiiriscv.prediction.{FetchWordPrediction, HistoryPlugin, LearnCmd, LearnService, LearnSource, Prediction, RasRepairService}
+ import vexiiriscv.schedule.{DispatchPlugin, ReschedulePlugin}
+ 
+ import scala.collection.mutable
+@@ -106,6 +106,8 @@
+     val pcs = host.get[PerformanceCounterService]
+     val ioRetainer = retains(wbp.elaborationLock, sp.elaborationLock, pcp.elaborationLock, ts.trapLock)
+     hp.foreach(ioRetainer += _.elaborationLock)
++    val rrs = host.get[RasRepairService].filter(_.withRasRepair)
++    rrs.foreach(ioRetainer += _.rasRepairLock)
+ 
+     val lastOfLane = pluginsOnLane.sortBy(_.jumpAt).last // As multiple branch plugin can be on the same lane if you use the "--late-alu" option
+     val isLastOfLane = BranchPlugin.this == lastOfLane
+@@ -146,6 +148,7 @@
+     val historyPort = hp.map(_.newPort(age, Execute.LANE_AGE_WIDTH))
+     val flushPort = sp.newFlushPort(age, laneAgeWidth = Execute.LANE_AGE_WIDTH, withUopId = true)
+     val trapPort = catchMissaligned generate ts.newTrap(age, Execute.LANE_AGE_WIDTH)
++    val rasPort = rrs.map(_.newRasRestorePort(age))
+ 
+     uopRetainer.release()
+     ioRetainer.release()
+@@ -260,6 +263,17 @@
+       val rdLink  = List[Bits](1,5).map(UOP(Const.rdRange) === _).orR // See the RISC-V calling conventions specification
+       val rs1Link = List[Bits](1,5).map(UOP(Const.rs1Range) === _).orR // See the RISC-V calling conventions specification
+       val rdEquRs1 = UOP(Const.rdRange) === UOP(Const.rs1Range)
++      val isPush = (IS_JAL || IS_JALR) && rdLink
++      val isPop = IS_JALR && (!rdLink && rs1Link || rdLink && rs1Link && !rdEquRs1)
++
++      // On a redirect, resume the RAS from this instruction's fetch-time pointer plus its own push/pop,
++      // dropping the speculative push/pop of the flushed younger instructions.
++      rasPort.foreach{ port =>
++        port.valid := doIt
++        port.ptr := apply(rrs.get.RAS_PTR) + U(isPush) - U(isPop)
++        port.doPush := isPush
++        port.pushPc := PC_FALSE
++      }
+ 
+       ls.learnLock.await()
+ 
+@@ -270,8 +284,8 @@
+         learn.pcTarget := PC_TRUE
+         learn.pcOnLastSlice := PC_LAST_SLICE
+         learn.isBranch := BRANCH_CTRL === BranchCtrlEnum.B
+-        learn.isPush := (IS_JAL || IS_JALR) && rdLink
+-        learn.isPop := IS_JALR && (!rdLink && rs1Link || rdLink && rs1Link && !rdEquRs1)
++        learn.isPush := isPush
++        learn.isPop := isPop
+         learn.wasWrong := needFix
+         learn.badPredictedTarget := withBtb.mux(alu.btb.BAD_TARGET, False)
+         if(historyPort.nonEmpty) learn.history := history.fetched
+diff --color -ruN a/src/main/scala/vexiiriscv/execute/lsu/LsuL1Plugin.scala b/src/main/scala/vexiiriscv/execute/lsu/LsuL1Plugin.scala
+--- a/src/main/scala/vexiiriscv/execute/lsu/LsuL1Plugin.scala	2026-11-20 18:31:15.953045537 -0800
++++ b/src/main/scala/vexiiriscv/execute/lsu/LsuL1Plugin.scala	2026-11-20 18:31:15.953648876 -0800
+@@ -176,7 +176,10 @@
+     val tagRange = postTranslationWidth - 1 downto log2Up(linePerWay * lineSize)
+     val lineRange = tagRange.low - 1 downto log2Up(lineSize)
+     val refillRange = tagRange.high downto lineRange.low
+-    val hazardCheckRange = (Math.min(11, lineRange.high)) downto lineRange.low
++    // Refill/writeback slot hazards are per cache set: compare the whole set index. The compares are made on
++    // PHYSICAL_ADDRESS (slots hold physical addresses), so no translation limit applies. With an MMU the
++    // set count is already limited to 4 KB per way (lineRange.high <= 11), so this only widens MMU-less configs.
++    val hazardCheckRange = lineRange
+     val notWordRange = tagRange.high downto log2Up(cpuDataWidth/8)
+ 
+     val bankCount = wayCount
+@@ -824,6 +827,30 @@
+         NEED_UNIQUE := STORE || ATOMIC
+       }
+ 
++      // Refill/writeback slot hazards, compared one stage before ctrlAt and carried into ctrlAt by the stage register,
++      // so the ctrl stage only ORs flops. The registered value equals what ctrlAt would compute, every cycle:
++      // - the stage register only loads when the lane is not frozen; in that cycle slot s is valid next cycle iff it
++      //   is valid and does not free now (refill: loadedDone, writeback: timer.done && (fire || !busy), both
++      //   otherwise gated only by slotsFreeze == lane.isFreezed), or it is the free slot a push fills now.
++      // - slots only become valid through refill/writeback.push, which only the ctrl stage drives; a pushed slot
++      //   takes the pushing request's set (refill.push.address is its PHYSICAL_ADDRESS, writeback.push.address(lineRange)
++      //   is its MIXED_ADDRESS(lineRange)), and a slot's address register only changes while the slot is free.
++      // - while the lane is frozen the stage register holds, and slots neither allocate (push is gated by
++      //   preventSideEffects) nor free (gated by slotsFreeze), so the held value stays equal.
++      // Coherency probes push writebacks independently of the lane, which this argument does not cover.
++      val hazardPre = new lane.Execute(ctrlAt-1) {
++        assert(!withCoherency, "registered LSU slot hazards require withCoherency = false")
++        assert(ctrlAt-1 >= 1, "registered LSU slot hazards need PHYSICAL_ADDRESS at ctrlAt-1")
++        val ctrlNode = lane.execute(ctrlAt)
++        def setHit(a : UInt, b : UInt) : Bool = a(hazardCheckRange) === b(hazardCheckRange)
++        val refillPushHit    = refill.push.valid    && setHit(ctrlNode(PHYSICAL_ADDRESS), PHYSICAL_ADDRESS)
++        val writebackPushHit = writeback.push.valid && setHit(ctrlNode(MIXED_ADDRESS).resize(postTranslationWidth), PHYSICAL_ADDRESS)
++        val refillStays    = refill.slots.map(s => s.valid && !s.loadedDone)
++        val writebackStays = writeback.slots.map(s => s.valid && !(s.timer.done && (s.fire || !s.busy)))
++        val REFILL_HAZARDS_REG    = insert(B(refill.slots.map(s => refillStays(s.id) && setHit(s.address, PHYSICAL_ADDRESS) || refillPushHit && refill.free(s.id))))
++        val WRITEBACK_HAZARDS_REG = insert(B(writeback.slots.map(s => writebackStays(s.id) && setHit(s.address, PHYSICAL_ADDRESS) || writebackPushHit && writeback.free(s.id))))
++      }
++
+       // This is the place where all the data / hazards / control path are aggregated
+       val ctrl = new lane.Execute(ctrlAt) {
+         val plruLogic = new Area {
+@@ -838,8 +865,8 @@
+ 
+         //Warning, those two signals aren't stable when lane.isFreezed
+         //Note that will also prevent refill/writeback on a cache line which is already busy
+-        val refillHazards    =  B(refill.slots.map(s => s.valid && s.address(hazardCheckRange) === PHYSICAL_ADDRESS(hazardCheckRange)))
+-        val writebackHazards =  B(writeback.slots.map(s => s.valid && s.address(hazardCheckRange) === PHYSICAL_ADDRESS(hazardCheckRange)))
++        val refillHazards    =  CombInit(this(hazardPre.REFILL_HAZARDS_REG))
++        val writebackHazards =  CombInit(this(hazardPre.WRITEBACK_HAZARDS_REG))
+ 
+         val refillHazard = refillHazards.orR
+         val writebackHazard = writebackHazards.orR
+diff --color -ruN a/src/main/scala/vexiiriscv/fetch/FetchPipelinePlugin.scala b/src/main/scala/vexiiriscv/fetch/FetchPipelinePlugin.scala
+--- a/src/main/scala/vexiiriscv/fetch/FetchPipelinePlugin.scala	2026-11-20 18:31:15.955605045 -0800
++++ b/src/main/scala/vexiiriscv/fetch/FetchPipelinePlugin.scala	2026-11-20 18:31:15.956194958 -0800
+@@ -4,7 +4,7 @@
+ import spinal.core.fiber.Retainer
+ import spinal.lib.misc.plugin.FiberPlugin
+ import spinal.lib.misc.pipeline
+-import spinal.lib.misc.pipeline.{CtrlLink, CtrlLinkMirror, Link}
++import spinal.lib.misc.pipeline.{CtrlLink, CtrlLinkMirror, Link, Node}
+ import vexiiriscv.Global
+ import vexiiriscv.misc.{PipelineService}
+ import vexiiriscv.schedule.{Ages, ReschedulePlugin}
+@@ -28,16 +28,31 @@
+   def setPersistence(id : Int) = persistenceSpec += id
+ 
+   def up = fetch(0).up
++
++  // Optional ready-registered output after the last fetch stage. The consumer
++  // (the aligner) reads this node instead of the last stage's down node, so
++  // its late ready (dispatch hazard -> decode -> aligner) lands on one flop
++  // instead of every fetch stage's clock enable. Must be requested while
++  // elaborationLock is retained.
++  var skidRequested = false
++  lazy val skidNode = Node().setName("fetch_skid")
++  def skidOutput(): Node = { skidRequested = true; skidNode }
+   val logic = during build new Area{
+     elaborationLock.await()
+     val idMax = idToFetch.keys.max
+     for(i <- 0 to idMax) fetch(i).unsetName() //To ensure the creation to all intermediate nodes
+     val ctrls = idToFetch.toList.sortBy(_._1).map(_._2)
+     val sc = (for((from, to) <- (ctrls, ctrls.tail).zipped) yield new pipeline.StageLink(from.down, to.up).withoutCollapse()).toSeq
+-    val connectors = (sc ++ ctrls).toSeq
++    val rp = host[ReschedulePlugin]
++    // The buffered word has left the fetch stages, so it is dropped by the
++    // same redirects that clear the aligner's own buffer.
++    val skid = skidRequested generate new FetchSkidLink(
++      ctrls.last.down, skidNode,
++      rp.isFlushedAt(Ages.DECODE - Ages.STAGE, U(0), U(0)).getOrElse(False)
++    ).setName("fetch_skid_link")
++    val connectors = (sc ++ ctrls ++ Option(skid)).toSeq
+     for(e <- persistenceSpec) sc(e-1).withoutCollapse().withPayloadHold()
+ 
+-    val rp = host[ReschedulePlugin]
+     val flushRange = 1 until ctrls.size
+     val flushes = for(id <- flushRange) yield new Area {
+       val age = getAge(id)
+@@ -55,4 +70,47 @@
+   }
+ 
+   class Fetch(id : Int) extends CtrlLinkMirror(fetch(id))
+-}
+\ No newline at end of file
++}
++
++/**
++ * One-entry skid buffer between two nodes. up.ready is a register (buffer
++ * empty); while the buffer is empty the transaction passes combinationally,
++ * so an unstalled pipeline keeps full throughput with no added latency.
++ * When down stalls, the word up presents that cycle is captured and replayed.
++ * flush drops the buffered word; the word passing through in the flush cycle
++ * is left to the consumer, exactly as without the buffer.
++ */
++class FetchSkidLink(val up : Node, val down : Node, flush : => Bool) extends Link {
++  down.up = this
++  up.down = this
++
++  override def ups: Seq[Node] = List(up)
++  override def downs: Seq[Node] = List(down)
++
++  override def propagateDown(): Unit = {
++    propagateDownAll()
++    down.valid
++  }
++  override def propagateUp(): Unit = {
++    propagateUpAll()
++    up.ready
++  }
++
++  override def build(): Unit = {
++    assert(down.ctrl.forgetOne.isEmpty && down.ctrl.cancel.isEmpty, "FetchSkidLink consumer must not request forgetOne/cancel")
++    val matches = down.fromUp.payload.intersect(up.fromDown.payload)
++
++    val rValid = RegInit(False) setCompositeName(this, "rValid")
++    val rData = matches.map(e => RegNextWhen(up(e), !rValid).setCompositeName(up(e), "skidBuffer"))
++
++    up.ready := !rValid
++    down.valid := up.isValid || rValid
++    when(rValid) {
++      (matches, rData).zipped.foreach(down(_) := _)
++    } otherwise {
++      matches.foreach(e => down(e) := up(e))
++    }
++
++    rValid setWhen(up.isValid) clearWhen(down.ready) clearWhen(flush)
++  }
++}
+diff --color -ruN a/src/main/scala/vexiiriscv/misc/TrapPlugin.scala b/src/main/scala/vexiiriscv/misc/TrapPlugin.scala
+--- a/src/main/scala/vexiiriscv/misc/TrapPlugin.scala	2026-11-20 18:31:15.958148763 -0800
++++ b/src/main/scala/vexiiriscv/misc/TrapPlugin.scala	2026-11-20 18:31:15.958719671 -0800
+@@ -15,7 +15,7 @@
+ import vexiiriscv.execute.lsu.{LsuL1Service, LsuService}
+ import vexiiriscv.fetch.{Fetch, FetchL1Service, InitService, PcService}
+ import vexiiriscv.memory.AddressTranslationService
+-import vexiiriscv.prediction.{HistoryPlugin, Prediction}
++import vexiiriscv.prediction.{HistoryPlugin, Prediction, RasRepairService}
+ import vexiiriscv.schedule.Ages
+ 
+ import scala.collection.mutable
+@@ -138,6 +138,8 @@
+     val lsul1 = host.get[LsuL1Service]
+     val pcs = host[PcService]
+     val hp = host.get[HistoryPlugin]
++    val rrs = host.get[RasRepairService].filter(_.withRasRepair)
++    val rasRetainer = retains(rrs.map(_.rasRepairLock).toList)
+     val ats = host[AddressTranslationService]
+     val withRam = host.get[CsrRamService].nonEmpty
+     val crs = withRam generate host[CsrRamService]
+@@ -280,6 +282,7 @@
+           val state = arbiter.down.toReg
+           val pc = Reg(PC)
+           val history = hp.nonEmpty generate Reg(Prediction.BRANCH_HISTORY)
++          val rasPtr = rrs.map(s => Reg(s.RAS_PTR))
+           val slices = Reg(UInt(INSTRUCTION_SLICE_COUNT_WIDTH+1 bits))
+ 
+           val xret = new Area {
+@@ -326,6 +329,7 @@
+           when(valid) {
+             pending.pc := reader(_(PC))
+             if(hp.nonEmpty) pending.history := reader(_(Prediction.BRANCH_HISTORY))
++            for(s <- rrs) pending.rasPtr.get := reader(_(s.RAS_PTR))
+             pending.slices := reader(_(INSTRUCTION_SLICE_COUNT)).resize(INSTRUCTION_SLICE_COUNT_WIDTH+1)+1
+           }
+         }
+@@ -343,6 +347,14 @@
+         }
+ 
+         val pcPort = pcs.newJumpInterface(Ages.TRAP, 0, 0)
++        // Every fetch restart from here resumes the RAS from the trapping instruction's fetch-time pointer
++        val rasPort = rrs.map(_.newRasRestorePort(Ages.TRAP))
++        rasPort.foreach { p =>
++          p.valid := pcPort.valid
++          p.ptr := pending.rasPtr.get
++          p.doPush := False
++          p.pushPc := pending.pc
++        }
+         pcPort.valid := False
+         pcPort.fault := False
+         pcPort.hartId := hartId
+@@ -736,6 +748,7 @@
+     }
+ 
+     ramPortRetainers.release()
++    rasRetainer.release()
+     buildBefore.release()
+ 
+     initHold := host.list[InitService].map(_.initHold()).orR
+diff --color -ruN a/src/main/scala/vexiiriscv/prediction/BtbPlugin.scala b/src/main/scala/vexiiriscv/prediction/BtbPlugin.scala
+--- a/src/main/scala/vexiiriscv/prediction/BtbPlugin.scala	2026-11-20 18:31:15.960707339 -0800
++++ b/src/main/scala/vexiiriscv/prediction/BtbPlugin.scala	2026-11-20 18:31:15.961272957 -0800
+@@ -14,9 +14,10 @@
+ import vexiiriscv.schedule.{DispatchPlugin, ReschedulePlugin}
+ import Prediction._
+ import spinal.core.fiber.Fiber
+-import vexiiriscv.decode.Decode
++import vexiiriscv.decode.{AlignerService, Decode}
+ import vexiiriscv.execute.BranchPlugin
+ 
++import scala.collection.mutable.ArrayBuffer
+ import scala.util.Random
+ 
+ /**
+@@ -32,7 +33,7 @@
+                 var readAt : Int = 0,
+                 var hitAt : Int = 1,
+                 var jumpAt : Int = 1,
+-                var bootMemClear : Boolean) extends FiberPlugin with FetchWordPrediction with InitService  {
++                var bootMemClear : Boolean) extends FiberPlugin with FetchWordPrediction with InitService with RasRepairService {
+ 
+ 
+   override def useAccurateHistory: Boolean = jumpAt == 1
+@@ -41,15 +42,22 @@
+ 
+   override def initHold(): Bool = bootMemClear.mux(logic.initializer.busy, False)
+ 
++  override def withRasRepair: Boolean = rasDepth > 0
++  override val RAS_PTR = Payload(UInt(log2Up(rasDepth max 2) bits))
++  case class RasRestoreSpec(age : Int, port : Flow[RasRestoreCmd])
++  val rasRestores = ArrayBuffer[RasRestoreSpec]()
++  override def newRasRestorePort(age: Int): Flow[RasRestoreCmd] = rasRestores.addRet(RasRestoreSpec(age, Flow(RasRestoreCmd(widthOf(RAS_PTR()))))).port
++
+   val logic = during setup new Area{
+     val fpp = host[FetchPipelinePlugin]
+     val pcp = host[PcService]
+     val rp = host[ReschedulePlugin]
+     val dp = host[DispatchPlugin]
+     val hp = host.get[HistoryPlugin]
++    val ap = host[AlignerService]
+ 
+     val buildBefore = retains(fpp.elaborationLock, pcp.elaborationLock)
+-    val retainer = retains(List(rp.elaborationLock, dp.elaborationLock) ++ hp.map(_.elaborationLock))
++    val retainer = retains(List(rp.elaborationLock, dp.elaborationLock, ap.elaborationLock) ++ hp.map(_.elaborationLock))
+     Fiber.awaitBuild()
+ 
+     val withCondPrediction = host.get[FetchConditionalPrediction].nonEmpty
+@@ -63,6 +71,12 @@
+     dp.hmKeys += Prediction.ALIGNED_JUMPED_PC
+     dp.hmKeys += Prediction.ALIGNED_SLICES_TAKEN
+     dp.hmKeys += Prediction.ALIGNED_SLICES_BRANCH
++    if(rasDepth > 0) {
++      // First slice : for an instruction spanning two fetch words, the first word's pointer is the one before
++      // any prediction cut the instruction (ALIGN_REDO), and equals the second word's pointer otherwise.
++      ap.addFirstSliceDataCtx(RAS_PTR)
++      dp.addDispatchCtx(RAS_PTR)
++    }
+ 
+     retainer.release()
+ 
+@@ -88,6 +102,8 @@
+       }
+       val readIt = Bool()
+       val read = RegNextWhen(mem.stack.readAsync(ptr.pop.getAheadValue()), readIt)
++      // Push pointer seen by the fetch word entering fetch(jumpAt), before its own push/pop (same capture as read)
++      val readPtr = RegNextWhen(ptr.push.getAheadValue(), readIt) init(0)
+       val write = mem.stack.writePort
+       write.valid := ptr.pushIt
+       write.address := ptr.push
+@@ -194,10 +210,11 @@
+       memRead.cmd.payload := (WORD_PC >> wordBytesWidth).resize(mem.addressWidth)
+ 
+       val HAZARDS = insert(memWrite.mask.andMask(memWrite.valid && memWrite.address === memRead.cmd.payload))
+-      // To fix read during write conflicts, we just prevent the pipeline from progressing when we make the BTB learn stuff.
+-      // This implementation relax timings on the BTB read port, at the cost of IPC.
+-      // Note that this implementation is compatible with a single port ram BTB (for ASIC)
+-      haltWhen(memWrite.valid) // Omit readPort.cmd.payload to avoid creating long path. Also, this is inline with a single port RW BTB memory.
++      // Single port RAM : a write steals the port, so the read must wait (one fetch cycle per BTB write).
++      // Dual port RAM : the read proceeds during the write. A read of the very entry being written may
++      // return old or undefined data (mixed-port read-during-write), so HAZARDS travels with the fetch
++      // word and hitCalc treats that one read as a miss. No address compare reaches the fetch-0 halt.
++      if(!dualPortRam) haltWhen(memWrite.valid) // Omit readPort.cmd.payload to avoid creating long path. Also, this is inline with a single port RW BTB memory.
+     }
+ 
+ 
+@@ -211,8 +228,8 @@
+         KeepAttribute(this(ENTRY))
+       }
+       val hitCalc = new fpp.Fetch(hitAt) {
+-        val HIT = insert(readRsp.ENTRY.hash === getHash(WORD_PC) && getSlice(chunkId, readRsp.ENTRY.sliceLow) >= WORD_PC(SLICE_RANGE.get))
+-        assert(!(isValid && readCmd.HAZARDS(chunkId)))
++        val HIT = insert(readRsp.ENTRY.hash === getHash(WORD_PC) && getSlice(chunkId, readRsp.ENTRY.sliceLow) >= WORD_PC(SLICE_RANGE.get) && !(if(dualPortRam) readCmd.HAZARDS(chunkId) else False))
++        if(!dualPortRam) assert(!(isValid && readCmd.HAZARDS(chunkId)))
+       }
+       val predict = new fpp.Fetch(jumpAt) {
+         def pred = withCondPrediction.mux(
+@@ -244,6 +261,7 @@
+         ras.write.data := (pushPc + SLICE_BYTES.get) >> Fetch.SLICE_RANGE_LOW
+         ras.ptr.pushIt setWhen (pushValid)
+         ras.ptr.popIt setWhen(doIt && entry.isPop)
++        RAS_PTR := ras.readPtr
+       }
+ 
+       flushPort.valid := doIt
+@@ -256,7 +274,13 @@
+ 
+       WORD_JUMPED := needIt
+       WORD_JUMP_SLICE := doItSlice
+-      WORD_JUMP_PC := pcTarget << Fetch.SLICE_RANGE_LOW
++      // Target reported to the BranchPlugin (ALIGNED_JUMPED_PC, used to decide if the BTB must learn). Without a
++      // taken hit there was no jump, so do not report the RAS top for a pop entry : when the RAS happens to hold the
++      // right return address, a return missing the BTB (its set holding another return's entry) would look
++      // well predicted and never be learned. Same as pcTarget whenever a jump is taken.
++      val reportedTarget = CombInit(entry.pcTarget)
++      if(withRas) when(entry.isPop && chunksTakenOh.orR){ reportedTarget := ras.read }
++      WORD_JUMP_PC := reportedTarget << Fetch.SLICE_RANGE_LOW
+ 
+       // Apply the branch prediction to the current branch history
+       val history = historyPort.map { port =>
+@@ -317,4 +341,24 @@
+     }
+     buildBefore.release()
+   }
++
++  // Restore the RAS pointers when a younger-instruction flush restarts the fetch. Kept in its own fiber so the
++  // plugins which create restore ports (BranchPlugin, TrapPlugin) never wait on the BtbPlugin build.
++  // Assigned after the speculative fetch update, so a restore wins over a push/pop done the same cycle by a
++  // word being flushed. The stack content is not restored, but a restoring call (re)writes its return address
++  // on the new top (a call missed by the BTB was never pushed), and a restore cancels the same-cycle push
++  // of a flushed word.
++  val rasRepair = during build new Area {
++    rasRepairLock.await()
++    val ras = logic.ras
++    if (rasDepth > 0) {
++      for (spec <- rasRestores.sortBy(_.age)) when(spec.port.valid) {
++        ras.ptr.push := spec.port.ptr
++        ras.ptr.pop := spec.port.ptr - 1
++        ras.write.valid := spec.port.doPush
++        ras.write.address := spec.port.ptr - 1
++        ras.write.data := spec.port.pushPc >> Fetch.SLICE_RANGE_LOW
++      }
++    }
++  }
+ }
+\ No newline at end of file
+diff --color -ruN a/src/main/scala/vexiiriscv/prediction/Service.scala b/src/main/scala/vexiiriscv/prediction/Service.scala
+--- a/src/main/scala/vexiiriscv/prediction/Service.scala	2026-11-20 18:31:15.963344202 -0800
++++ b/src/main/scala/vexiiriscv/prediction/Service.scala	2026-11-20 18:31:15.964001391 -0800
+@@ -85,6 +85,25 @@
+ }
+ 
+ /**
++ * Return address stack pointer recovery (implemented by the BtbPlugin when it has a RAS).
++ * RAS_PTR travels with each instruction : the RAS push pointer of its first fetch word, before that word's
++ * own speculative push/pop. Plugins which flush younger instructions and restart the fetch create a restore
++ * port (age based priority, bigger win) and drive it with the pointer value the fetch should resume with.
++ */
++case class RasRestoreCmd(ptrWidth : Int) extends Bundle {
++  val ptr = UInt(ptrWidth bits) // Push pointer the fetch resumes with
++  val doPush = Bool() // The restoring instruction is a call : (re)write its return address on the new top of the stack
++  val pushPc = Global.PC() // That return address
++}
++
++trait RasRepairService {
++  val rasRepairLock = Retainer()
++  def withRasRepair : Boolean
++  def RAS_PTR : Payload[UInt]
++  def newRasRestorePort(age : Int) : Flow[RasRestoreCmd]
++}
++
++/**
+  * Provide an API allowing plugins to access the LearnCmd interface (used by BtbPlugin/GSharePlugin),
+  * as well as a way to specify additional execute pipeline payload which should be collected and feeded to the LearnCmd
+  */

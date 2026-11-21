@@ -2870,7 +2870,31 @@ assign video_hs = vidout_hs;
     // but they are never active simultaneously — the GPU FSM serialises
     // its own reads and writes.  We drop both into the arbiter's M0
     // master: only one channel fires at a time, the other is idle.
+    // INCLUDE_SDRAM_WRITE_PIPE (os25): GPU queue writes are released by the
+    // SDRAM slave once io_sdram has accepted them (io_sdram latches write data
+    // at dispatch), so consecutive GPU writes no longer idle the SDRAM through
+    // the B / re-grant / re-issue round trip.  The GPU's B still waits for the
+    // commit (arbiter GPU_COMMIT_B).  The 166 MHz clock bridge does not carry
+    // the commit pulse, so the option is off there.
+    localparam SDRAM_WRITE_PIPE =
+`ifdef INCLUDE_SDRAM_WRITE_PIPE
+  `ifdef INCLUDE_OS30_SDRAM166
+        0;
+  `else
+        1;
+  `endif
+`else
+        0;
+`endif
+    wire arb_s_bcommit;
     axi_sdram_arbiter #(
+        .GPU_COMMIT_B(SDRAM_WRITE_PIPE),
+        // INCLUDE_SDRAM_MASKED_BURSTS (os25): partial-strobe GPU framebuffer
+        // words coalesce into native SDRAM bursts (byte enables -> DQM).
+        .GPU_WQ_MASKED_MERGE(`ifdef INCLUDE_SDRAM_MASKED_BURSTS 1 `else 0 `endif),
+        // INCLUDE_SDRAM_WHOLE_BURSTS (os25): drain a GPU burst only once its
+        // final beat is queued, instead of splitting 8-beat bursts 2 + 6.
+        .GPU_WQ_WHOLE_BURST(`ifdef INCLUDE_SDRAM_WHOLE_BURSTS 1 `else 0 `endif),
         .GPU_WRITE_QUEUE_DEPTH(`ifdef INCLUDE_GPU_WQ16 16 `else 8 `endif),
 `ifdef INCLUDE_OS30_SDRAM166
         .BUFFERED_SLAVE(1'b1)
@@ -2936,6 +2960,7 @@ assign video_hs = vidout_hs;
         .s_wdata(arb_s_wdata),     .s_wstrb(arb_s_wstrb),
         .s_wlast(arb_s_wlast),
         .s_bvalid(arb_s_bvalid),   .s_bresp(arb_s_bresp),
+        .s_bcommit(arb_s_bcommit),
         .s_wcont(arb_s_wcont),
         .dbg_arb_state(),
         .dbg_cpu_pending(),
@@ -2971,6 +2996,7 @@ assign video_hs = vidout_hs;
     wire mem_s_bvalid;
     wire [1:0] mem_s_bresp;
     wire mem_s_bready, mem_s_wcont;
+    wire mem_s_bcommit;
     wire sdram_fast_reset_n, sdram_cpu_reset_n;
 `ifdef INCLUDE_OS30_SDRAM166
     // PLL reset only: the memory fabric must finish saves across CPU resets.
@@ -2985,6 +3011,7 @@ assign video_hs = vidout_hs;
     assign sdram_fast_reset_n = sdram_fast_reset_sync[2];
     assign sdram_cpu_reset_n = sdram_cpu_reset_sync[2];
     assign mem_s_wcont = 1'b0; // Clock crossing can insert WVALID bubbles.
+    assign arb_s_bcommit = 1'b0; // SDRAM_WRITE_PIPE is 0 with the bridge.
     axi_sdram_clock_bridge sdram_clock_bridge (
         .s_clk(clk_cpu), .m_clk(clk_ram_controller), .reset_n(pll_ram_locked),
         .s_arvalid(arb_s_arvalid), .m_arvalid(mem_s_arvalid),
@@ -3032,6 +3059,7 @@ assign video_hs = vidout_hs;
     assign arb_s_bresp = mem_s_bresp;
     assign mem_s_bready = 1'b1;
     assign mem_s_wcont = arb_s_wcont;
+    assign arb_s_bcommit = mem_s_bcommit;
     assign sdram_fast_reset_n = 1'b1;
     assign sdram_cpu_reset_n = 1'b1;
 `endif
@@ -3045,7 +3073,8 @@ assign video_hs = vidout_hs;
         // single native io_sdram burst), not a serialized per-beat path.  MAX
         // cap stays at 15 (the io_sdram/AXI 4-bit ARLEN/AWLEN limit).
         .SERIALIZE_WRITE_BURSTS(1'b0),
-        .MAX_NATIVE_WRITE_BURST_LEN(8'd15)
+        .MAX_NATIVE_WRITE_BURST_LEN(8'd15),
+        .EARLY_WRITE_ACK(SDRAM_WRITE_PIPE)
     ) sdram_axi_slave (
         .clk(clk_ram_controller),
         .reset_n(sdram_fast_reset_n),
@@ -3071,6 +3100,7 @@ assign video_hs = vidout_hs;
         .s_axi_bready(mem_s_bready),
         .s_axi_bresp(mem_s_bresp),
         .s_axi_wcont(mem_s_wcont),
+        .s_axi_bcommit(mem_s_bcommit),
         .sdram_rd(sdram_slave_rd),
         .sdram_wr(sdram_slave_wr),
         .sdram_addr(sdram_slave_addr),
@@ -3672,6 +3702,11 @@ gpu_core #(
     // (Quake perspective); os30 omits it so the Q29 z-step cone + perspective
     // branches fold — removes the GPU's #1 critical path + frees ~150-220 ALM.
     .INCLUDE_PARAM_SPAN_Q29(`ifdef INCLUDE_PARAM_SPAN_Q29 1 `else 0 `endif),
+    // Early handoff for opaque depth-free parametric records (no command or
+    // capability change; os25).
+    .GPU_SPAN_EARLY_HANDOFF(`ifdef INCLUDE_GPU_SPAN_EARLY_HANDOFF 1 `else 0 `endif),
+    // Prepared-span shadow setup (needs INCLUDE_SPAN_DEDICATED_MULT; os25).
+    .GPU_SPAN_PREP(`ifdef INCLUDE_GPU_SPAN_PREP 1 `else 0 `endif),
     // Optional CPU command uploads reuse the ring RAM. Status advertises this
     // transport; DMA-free variants require applications that select it.
     .INCLUDE_CPU_RING(`ifdef INCLUDE_CPU_RING 1 `else 0 `endif),
@@ -3703,6 +3738,18 @@ gpu_core #(
     // bit-identical to the old EXCLUDE_PARALLEL_DIVS/DIRECT_COLOR derivation and
     // removes that load-bearing ifdef ordering.
     .GPU_EW_PARALLEL_DIVS(`ifdef INCLUDE_PARALLEL_DIVS 1 `else 0 `endif),
+    // Dedicated colormap store (os25): palookup reads get their own 4 KB
+    // direct-mapped store (256 x 16 B, 4+1 M10K) instead of sharing the
+    // 16 KB texture cache, so colormap rows stop evicting texture lines.
+    // Byte-identical pixels; only texture/colormap fill counts change.
+    .GPU_TEX_CMAP_SET_BITS(`ifdef INCLUDE_GPU_CMAP_STORE 8 `else 0 `endif),
+    // Tag the colormap store with the palookup-relative offset (6-bit compare).
+    .GPU_TEX_CMAP_REL_TAG(`ifdef INCLUDE_GPU_CMAP_STORE 1 `else 0 `endif),
+    // 64-byte texture cache lines (os25): same 16 KB of data as 256 x 64 B
+    // (tags 256 x 13 -> 1 M10K instead of 2); one 16-beat fill replaces
+    // up to four 4-beat fills for Doom's column-major textures.
+    .GPU_TEX_CACHE_SET_BITS(`ifdef INCLUDE_GPU_TEX_LINE64 8 `else 10 `endif),
+    .GPU_TEX_CACHE_LINE_BITS(`ifdef INCLUDE_GPU_TEX_LINE64 6 `else 4 `endif),
     // The render cache gathers and merges framebuffer/depth writes itself;
     // the internal write combiner in front of it only costs time and RAM.
     .GPU_WRITE_COMBINE(`ifdef INCLUDE_GPU_RENDER_CACHE 0 `else 1 `endif)
@@ -3988,6 +4035,7 @@ io_sdram #(
 `else
     .BANK_ROW_TRACK(0)
 `endif
+    , .WR_DATA_LATCH(SDRAM_WRITE_PIPE)
 `ifdef INCLUDE_OS30_SDRAM166
     , .FAST_166(1), .REFRESH_INTERVAL(1222)
 `elsif INCLUDE_CLK90

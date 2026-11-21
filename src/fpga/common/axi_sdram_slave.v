@@ -17,7 +17,7 @@
 //     AWLEN>0 transaction, but issue one conservative io_sdram word write per
 //     beat.  This isolates hardware from the SDRAM burst-continuation path
 //     while preserving lower upstream AXI/arbiter transaction volume.
-//   - Single outstanding transaction
+//   - Single outstanding transaction (EARLY_WRITE_ACK: see below)
 //   - 0 M10K (registers and MLAB response/write buffers)
 //
 
@@ -30,7 +30,23 @@ module axi_sdram_slave #(
     // framebuffer writes into bursts up to 8 beats (AWLEN 0..7); CPU writebacks
     // (AWLEN<=15) take the buffered S_WR_FILL path and issue one native burst.
     // Serialization only applies to AWLEN>15 or when SERIALIZE_WRITE_BURSTS set.
-    parameter [7:0] MAX_NATIVE_WRITE_BURST_LEN = 8'd15
+    parameter [7:0] MAX_NATIVE_WRITE_BURST_LEN = 8'd15,
+    // Early write acknowledge (Pocket os25 INCLUDE_SDRAM_WRITE_PIPE; requires
+    // io_sdram WR_DATA_LATCH=1).  0 (default) = legacy: every write holds the
+    // slave until io_sdram's word_wr_done, so io_sdram idles through the B /
+    // re-grant / re-issue round trip between consecutive writes.
+    // 1 = a continuously-fed write (s_axi_wcont, i.e. the GPU posted queue) is
+    // RELEASED as soon as io_sdram has accepted its command and, for a native
+    // burst, every continuation beat has been handed over: B is returned and
+    // the slave takes the next AW/AR, whose command then waits in io_sdram's
+    // one-deep queue while the released write still executes.  io_sdram runs
+    // ops strictly in order, so ordering against later reads/writes of any
+    // master is unchanged.  Each released write still produces s_axi_bcommit
+    // (one cycle) when its word_wr_done arrives, in release order, so the
+    // arbiter can keep "B = committed to SDRAM" for the GPU.  At most two
+    // released writes are outstanding (one executing, one queued).  CPU /
+    // bridge writes (wcont=0) keep the legacy hold-until-done behaviour.
+    parameter EARLY_WRITE_ACK = 0
 ) (
     input wire clk,
     input wire reset_n,
@@ -73,6 +89,9 @@ module axi_sdram_slave #(
     // (CPU cache-line writebacks) are forced to the serialized path, where each
     // beat waits for its own WVALID and so cannot latch a stale/duplicated word.
     input  wire        s_axi_wcont,
+    // EARLY_WRITE_ACK: one-cycle pulse per released write, when it commits
+    // (word_wr_done), oldest first.  Constant 0 when EARLY_WRITE_ACK == 0.
+    output reg         s_axi_bcommit,
 
     // SDRAM word interface (directly to arbiter in core_top.v)
     output reg         sdram_rd,
@@ -129,6 +148,13 @@ reg [31:0] active_next_wdata; // Beat selected by the last sdram_wr_data_next pu
 reg [3:0]  active_next_wstrb;
 reg        wready_given; // Next W beat already accepted
 reg        wcont_r;      // latched s_axi_wcont for the in-flight write
+// EARLY_WRITE_ACK bookkeeping.  b_owed counts released writes whose
+// word_wr_done has not arrived; done pulses are attributed oldest-first, so a
+// done while b_owed != 0 always belongs to a released write (io_sdram executes
+// in order and every released write was issued before the current one).
+reg  [1:0] b_owed;
+wire       owed_wr_done = EARLY_WRITE_ACK && sdram_wr_done && (b_owed != 2'd0);
+wire       own_wr_done  = sdram_wr_done && !owed_wr_done;
 reg        wr_op_done_seen; // sdram_wr_done pulse latched after our write was accepted; preferred over !sdram_busy because the busy signal stays high across unrelated io_sdram ops (scanout burst_rd, autorefresh) and starves single-word writes
 
 // Buffered writeback path (de-serialized CPU cache-line evictions).
@@ -209,6 +235,25 @@ wire idle_aw_serialized = SERIALIZE_WRITE_BURSTS ||
 // preload needs beat 1 resident at issue time so continuation beats can
 // stream back-to-back without the old 2-dead-cycle pull bubble.
 wire idle_aw_native = !idle_aw_serialized && (s_axi_awlen != 8'd0);
+// EARLY_WRITE_ACK release points (wcont writes only).
+//  * single word: the cycle io_sdram's queue accepts the command (its data is
+//    latched in the command; WR_DATA_LATCH keeps it safe from the next one);
+//  * native burst: once every continuation pull has been served
+//    (beat_count == burst_len-1; beats 0/1 rode the command) and the final
+//    W handshake has completed (no WREADY pending, nothing pre-staged, no
+//    beat offered).  The slave then never touches active_next_* again before
+//    the next burst's own pulls, so io_sdram's late capture of the last pulled
+//    beat stays valid.
+wire early_rel_cmd   = EARLY_WRITE_ACK && wcont_r && (state == S_WR_CMD) &&
+                       cmd_issued && sdram_accepted && (burst_len == 8'd0);
+wire early_rel_burst = EARLY_WRITE_ACK && wcont_r && !wbuf_active &&
+                       (state == S_WR_BURST) && started &&
+                       !wr_op_done_seen && !own_wr_done &&
+                       (beat_count == burst_len - 8'd1) &&
+                       !s_axi_wready && !wready_given && !s_axi_wvalid &&
+                       !sdram_wr_data_next;
+wire early_rel = early_rel_cmd || early_rel_burst;
+
 // Multi-beat write whose W stream may stall (CPU dirty-line writeback):
 // buffer-then-native-burst instead of 16 independent word writes.
 wire idle_aw_buffered = !SERIALIZE_WRITE_BURSTS && !s_axi_wcont &&
@@ -252,6 +297,8 @@ always @(posedge clk or posedge reset) begin
         wbuf_wptr <= 0;
         wbuf_rptr <= 0;
         wbuf_active <= 0;
+        b_owed <= 2'd0;
+        s_axi_bcommit <= 1'b0;
 
     end else begin
         // Defaults: deassert single-cycle signals.  rvalid and bvalid
@@ -276,6 +323,10 @@ always @(posedge clk or posedge reset) begin
             end
         end
         if (s_axi_bvalid && s_axi_bready) s_axi_bvalid <= 1'b0;
+
+        // Released-write accounting (constant 0 unless EARLY_WRITE_ACK).
+        s_axi_bcommit <= owed_wr_done;
+        b_owed <= b_owed + (early_rel ? 2'd1 : 2'd0) - (owed_wr_done ? 2'd1 : 2'd0);
 
         case (state)
 
@@ -418,7 +469,16 @@ always @(posedge clk or posedge reset) begin
                 sdram_addr <= addr_r[25:2];
                 sdram_burst_wr_len <= (write_burst_serialized && (burst_len != 8'd0))
                                     ? 4'd0 : burst_len[3:0];
-                if (sdram_accepted) begin
+                if (early_rel_cmd) begin
+                    // EARLY_WRITE_ACK single word: release now; the commit
+                    // follows as s_axi_bcommit.
+                    cmd_issued <= 0;
+                    started <= 0;
+                    wr_op_done_seen <= 0;
+                    s_axi_bvalid <= 1;
+                    s_axi_bresp <= 2'b00;
+                    state <= S_IDLE;
+                end else if (sdram_accepted) begin
                     started <= 1;
                     // Reset wr_op_done_seen for BOTH paths.
                     // The saw-busy gate alone left S_WR_DON polling
@@ -450,12 +510,21 @@ always @(posedge clk or posedge reset) begin
              * stable register for the controller to capture later.  The
              * pre-stage slot lets AXI W handshakes happen before or on
              * the pull without changing the active continuation word. */
-            if (sdram_wr_done) wr_op_done_seen <= 1;
-            if (started && (wr_op_done_seen || sdram_wr_done)) begin
+            if (own_wr_done) wr_op_done_seen <= 1;
+            if (started && (wr_op_done_seen || own_wr_done)) begin
                 cmd_issued <= 0;
                 started <= 0;
                 wready_given <= 0;
                 wbuf_active <= 1'b0;
+                wr_op_done_seen <= 0;
+                s_axi_bvalid <= 1;
+                s_axi_bresp <= 2'b00;
+                state <= S_IDLE;
+            end else if (early_rel_burst) begin
+                // EARLY_WRITE_ACK native burst: all beats handed over.
+                cmd_issued <= 0;
+                started <= 0;
+                wready_given <= 0;
                 wr_op_done_seen <= 0;
                 s_axi_bvalid <= 1;
                 s_axi_bresp <= 2'b00;
@@ -526,8 +595,8 @@ always @(posedge clk or posedge reset) begin
             // wedge).  Use sdram_wr_done pulse instead: it fires exactly
             // when io_sdram's ST_WRITE_4→ST_IDLE for THIS write, immune
             // to subsequent contention.
-            if (sdram_wr_done) wr_op_done_seen <= 1;
-            if (started && (wr_op_done_seen || sdram_wr_done)) begin
+            if (own_wr_done) wr_op_done_seen <= 1;
+            if (started && (wr_op_done_seen || own_wr_done)) begin
                 cmd_issued <= 0;
                 started <= 0;
                 wr_op_done_seen <= 0;

@@ -27,7 +27,13 @@
 `default_nettype none
 
 module tb_sdram_cont #(
-    parameter BANK_ROW_TRACK = 1
+    parameter BANK_ROW_TRACK = 1,
+    // W candidate 3 (INCLUDE_SDRAM_WHOLE_BURSTS): 1 = drain whole GPU AW bursts
+    parameter GPU_WQ_WHOLE_BURST = 0,
+    // W candidate 2 (INCLUDE_SDRAM_MASKED_BURSTS): 1 = masked GPU queue beats join bursts
+    parameter GPU_WQ_MASKED_MERGE = 0,
+    // W candidate 1 (INCLUDE_SDRAM_WRITE_PIPE): 1 = early write ack + commit B
+    parameter SDRAM_WRITE_PIPE = 0
 ) (
     input  wire        clk,
     input  wire        reset_n,
@@ -223,7 +229,8 @@ end
 // ============================================================
 // DUT 1: AXI SDRAM arbiter (production, unmodified)
 // ============================================================
-axi_sdram_arbiter sdram_arb (
+wire arb_s_bcommit;
+axi_sdram_arbiter #(.GPU_COMMIT_B(SDRAM_WRITE_PIPE), .GPU_WQ_MASKED_MERGE(GPU_WQ_MASKED_MERGE), .GPU_WQ_WHOLE_BURST(GPU_WQ_WHOLE_BURST)) sdram_arb (
     .clk(clk),
     .reset_n(reset_n),
 
@@ -280,6 +287,7 @@ axi_sdram_arbiter sdram_arb (
     .s_wlast(arb_s_wlast),
     .s_bvalid(arb_s_bvalid),   .s_bresp(arb_s_bresp),
     .s_wcont(arb_s_wcont),
+    .s_bcommit(arb_s_bcommit),
 
     .dbg_arb_state(dbg_arb_state),
     .dbg_cpu_pending(),
@@ -291,7 +299,8 @@ axi_sdram_arbiter sdram_arb (
 // ============================================================
 axi_sdram_slave #(
     .SERIALIZE_WRITE_BURSTS(1'b0),
-    .MAX_NATIVE_WRITE_BURST_LEN(8'd15)
+    .MAX_NATIVE_WRITE_BURST_LEN(8'd15),
+    .EARLY_WRITE_ACK(SDRAM_WRITE_PIPE)
 ) slave (
     .clk(clk), .reset_n(reset_n),
     .s_axi_arvalid(arb_s_arvalid), .s_axi_arready(arb_s_arready),
@@ -304,6 +313,7 @@ axi_sdram_slave #(
     .s_axi_wdata(arb_s_wdata),     .s_axi_wstrb(arb_s_wstrb), .s_axi_wlast(arb_s_wlast),
     .s_axi_bvalid(arb_s_bvalid),   .s_axi_bready(1'b1),       .s_axi_bresp(arb_s_bresp),
     .s_axi_wcont(arb_s_wcont),
+    .s_axi_bcommit(arb_s_bcommit),
     .sdram_rd(sdram_slave_rd), .sdram_wr(sdram_slave_wr),
     .sdram_addr(sdram_slave_addr), .sdram_wdata(sdram_slave_wdata), .sdram_wstrb(sdram_slave_wstrb),
     .sdram_burst_len(sdram_slave_burst_len), .sdram_burst_wr_len(sdram_slave_burst_wr_len),
@@ -321,7 +331,8 @@ axi_sdram_slave #(
 // DUT 3: io_sdram (MiSTer controller; test variant with split DQ)
 // ============================================================
 io_sdram #(
-    .BANK_ROW_TRACK(BANK_ROW_TRACK)
+    .BANK_ROW_TRACK(BANK_ROW_TRACK),
+    .WR_DATA_LATCH(SDRAM_WRITE_PIPE)
 ) sdram_ctrl (
     .controller_clk(clk), .chip_clk(clk), .clk_90(clk), .reset_n(reset_n),
     .phy_cke(phy_cke), .phy_clk(phy_clk),
